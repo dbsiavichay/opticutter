@@ -2,10 +2,6 @@ import logging
 
 from environs import Env
 
-from .base import OpenTelemetryConfig
-
-__all__ = ["OpenTelemetryConfig"]
-
 env = Env()
 logger = logging.getLogger(__name__)
 

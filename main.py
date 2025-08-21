@@ -1,25 +1,49 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from config import config
-from src.certificate.infra.routers import router as certificate_router
-from src.core.infra.adapters import OpenTelemetry
-from src.core.infra.middlewares import ErrorHandlingMiddleware
-from src.sealer.infra.routers import router as sealer_router
+from src.api.routes import api_router
+from src.core.middlewares import ErrorHandlingMiddleware
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
-
-telemetry = OpenTelemetry()
-
-origins = ["http://localhost:3000"]
-
-app = FastAPI()
-telemetry.instrument(app, config=config.get_otel_config())
+# Configurar logging
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manejo del ciclo de vida de la aplicación"""
+    logger.info("Iniciando aplicación FastAPI")
+    yield
+    logger.info("Cerrando aplicación FastAPI")
+
+
+# Configuración de CORS
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+]
+
+# Crear aplicación FastAPI
+app = FastAPI(
+    title="Cutter API",
+    description="API para el sistema Cutter de Maderable",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# Middlewares
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -29,16 +53,29 @@ app.add_middleware(
 )
 app.add_middleware(ErrorHandlingMiddleware)
 
-app.include_router(certificate_router, prefix="/api/certificates")
-app.include_router(sealer_router, prefix="/api/certificates")
+# Incluir rutas
+app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/")
 async def root():
+    """Redirige a la documentación de la API"""
     return RedirectResponse("/docs")
+
+
+@app.get("/health")
+async def health_check():
+    """Endpoint de verificación de salud"""
+    return {"status": "healthy", "environment": config.ENVIRONMENT, "version": "1.0.0"}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=3000)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=3000,
+        reload=True if config.ENVIRONMENT == "local" else False,
+        log_level=config.LOG_LEVEL.lower(),
+    )
