@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api
+    env_file:
+      - .env
+    volumes:
+      - ./:/src/
+    ports:
+      - "3000:3000"
+    networks:
+      - cutter_network
+
+networks:
+  cutter_network:
+    driver: bridge
