@@ -6,9 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from config import config
-from src.api.routes import api_router
-from src.core.middlewares import ErrorHandlingMiddleware
-
 # Configurar logging
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
