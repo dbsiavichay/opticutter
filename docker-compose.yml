@@ -6,10 +6,24 @@ services:
     container_name: api
     env_file:
       - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OPT_RESULT_TTL_SECONDS=259200
     volumes:
       - ./:/src/
     ports:
       - "3000:3000"
+    depends_on:
+      - redis
+    networks:
+      - cutter_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
     networks:
       - cutter_network
 

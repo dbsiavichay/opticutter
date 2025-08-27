@@ -16,6 +16,25 @@ extend-exclude = '''
 )/
 '''
 
+[tool.autoflake]
+remove-all-unused-imports = true
+remove-unused-variables = true
+remove-duplicate-keys = true
+expand-star-imports = true
+ignore-init-module-imports = true
+in-place = true
+recursive = true
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist"
+]
+
 [tool.isort]
 profile = "black"
 multi_line_output = 3

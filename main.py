@@ -6,6 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from config import config
+from src.api.cutter import router as cutter_router
+from src.api.health import router as health_router
+from src.api.optimize import router as optimize_router
+from src.services.optimization import cache
+
 # Configurar logging
 logging.basicConfig(
     level=getattr(logging, config.LOG_LEVEL),
@@ -18,8 +23,18 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Manejo del ciclo de vida de la aplicación"""
     logger.info("Iniciando aplicación FastAPI")
+    # could test redis connection here
+    try:
+        await cache._redis.ping()
+        logger.info("Redis conectado correctamente")
+    except Exception as e:
+        logger.warning(f"No se pudo conectar a Redis en startup: {e}")
     yield
     logger.info("Cerrando aplicación FastAPI")
+    try:
+        await cache.close()
+    except Exception:
+        pass
 
 
 # Configuración de CORS
@@ -33,7 +48,7 @@ origins = [
 # Crear aplicación FastAPI
 app = FastAPI(
     title="Cutter API",
-    description="API para el sistema Cutter de Maderable",
+    description="API para optimización de cortes de melamina",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -48,10 +63,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(ErrorHandlingMiddleware)
 
 # Incluir rutas
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/api/v1")
+app.include_router(cutter_router, prefix="/api/v1")
+app.include_router(optimize_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -71,8 +87,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=3000,
+        host=config.HOST,
+        port=config.PORT,
         reload=True if config.ENVIRONMENT == "local" else False,
         log_level=config.LOG_LEVEL.lower(),
     )

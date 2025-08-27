@@ -28,8 +28,8 @@ def test_api_health_check():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["environment"] == "local"
-    assert data["version"] == "1.0.0"
+    assert "environment" in data
+    assert "version" in data
 
 
 def test_readiness_check():

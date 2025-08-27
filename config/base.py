@@ -28,8 +28,11 @@ class BaseConfig:
     # Base de datos (para futuro uso)
     DATABASE_URL = env("DATABASE_URL", "")
 
-    # Redis (para futuro uso)
-    REDIS_URL = env("REDIS_URL", "redis://localhost:6379")
+    # Redis (para caching de optimizaciones)
+    REDIS_URL = env("REDIS_URL", "redis://localhost:6379/0")
+
+    # Caching / TTLs
+    OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)  # 3 días
 
     def get_cors_origins(self) -> List[str]:
         """Obtiene la lista de orígenes permitidos para CORS"""
