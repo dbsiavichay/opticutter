@@ -132,3 +132,12 @@ class OptimizationsListResponse(BaseModel):
 class RetrieveOptimizationResponse(BaseModel):
     cached: bool
     item: Optional[CacheEntry]
+
+
+class OptimizationImageResponse(BaseModel):
+    """Response containing the optimization visualization image."""
+
+    image_base64: str
+    content_type: str = "image/png"
+    request_hash: str
+    project_name: str
