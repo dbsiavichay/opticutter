@@ -29,7 +29,7 @@ tests-local: ## Ejecuta las pruebas localmente
 	pytest -q
 
 lint-fix: ## Corrige errores de formato
-	autoflake . && black . && isort . --profile black && flake8 .
+	source .venv/bin/activate && autoflake . && black . && isort . --profile black && flake8 .
 
 lint-check: ## Verifica el formato del código
 	docker compose run --no-deps --rm api autoflake . --check
@@ -62,3 +62,12 @@ run-local: ## Ejecuta la aplicación localmente
 setup: ## Configuración inicial del proyecto
 	cp .env.example .env || true
 	@echo "Archivo .env creado. Edítalo según tus necesidades."
+
+migrations:  ## Create a new migration with Alembic
+	docker compose run --no-deps --rm api alembic revision --autogenerate -m "$(m)"
+
+upgrade:  ## Apply all pending migrations with Alembic
+	docker compose run --no-deps --rm api alembic upgrade head
+
+downgrade:  ## Downgrade the database to the previous migration
+	docker compose run --no-deps --rm api alembic downgrade $(d)
