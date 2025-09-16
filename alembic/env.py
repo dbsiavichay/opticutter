@@ -12,12 +12,13 @@ sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), ".."
 from config import config as app_config
 from src.db import Base
 from src.models.models import (  # noqa: F401
-    BoardLayoutModel,
     BoardModel,
     ClientModel,
-    CutItemModel,
-    CutPlacedModel,
+    OptimizationBoardModel,
+    OptimizationCutModel,
+    OptimizationLayoutModel,
     OptimizationModel,
+    OptmizationLayoutCutModel,
 )
 
 # Importar modelos para que Alembic pueda detectarlos automáticamente

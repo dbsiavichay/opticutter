@@ -33,51 +33,53 @@ class BoardModel(Base):
     grain_direction: Mapped[Optional[str]] = mapped_column(String(4))
     price: Mapped[float] = mapped_column(Float)
 
-    cut_items: Mapped[list["CutItemModel"]] = relationship(
-        "CutItemModel", back_populates="board"
-    )
-    board_layouts: Mapped[list["BoardLayoutModel"]] = relationship(
-        "BoardLayoutModel", back_populates="board"
-    )
-
 
 class OptimizationModel(Base):
     __tablename__ = "optimizations"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    total_boards_used: Mapped[int] = mapped_column(Integer)
+    total_boards_cost: Mapped[float] = mapped_column(Float)
+    total_waste_percentage: Mapped[float] = mapped_column(Float)
+    duration_ms: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
 
     client: Mapped["ClientModel"] = relationship(
         "ClientModel", back_populates="optimizations"
     )
-    cut_items: Mapped[list["CutItemModel"]] = relationship(
-        "CutItemModel", back_populates="optimization"
+    cuts: Mapped[list["OptimizationCutModel"]] = relationship(
+        "OptimizationCutModel", back_populates="optimization"
     )
-    board_layouts: Mapped[list["BoardLayoutModel"]] = relationship(
-        "BoardLayoutModel", back_populates="optimization"
+    layouts: Mapped[list["OptimizationLayoutModel"]] = relationship(
+        "OptimizationLayoutModel", back_populates="optimization"
+    )
+    boards_used: Mapped[list["OptimizationBoardModel"]] = relationship(
+        "OptimizationBoardModel", back_populates="optimization"
     )
 
 
-class CutItemModel(Base):
-    __tablename__ = "cut_items"
+class OptimizationCutModel(Base):
+    __tablename__ = "optimization_cuts"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    index: Mapped[int] = mapped_column(Integer)
     length: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)
     quantity: Mapped[int] = mapped_column(Integer)
     label: Mapped[Optional[str]] = mapped_column(String(64))
+    allow_rotation: Mapped[bool] = mapped_column(default=True)
     board_id: Mapped[int] = mapped_column(ForeignKey("boards.id"))
     optimization_id: Mapped[int] = mapped_column(ForeignKey("optimizations.id"))
 
-    board: Mapped["BoardModel"] = relationship("BoardModel", back_populates="cut_items")
+    board: Mapped["BoardModel"] = relationship("BoardModel")
     optimization: Mapped["OptimizationModel"] = relationship(
-        "OptimizationModel", back_populates="cut_items"
+        "OptimizationModel", back_populates="cuts"
     )
 
 
-class BoardLayoutModel(Base):
-    __tablename__ = "board_layouts"
+class OptimizationLayoutModel(Base):
+    __tablename__ = "optimizations_layouts"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     index: Mapped[int] = mapped_column(Integer)
@@ -89,16 +91,14 @@ class BoardLayoutModel(Base):
     optimization: Mapped["OptimizationModel"] = relationship(
         "OptimizationModel", back_populates="board_layouts"
     )
-    board: Mapped["BoardModel"] = relationship(
-        "BoardModel", back_populates="board_layouts"
-    )
-    cuts_placed: Mapped[list["CutPlacedModel"]] = relationship(
-        "CutPlacedModel", back_populates="board_layout"
+    board: Mapped["BoardModel"] = relationship("BoardModel")
+    layout_cuts: Mapped[list["OptmizationLayoutCutModel"]] = relationship(
+        "OptmizationLayoutCutModel", back_populates="board_layout"
     )
 
 
-class CutPlacedModel(Base):
-    __tablename__ = "cuts_placed"
+class OptmizationLayoutCutModel(Base):
+    __tablename__ = "optimization_layouts_cuts"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     x: Mapped[int] = mapped_column(Integer)
@@ -106,8 +106,26 @@ class CutPlacedModel(Base):
     length: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)
     label: Mapped[Optional[str]] = mapped_column(String(64))
-    board_layout_id: Mapped[int] = mapped_column(ForeignKey("board_layouts.id"))
+    type: Mapped[str] = mapped_column(String(16))  # 'cut' or 'waste'
+    optimization_layout_id: Mapped[int] = mapped_column(
+        ForeignKey("optimizations_layouts.id")
+    )
+    optimization_layout: Mapped["OptimizationLayoutModel"] = relationship(
+        "OptimizationLayoutModel", back_populates="layout_cuts"
+    )
 
-    board_layout: Mapped["BoardLayoutModel"] = relationship(
-        "BoardLayoutModel", back_populates="cuts_placed"
+
+class OptimizationBoardModel(Base):
+    __tablename__ = "optimization_boards"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    used: Mapped[int] = mapped_column(Integer)
+    unit_cost: Mapped[float] = mapped_column(Float)
+    total_cost: Mapped[float] = mapped_column(Float)
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id"))
+    optimization_id: Mapped[int] = mapped_column(ForeignKey("optimizations.id"))
+
+    board: Mapped["BoardModel"] = relationship("BoardModel")
+    optimization: Mapped["OptimizationModel"] = relationship(
+        "OptimizationModel", back_populates="boards_used"
     )
