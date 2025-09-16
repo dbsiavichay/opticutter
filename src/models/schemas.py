@@ -25,6 +25,7 @@ class OptimizeRequest(BaseModel):
     cuts: List[CutRequirement] = Field(
         ..., min_length=1, description="List of cuts to optimize"
     )
+    client_id: int = Field(..., description="Client ID for the optimization")
 
 
 # Response models
@@ -72,6 +73,7 @@ class OptimizationSummary(BaseModel):
 
 
 class OptimizeResponse(BaseModel):
+    id: int
     optimization_summary: OptimizationSummary
     cost_summary: CostSummary
     boards_layout: List[BoardLayout]

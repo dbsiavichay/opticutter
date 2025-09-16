@@ -1,6 +1,6 @@
 import os
 import sys
-from logging.config import fileConfig
+from logging.config import fileConfig  # noqa: E402
 
 from sqlalchemy import engine_from_config, pool
 

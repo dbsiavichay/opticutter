@@ -1,10 +1,18 @@
+import time
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
 from config import config
-from src.models.models import BoardModel
+from src.models.models import (
+    BoardModel,
+    OptimizationBoardModel,
+    OptimizationCutModel,
+    OptimizationLayoutModel,
+    OptimizationModel,
+    OptmizationLayoutCutModel,
+)
 from src.models.schemas import (
     BoardLayout,
     CostSummary,
@@ -259,6 +267,7 @@ class Optimizer:
 
 
 async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeResponse:
+    start_time = time.time()
     board_codes = {r.board_code for r in request.cuts}
     boards = BoardService.get_boards_by_codes(db, tuple(board_codes))
     if len(boards) != len(board_codes):
@@ -283,7 +292,88 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
     # Compute
     optimizer = Optimizer(request.cuts, boards, cutting_params)
     boards_layout, cost_summary, summary = optimizer.run()
+    duration_ms = int((time.time() - start_time) * 1000)
+
+    # Save to database
+    optimization = OptimizationModel(
+        total_boards_used=summary.total_boards_used,
+        total_boards_cost=summary.total_cost,
+        total_waste_percentage=summary.total_waste_percentage,
+        duration_ms=duration_ms,
+        client_id=request.client_id,
+    )
+    db.add(optimization)
+    db.flush()  # Get the ID
+
+    # Save cuts
+    for cut_req in request.cuts:
+        board = next(b for b in boards if b.code == cut_req.board_code)
+        cut_model = OptimizationCutModel(
+            index=cut_req.index,
+            length=cut_req.length,
+            width=cut_req.width,
+            quantity=cut_req.quantity,
+            label=cut_req.label,
+            allow_rotation=cut_req.allow_rotation,
+            board_id=board.id,
+            optimization_id=optimization.id,
+        )
+        db.add(cut_model)
+
+    # Save layouts
+    for layout in boards_layout:
+        board = next(b for b in boards if b.code == layout.material)
+        layout_model = OptimizationLayoutModel(
+            index=layout.index,
+            quantity=1,  # Assuming 1 for now
+            utilization_percentage=layout.utilization_percentage,
+            board_id=board.id,
+            optimization_id=optimization.id,
+        )
+        db.add(layout_model)
+        db.flush()  # Get layout ID
+
+        # Save layout cuts
+        for cut in layout.cuts_placed:
+            cut_model = OptmizationLayoutCutModel(
+                x=cut.x,
+                y=cut.y,
+                length=cut.length,
+                width=cut.width,
+                label=cut.label,
+                type="cut",
+                optimization_layout_id=layout_model.id,
+            )
+            db.add(cut_model)
+
+        # Save waste pieces
+        for waste in layout.waste_pieces:
+            waste_model = OptmizationLayoutCutModel(
+                x=waste.x,
+                y=waste.y,
+                length=waste.length,
+                width=waste.width,
+                type="waste",
+                optimization_layout_id=layout_model.id,
+            )
+            db.add(waste_model)
+
+    # Save boards used
+    for material_cost in cost_summary.materials:
+        board = next(b for b in boards if b.code == material_cost.material)
+        board_model = OptimizationBoardModel(
+            used=material_cost.boards_used,
+            unit_cost=material_cost.unit_cost,
+            total_cost=material_cost.total_cost,
+            board_id=board.id,
+            optimization_id=optimization.id,
+        )
+        db.add(board_model)
+
+    db.commit()
+
     resp = OptimizeResponse(
+        id=optimization.id,
         optimization_summary=summary,
         cost_summary=cost_summary,
         boards_layout=boards_layout,

@@ -26,7 +26,6 @@ async def lifespan(app: FastAPI):
     logger.info("Iniciando aplicación FastAPI")
     yield
     logger.info("Cerrando aplicación FastAPI")
-    
 
 
 # Configuración de CORS
