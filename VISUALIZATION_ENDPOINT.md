@@ -14,7 +14,6 @@ Este endpoint genera una imagen visual de los resultados de optimización de cor
   "image_base64": "iVBORw0KGgoAAAANSUhEUgAA...", // Imagen PNG en base64
   "content_type": "image/png",
   "request_hash": "abc123...",
-  "project_name": "Cocina Integral Cliente X"
 }
 ```
 
@@ -30,7 +29,6 @@ Este endpoint genera una imagen visual de los resultados de optimización de cor
 curl -X POST "http://localhost:3000/api/v1/optimize" \
   -H "Content-Type: application/json" \
   -d '{
-    "project_name": "Cocina Integral Cliente X",
     "cuts": [
       {
         "width": 600,

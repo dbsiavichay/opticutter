@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, PositiveInt, confloat, conint, model_validator
+from pydantic import BaseModel, Field, PositiveInt, confloat, model_validator
 
 
 class GrainDirection(str, Enum):
@@ -30,19 +30,9 @@ class Material(BaseModel):
     grain_direction: Optional[GrainDirection] = None
 
 
-class CuttingParameters(BaseModel):
-    kerf: conint(ge=0) = 0
-    top_trim: conint(ge=0) = 0
-    bottom_trim: conint(ge=0) = 0
-    left_trim: conint(ge=0) = 0
-    right_trim: conint(ge=0) = 0
-
-
 class OptimizeRequest(BaseModel):
-    project_name: str
     cuts: List[CutItem]
     materials: List[Material]
-    cutting_parameters: CuttingParameters
 
     @model_validator(mode="after")
     def validate_sizes(self) -> "OptimizeRequest":
@@ -102,7 +92,6 @@ class CostSummary(BaseModel):
 
 
 class OptimizationSummary(BaseModel):
-    project_name: str
     total_boards_used: int
     total_cost: float
     total_waste_percentage: float
@@ -113,8 +102,6 @@ class OptimizeResponse(BaseModel):
     optimization_summary: OptimizationSummary
     cost_summary: CostSummary
     boards_layout: List[BoardLayout]
-    cached: bool = False
-    request_hash: Optional[str] = None
 
 
 class CacheEntry(BaseModel):
@@ -139,7 +126,6 @@ class OptimizationImageResponse(BaseModel):
     image_base64: str
     content_type: str = "image/png"
     request_hash: str
-    project_name: str
 
 
 # Board schemas for CRUD operations

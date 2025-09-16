@@ -94,7 +94,6 @@ def canonicalize_optimize_payload(payload: Any) -> Dict[str, Any]:
     }
 
     return {
-        "project_name": data.get("project_name", ""),
         "materials": materials_sorted,
         "cuts": cuts_sorted,
         "cutting_parameters": cp,

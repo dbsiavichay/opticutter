@@ -31,6 +31,13 @@ class BaseConfig:
     # Redis (para caching de optimizaciones)
     REDIS_URL = env("REDIS_URL", "redis://localhost:6379/0")
 
+    # Cutting optimizer params
+    KERF = env.float("KERF", 5.0)
+    TOP_TRIM = env.float("TOP_TRIM", 0.0)
+    BOTTOM_TRIM = env.float("BOTTOM_TRIM", 0.0)
+    LEFT_TRIM = env.float("LEFT_TRIM", 0.0)
+    RIGHT_TRIM = env.float("RIGHT_TRIM", 0.0)
+
     # Caching / TTLs
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)  # 3 días
 

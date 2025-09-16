@@ -1,17 +1,11 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from src.models.schemas import (
     OptimizationImageResponse,
-    OptimizationsListResponse,
     OptimizeRequest,
     OptimizeResponse,
-    RetrieveOptimizationResponse,
 )
-from src.services.optimization import (
-    get_cached_by_hash,
-    list_recent_optimizations,
-    optimize_with_cache,
-)
+from src.services.optimization import optimize_cuts
 from src.services.visualization import visualization_service
 
 router = APIRouter(prefix="/optimize", tags=["optimize"])
@@ -19,19 +13,7 @@ router = APIRouter(prefix="/optimize", tags=["optimize"])
 
 @router.post("/", response_model=OptimizeResponse)
 async def optimize(req: OptimizeRequest) -> OptimizeResponse:
-    return await optimize_with_cache(req.model_dump())
-
-
-@router.get("/by-hash/{request_hash}", response_model=RetrieveOptimizationResponse)
-async def get_by_hash(request_hash: str):
-    item = await get_cached_by_hash(request_hash)
-    return RetrieveOptimizationResponse(cached=item is not None, item=item)
-
-
-@router.get("/recent", response_model=OptimizationsListResponse)
-async def recent(offset: int = Query(0, ge=0), limit: int = Query(10, ge=1, le=50)):
-    items = await list_recent_optimizations(offset=offset, limit=limit)
-    return OptimizationsListResponse(total=len(items), items=items)
+    return await optimize_cuts(req.model_dump())
 
 
 @router.get("/visualize/{request_hash}", response_model=OptimizationImageResponse)
@@ -46,7 +28,8 @@ async def visualize_optimization(request_hash: str):
         OptimizationImageResponse with the image in base64 format
     """
     # Get the cached optimization result
-    cache_entry = await get_cached_by_hash(request_hash)
+    # cache_entry = await get_cached_by_hash(request_hash)
+    cache_entry = None
 
     if not cache_entry:
         raise HTTPException(
@@ -143,7 +126,6 @@ async def visualize_optimization(request_hash: str):
         return OptimizationImageResponse(
             image_base64=image_base64,
             request_hash=request_hash,
-            project_name=optimization_result.optimization_summary.project_name,
         )
 
     except Exception as e:

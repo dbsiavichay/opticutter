@@ -7,7 +7,6 @@ import redis.asyncio as aioredis
 from config import config
 from src.models.schemas import (
     BoardLayout,
-    CacheEntry,
     CostSummary,
     Material,
     MaterialCostSummary,
@@ -17,7 +16,7 @@ from src.models.schemas import (
     PlacedCut,
     WastePiece,
 )
-from src.utils.hash import canonicalize_optimize_payload, hash_optimize_request
+from src.schemas import CuttingParameters
 
 # Redis keys
 CACHE_KEY_PREFIX = "opt:"
@@ -189,14 +188,14 @@ class BoardBin:
 
 
 class Optimizer:
-    def __init__(self, req: OptimizeRequest):
+    def __init__(self, req: OptimizeRequest, cutting_parameters: CuttingParameters):
         self.req = req
-        self.kerf = req.cutting_parameters.kerf
+        self.kerf = cutting_parameters.kerf
         self.trims = (
-            req.cutting_parameters.left_trim,
-            req.cutting_parameters.top_trim,
-            req.cutting_parameters.right_trim,
-            req.cutting_parameters.bottom_trim,
+            cutting_parameters.left_trim,
+            cutting_parameters.top_trim,
+            cutting_parameters.right_trim,
+            cutting_parameters.bottom_trim,
         )
         self.materials = {m.code: m for m in req.materials}
 
@@ -300,7 +299,6 @@ class Optimizer:
 
         elapsed = (datetime.now(timezone.utc) - start).total_seconds()
         summary = OptimizationSummary(
-            project_name=self.req.project_name,
             total_boards_used=total_boards_used,
             total_cost=total_cost,
             total_waste_percentage=(1.0 - (total_used_area / max(total_usable_area, 1)))
@@ -313,75 +311,24 @@ class Optimizer:
         return layout_list, cost_summary, summary
 
 
-async def optimize_with_cache(payload: Dict[str, Any]) -> OptimizeResponse:
+async def optimize_cuts(payload: Dict[str, Any]) -> OptimizeResponse:
     req = OptimizeRequest(**payload)
-    canonical = canonicalize_optimize_payload(req)
-    h = hash_optimize_request(canonical)
-    key = f"{CACHE_KEY_PREFIX}{h}"
-    # Attempt cache hit
-    cached_raw = await cache.get(key)
-    if cached_raw:
-        try:
-            data = json.loads(cached_raw)
-            resp = OptimizeResponse(**data)
-            resp.cached = True
-            resp.request_hash = h
-            return resp
-        except Exception:
-            pass
+
+    cutting_params = CuttingParameters(
+        kerf=getattr(config, "KERF", 5.0),
+        top_trim=getattr(config, "TOP_TRIM", 0.0),
+        bottom_trim=getattr(config, "BOTTOM_TRIM", 0.0),
+        left_trim=getattr(config, "LEFT_TRIM", 0.0),
+        right_trim=getattr(config, "RIGHT_TRIM", 0.0),
+    )
+
     # Compute
-    optimizer = Optimizer(req)
+    optimizer = Optimizer(req, cutting_params)
     boards_layout, cost_summary, summary = optimizer.run()
     resp = OptimizeResponse(
         optimization_summary=summary,
         cost_summary=cost_summary,
         boards_layout=boards_layout,
         cached=False,
-        request_hash=h,
     )
-    # Store in cache and index
-    now = datetime.now(timezone.utc).isoformat()
-    entry = CacheEntry(request_hash=h, timestamp_utc=now, result=resp)
-    ttl = int(getattr(config, "OPT_RESULT_TTL_SECONDS", 259200))
-    try:
-        await cache.set(key, json.dumps(resp.model_dump()), ttl)
-        await cache.set_json(f"{META_KEY_PREFIX}{h}", entry.model_dump(), ttl)
-        await cache.zadd(
-            INDEX_ZSET_KEY, score=datetime.now(timezone.utc).timestamp(), member=h
-        )
-    except Exception:
-        pass
     return resp
-
-
-async def get_cached_by_hash(h: str) -> Optional[CacheEntry]:
-    data = await cache.get_json(f"{META_KEY_PREFIX}{h}")
-    if not data:
-        # try rebuild from main cache if exists
-        raw = await cache.get(f"{CACHE_KEY_PREFIX}{h}")
-        if not raw:
-            return None
-        try:
-            resp = OptimizeResponse(**json.loads(raw))
-            entry = CacheEntry(
-                request_hash=h,
-                timestamp_utc=datetime.now(timezone.utc).isoformat(),
-                result=resp,
-            )
-            return entry
-        except Exception:
-            return None
-    return CacheEntry(**data)
-
-
-async def list_recent_optimizations(
-    offset: int = 0, limit: int = 10
-) -> List[CacheEntry]:
-    # zrevrange is inclusive stop index
-    hashes = await cache.zrevrange(INDEX_ZSET_KEY, offset, offset + limit - 1)
-    items: List[CacheEntry] = []
-    for h in hashes:
-        item = await get_cached_by_hash(h)
-        if item:
-            items.append(item)
-    return items

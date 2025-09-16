@@ -28,7 +28,6 @@ Ejemplo de petición:
 
 POST /api/v1/optimize
 {
-  "project_name": "Cocina Integral Cliente X",
   "cuts": [...],
   "materials": [...],
   "cutting_parameters": {"kerf": 5, "top_trim": 0, "bottom_trim": 0, "left_trim": 0, "right_trim": 0}
