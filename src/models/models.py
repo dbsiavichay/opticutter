@@ -1,13 +1,3 @@
-"""
-Importa todos los modelos aquí para que Alembic pueda detectarlos automáticamente.
-Cuando crees modelos nuevos, impórtalos aquí para que las migraciones funcionen.
-
-Ejemplo:
-from .user import User
-from .project import Project
-"""
-
-
 from datetime import datetime
 from typing import Optional
 
@@ -47,7 +37,7 @@ class BoardModel(Base):
         "CutItemModel", back_populates="board"
     )
     board_layouts: Mapped[list["BoardLayoutModel"]] = relationship(
-        "BoardLayoutModel", back_populates="board" 
+        "BoardLayoutModel", back_populates="board"
     )
 
 

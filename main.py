@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse
 
 from config import config
 from src.api.boards import router as boards_router
+from src.api.clients import router as clients_router
 from src.api.cutter import router as cutter_router
 from src.api.health import router as health_router
 from src.api.optimize import router as optimize_router
@@ -67,6 +68,7 @@ app.add_middleware(
 # Incluir rutas
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(boards_router, prefix="/api/v1")
+app.include_router(clients_router, prefix="/api/v1")
 app.include_router(cutter_router, prefix="/api/v1")
 app.include_router(optimize_router, prefix="/api/v1")
 
