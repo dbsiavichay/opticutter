@@ -25,6 +25,10 @@ class ClientModel(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
 
+    optimizations: Mapped[list["OptimizationModel"]] = relationship(
+        "OptimizationModel", back_populates="client"
+    )
+
 
 class BoardModel(Base):
     __tablename__ = "boards"
@@ -38,6 +42,13 @@ class BoardModel(Base):
     thickness: Mapped[int] = mapped_column(Integer)
     grain_direction: Mapped[Optional[str]] = mapped_column(String(4))
     price: Mapped[float] = mapped_column(Float)
+
+    cut_items: Mapped[list["CutItemModel"]] = relationship(
+        "CutItemModel", back_populates="board"
+    )
+    board_layouts: Mapped[list["BoardLayoutModel"]] = relationship(
+        "BoardLayoutModel", back_populates="board" 
+    )
 
 
 class OptimizationModel(Base):
