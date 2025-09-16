@@ -89,11 +89,11 @@ class OptimizationLayoutModel(Base):
     optimization_id: Mapped[int] = mapped_column(ForeignKey("optimizations.id"))
 
     optimization: Mapped["OptimizationModel"] = relationship(
-        "OptimizationModel", back_populates="board_layouts"
+        "OptimizationModel", back_populates="layouts"
     )
     board: Mapped["BoardModel"] = relationship("BoardModel")
     layout_cuts: Mapped[list["OptmizationLayoutCutModel"]] = relationship(
-        "OptmizationLayoutCutModel", back_populates="board_layout"
+        "OptmizationLayoutCutModel", back_populates="optimization_layout"
     )
 
 

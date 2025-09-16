@@ -1,5 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
+from src.db import get_db
 from src.models.schemas import (
     OptimizationImageResponse,
     OptimizeRequest,
@@ -12,8 +14,10 @@ router = APIRouter(prefix="/optimize", tags=["optimize"])
 
 
 @router.post("/", response_model=OptimizeResponse)
-async def optimize(req: OptimizeRequest) -> OptimizeResponse:
-    return await optimize_cuts(req.model_dump())
+async def optimize(
+    req: OptimizeRequest, db: Session = Depends(get_db)
+) -> OptimizeResponse:
+    return await optimize_cuts(req, db)
 
 
 @router.get("/visualize/{request_hash}", response_model=OptimizationImageResponse)

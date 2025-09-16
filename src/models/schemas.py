@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, PositiveInt, confloat, model_validator
+from pydantic import BaseModel, Field, PositiveInt, confloat
 
 
 class GrainDirection(str, Enum):
@@ -11,47 +11,20 @@ class GrainDirection(str, Enum):
     vertical = "v"
 
 
-class CutItem(BaseModel):
+class CutRequirement(BaseModel):
+    index: PositiveInt
+    length: PositiveInt
     width: PositiveInt
-    height: PositiveInt
     quantity: PositiveInt = Field(1, ge=1, le=10000)
-    material: str
+    board_code: str
     label: Optional[str] = None
-    # If explicitly forced orientation for this piece
-    force_grain: Optional[GrainDirection] = None
-
-
-class Material(BaseModel):
-    code: str
-    width: PositiveInt
-    height: PositiveInt
-    price: confloat(ge=0) = 0.0
-    # Grain of the board itself. If none -> free rotation allowed for boards
-    grain_direction: Optional[GrainDirection] = None
+    allow_rotation: bool = True
 
 
 class OptimizeRequest(BaseModel):
-    cuts: List[CutItem]
-    materials: List[Material]
-
-    @model_validator(mode="after")
-    def validate_sizes(self) -> "OptimizeRequest":
-        materials_by_code = {m.code: m for m in self.materials}
-        if not self.cuts:
-            raise ValueError("No se han proporcionado cortes")
-        if not self.materials:
-            raise ValueError("No se han proporcionado materiales")
-        for c in self.cuts:
-            if c.material not in materials_by_code:
-                raise ValueError(f"Cut references unknown material: {c.material}")
-            m = materials_by_code[c.material]
-            # quick physical feasibility (ignoring kerf and trims here; the algorithm will enforce them) # NOQA
-            if c.width > m.width and c.height > m.height:
-                # Even with rotation won't fit raw board
-                raise ValueError(
-                    f"Cut {c.label or ''} {c.width}x{c.height} cannot fit in board {m.code} {m.width}x{m.height}"  # NOQA
-                )
-        return self
+    cuts: List[CutRequirement] = Field(
+        ..., min_length=1, description="List of cuts to optimize"
+    )
 
 
 # Response models
@@ -59,7 +32,7 @@ class PlacedCut(BaseModel):
     x: int
     y: int
     width: int
-    height: int
+    length: int
     label: Optional[str] = None
 
 
@@ -67,7 +40,7 @@ class WastePiece(BaseModel):
     x: int
     y: int
     width: int
-    height: int
+    length: int
     reusable: bool = True
 
 

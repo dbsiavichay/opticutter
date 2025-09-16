@@ -115,3 +115,8 @@ class BoardService:
             .limit(limit)
             .all()
         )
+
+    @staticmethod
+    def get_boards_by_codes(db: Session, codes: List[str]) -> List[BoardModel]:
+        """Get boards by a list of codes"""
+        return db.query(BoardModel).filter(BoardModel.code.in_(codes)).all()

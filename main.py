@@ -11,7 +11,6 @@ from src.api.clients import router as clients_router
 from src.api.cutter import router as cutter_router
 from src.api.health import router as health_router
 from src.api.optimize import router as optimize_router
-from src.services.optimization import cache
 
 # Configurar logging
 logging.basicConfig(
@@ -25,18 +24,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Manejo del ciclo de vida de la aplicación"""
     logger.info("Iniciando aplicación FastAPI")
-    # could test redis connection here
-    try:
-        await cache._redis.ping()
-        logger.info("Redis conectado correctamente")
-    except Exception as e:
-        logger.warning(f"No se pudo conectar a Redis en startup: {e}")
     yield
     logger.info("Cerrando aplicación FastAPI")
-    try:
-        await cache.close()
-    except Exception:
-        pass
+    
 
 
 # Configuración de CORS
