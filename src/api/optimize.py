@@ -2,11 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.db import get_db
-from src.models.schemas import (
-    OptimizationImageResponse,
-    OptimizeRequest,
-    OptimizeResponse,
-)
+from src.models.schemas import OptimizationImageResponse, OptimizeRequest
+from src.schemas import OptimizeResponse
 from src.services.optimization import optimize_cuts
 from src.services.visualization import visualization_service
 

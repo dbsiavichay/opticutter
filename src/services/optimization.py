@@ -13,18 +13,17 @@ from src.models.models import (
     OptimizationModel,
     OptmizationLayoutCutModel,
 )
-from src.models.schemas import (
+from src.models.schemas import CutRequirement, OptimizeRequest
+from src.schemas import (
     BoardLayout,
     CostSummary,
-    CutRequirement,
+    CuttingParameters,
     MaterialCostSummary,
     OptimizationSummary,
-    OptimizeRequest,
     OptimizeResponse,
     PlacedCut,
     WastePiece,
 )
-from src.schemas import CuttingParameters
 from src.services.board_service import BoardService
 
 
@@ -372,10 +371,11 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
 
     db.commit()
 
-    resp = OptimizeResponse(
+    return OptimizeResponse(
         id=optimization.id,
-        optimization_summary=summary,
-        cost_summary=cost_summary,
-        boards_layout=boards_layout,
+        client=optimization.client,
+        totalBoardsUsed=summary.total_boards_used,
+        totalBoardsCost=summary.total_cost,
+        totalWastePercentage=summary.total_waste_percentage,
+        durationMs=duration_ms,
     )
-    return resp

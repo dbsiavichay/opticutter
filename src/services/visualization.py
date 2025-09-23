@@ -4,7 +4,7 @@ from typing import List, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
-from src.models.schemas import BoardLayout, PlacedCut, WastePiece
+from src.schemas import BoardLayout, PlacedCut, WastePiece
 
 
 class VisualizationService:
