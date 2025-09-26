@@ -28,35 +28,37 @@ from src.services.board_service import BoardService
 
 
 class Rect:
-    __slots__ = ("x", "y", "w", "l")
+    __slots__ = ("x", "y", "width", "length")
 
-    def __init__(self, x: int, y: int, w: int, l: int):
+    def __init__(self, x: int, y: int, width: int, length: int):
         self.x = x
         self.y = y
-        self.w = w
-        self.l = l
+        self.width = width
+        self.length = length
 
     def area(self) -> int:
-        return max(self.w, 0) * max(self.l, 0)
+        return max(self.width, 0) * max(self.length, 0)
 
-    def fits(self, w: int, l: int) -> bool:
-        return w <= self.w and l <= self.l
+    def fits(self, width: int, length: int) -> bool:
+        return width <= self.width and length <= self.length
 
-    def split_after_place(self, pw: int, pl: int, kerf: int) -> List["Rect"]:
+    def split_after_place(
+        self, placed_width: int, placed_length: int, kerf: int
+    ) -> List["Rect"]:
         """Assumes the placed rect is anchored at (self.x, self.y).
         Returns two non-overlapping guillotine rectangles: right and bottom, respecting kerf.
         """
         rects: List[Rect] = []
-        # Right remainder: to the right of the placed piece, same y, length = pl
-        right_x = self.x + pw + kerf
-        right_w = (self.x + self.w) - right_x
-        if right_w > 0 and pl > 0:
-            rects.append(Rect(right_x, self.y, right_w, pl))
+        # Right remainder: to the right of the placed piece, same y, length = placed_length
+        right_x = self.x + placed_width + kerf
+        right_width = (self.x + self.width) - right_x
+        if right_width > 0 and placed_length > 0:
+            rects.append(Rect(right_x, self.y, right_width, placed_length))
         # Bottom remainder: below the placed piece, full width of original free rect
-        bottom_y = self.y + pl + kerf
-        bottom_l = (self.y + self.l) - bottom_y
-        if bottom_l > 0:
-            rects.append(Rect(self.x, bottom_y, self.w, bottom_l))
+        bottom_y = self.y + placed_length + kerf
+        bottom_length = (self.y + self.length) - bottom_y
+        if bottom_length > 0:
+            rects.append(Rect(self.x, bottom_y, self.width, bottom_length))
         return rects
 
 
@@ -71,38 +73,40 @@ class BoardBin:
         self.board = board
         self.index = index
         left, top, right, bottom = trims
-        usable_w = max(board.width - (left + right), 0)
-        usable_l = max(board.length - (top + bottom), 0)
-        self.usable_w = usable_w
-        self.usable_l = usable_l
+        usable_width = max(board.width - (left + right), 0)
+        usable_length = max(board.length - (top + bottom), 0)
+        self.usable_width = usable_width
+        self.usable_length = usable_length
         self.origin_x = left
         self.origin_y = top
         self.free_rects: List[Rect] = [
-            Rect(self.origin_x, self.origin_y, usable_w, usable_l)
+            Rect(self.origin_x, self.origin_y, usable_width, usable_length)
         ]
         self.placed: List[PlacedCut] = []
         self.kerf = kerf
 
-    def try_place(self, w: int, l: int, label: Optional[str]) -> Optional[PlacedCut]:
+    def try_place(
+        self, width: int, length: int, label: Optional[str]
+    ) -> Optional[PlacedCut]:
         # Choose smallest area free rect that fits to reduce fragmentation
         candidate_idx = -1
         candidate: Optional[Rect] = None
         candidate_score = None
-        for i, r in enumerate(self.free_rects):
-            if r.fits(w, l):
-                score = r.area()
+        for i, rect in enumerate(self.free_rects):
+            if rect.fits(width, length):
+                score = rect.area()
                 if candidate is None or score < candidate_score:  # type: ignore
-                    candidate = r
+                    candidate = rect
                     candidate_idx = i
                     candidate_score = score
         if candidate is None:
             return None
         # Place at top-left of candidate
         px, py = candidate.x, candidate.y
-        placed = PlacedCut(x=px, y=py, width=w, length=l, label=label)
+        placed = PlacedCut(x=px, y=py, width=width, length=length, label=label)
         # remove candidate and split
         del self.free_rects[candidate_idx]
-        self.free_rects.extend(candidate.split_after_place(w, l, self.kerf))
+        self.free_rects.extend(candidate.split_after_place(width, length, self.kerf))
         self._merge_free_rects()
         self.placed.append(placed)
         return placed
@@ -110,29 +114,35 @@ class BoardBin:
     def _merge_free_rects(self):
         # simple merge: remove contained rects
         pruned: List[Rect] = []
-        for r in self.free_rects:
+        for rect in self.free_rects:
             if not any(
-                (r is not o)
-                and (r.x >= o.x)
-                and (r.y >= o.y)
-                and (r.x + r.w <= o.x + o.w)
-                and (r.y + r.l <= o.y + o.l)
-                for o in self.free_rects
+                (rect is not other)
+                and (rect.x >= other.x)
+                and (rect.y >= other.y)
+                and (rect.x + rect.width <= other.x + other.width)
+                and (rect.y + rect.length <= other.y + other.length)
+                for other in self.free_rects
             ):
-                pruned.append(r)
+                pruned.append(rect)
         self.free_rects = pruned
 
     def utilization(self) -> float:
         area_used = sum(p.width * p.length for p in self.placed)
-        area_total = max(self.usable_w, 0) * max(self.usable_l, 0)
+        area_total = max(self.usable_width, 0) * max(self.usable_length, 0)
         return (area_used / area_total) * 100.0 if area_total > 0 else 0.0
 
     def waste_pieces(self) -> List[WastePiece]:
         waste: List[WastePiece] = []
-        for r in self.free_rects:
-            if r.w > 0 and r.l > 0:
+        for rect in self.free_rects:
+            if rect.width > 0 and rect.length > 0:
                 waste.append(
-                    WastePiece(x=r.x, y=r.y, width=r.w, length=r.l, reusable=True)
+                    WastePiece(
+                        x=rect.x,
+                        y=rect.y,
+                        width=rect.width,
+                        length=rect.length,
+                        reusable=True,
+                    )
                 )
         return waste
 
@@ -159,19 +169,19 @@ class Optimizer:
         # Expand cuts by quantity
         items: List[
             Tuple[str, int, int, str, bool]
-        ] = []  # (board_code, w, l, label, allow_rotation)
-        for c in self.cuts:
-            for _ in range(c.quantity):
+        ] = []  # (board_code, width, length, label, allow_rotation)
+        for cut in self.cuts:
+            for _ in range(cut.quantity):
                 items.append(
                     (
-                        c.board_code,
-                        c.width,
-                        c.length,
-                        c.label,
-                        c.allow_rotation,
+                        cut.board_code,
+                        cut.width,
+                        cut.length,
+                        cut.label,
+                        cut.allow_rotation,
                     )
                 )
-        # sort by material then by decreasing max(w,l) then area
+        # sort by material then by decreasing max(width,length) then area
         items.sort(key=lambda t: (t[0], -max(t[1], t[2]), -(t[1] * t[2])))
 
         # boards_layout: List[BoardLayout] = []
@@ -179,17 +189,17 @@ class Optimizer:
             code: [] for code in self.materials.keys()
         }
 
-        for mat_code, w, l, label, allow_rotate in items:
+        for mat_code, width, length, label, allow_rotate in items:
             mat = self.materials[mat_code]
             placed = None
             # Orientation candidates
-            candidates: List[Tuple[int, int]] = [(w, l)]
-            if allow_rotate and (w != l):
-                candidates.append((l, w))
+            candidates: List[Tuple[int, int]] = [(width, length)]
+            if allow_rotate and (width != length):
+                candidates.append((length, width))
             # Try place on existing boards first, preferring reuse of waste
-            for bw, bl in candidates:
+            for board_width, board_length in candidates:
                 for bin in boards_by_material[mat_code]:
-                    placed = bin.try_place(bw, bl, label)
+                    placed = bin.try_place(board_width, board_length, label)
                     if placed:
                         break
                 if placed:
@@ -203,13 +213,13 @@ class Optimizer:
                     trims=self.trims,
                 )
                 boards_by_material[mat_code].append(bin)
-                for bw, bl in candidates:
-                    placed = bin.try_place(bw, bl, label)
+                for board_width, board_length in candidates:
+                    placed = bin.try_place(board_width, board_length, label)
                     if placed:
                         break
             if not placed:
                 raise ValueError(
-                    f"Unable to place cut {label or ''} {w}x{l} on material {mat_code}"
+                    f"Unable to place cut {label or ''} {width}x{length} on material {mat_code}"
                 )
 
         # Build layouts and costs
@@ -226,7 +236,7 @@ class Optimizer:
             mat = self.materials[mat_code]
             for i, bin in enumerate(bins):
                 used_area = sum(p.width * p.length for p in bin.placed)
-                board_usable_area = bin.usable_w * bin.usable_l
+                board_usable_area = bin.usable_width * bin.usable_length
                 total_usable_area += board_usable_area
                 total_used_area += used_area
                 layout_list.append(
@@ -267,14 +277,14 @@ class Optimizer:
 
 async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeResponse:
     start_time = time.time()
-    board_codes = {r.board_code for r in request.cuts}
+    board_codes = {request_cut.board_code for request_cut in request.cuts}
     boards = BoardService.get_boards_by_codes(db, tuple(board_codes))
     if len(boards) != len(board_codes):
-        missing = board_codes - {b.code for b in boards}
+        missing = board_codes - {board.code for board in boards}
         raise ValueError(f"Board codes not found: {', '.join(missing)}")
 
     for cut in request.cuts:
-        board = next((b for b in boards if b.code == cut.board_code), None)
+        board = next((board for board in boards if board.code == cut.board_code), None)
         if cut.length > board.length or cut.width > board.width:
             raise ValueError(
                 f"Cut {cut.label or ''} {cut.length}x{cut.width} exceeds board {board.code} size {board.length}x{board.width}"
@@ -306,7 +316,7 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
 
     # Save cuts
     for cut_req in request.cuts:
-        board = next(b for b in boards if b.code == cut_req.board_code)
+        board = next(board for board in boards if board.code == cut_req.board_code)
         cut_model = OptimizationCutModel(
             index=cut_req.index,
             length=cut_req.length,
@@ -321,7 +331,7 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
 
     # Save layouts
     for layout in boards_layout:
-        board = next(b for b in boards if b.code == layout.material)
+        board = next(board for board in boards if board.code == layout.material)
         layout_model = OptimizationLayoutModel(
             index=layout.index,
             quantity=1,  # Assuming 1 for now
@@ -359,7 +369,7 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
 
     # Save boards used
     for material_cost in cost_summary.materials:
-        board = next(b for b in boards if b.code == material_cost.material)
+        board = next(board for board in boards if board.code == material_cost.material)
         board_model = OptimizationBoardModel(
             used=material_cost.boards_used,
             unit_cost=material_cost.unit_cost,
