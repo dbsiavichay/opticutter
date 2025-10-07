@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
@@ -6,14 +7,13 @@ from sqlalchemy.orm import Session
 
 from config import config
 from src.models.models import (
-    BoardModel,
     OptimizationBoardModel,
     OptimizationCutModel,
     OptimizationLayoutModel,
     OptimizationModel,
     OptmizationLayoutCutModel,
 )
-from src.models.schemas import CutRequirement, OptimizeRequest
+from src.models.schemas import OptimizeRequest
 from src.schemas import (
     BoardLayout,
     CostSummary,
@@ -25,6 +25,100 @@ from src.schemas import (
     WastePiece,
 )
 from src.services.board_service import BoardService
+
+
+# Native Python dataclasses for internal optimization logic
+@dataclass
+class Board:
+    """Native Python representation of a board."""
+
+    code: str
+    width: int
+    length: int
+    price: float
+
+
+@dataclass
+class Cut:
+    """Native Python representation of a cut requirement."""
+
+    board_code: str
+    width: int
+    length: int
+    label: Optional[str] = None
+    allow_rotation: bool = True
+
+
+@dataclass
+class CuttingParams:
+    """Native Python representation of cutting parameters."""
+
+    kerf: int = 0
+    top_trim: int = 0
+    bottom_trim: int = 0
+    left_trim: int = 0
+    right_trim: int = 0
+
+
+@dataclass
+class PlacedCutData:
+    """Native Python representation of a placed cut."""
+
+    x: int
+    y: int
+    width: int
+    length: int
+    label: Optional[str] = None
+
+
+@dataclass
+class WastePieceData:
+    """Native Python representation of a waste piece."""
+
+    x: int
+    y: int
+    width: int
+    length: int
+    reusable: bool = True
+
+
+@dataclass
+class BoardLayoutData:
+    """Native Python representation of a board layout."""
+
+    material: str
+    index: int
+    cuts_placed: List[PlacedCutData]
+    utilization_percentage: float
+    waste_pieces: List[WastePieceData]
+
+
+@dataclass
+class MaterialCostData:
+    """Native Python representation of material cost summary."""
+
+    material: str
+    boards_used: int
+    unit_cost: float
+    total_cost: float
+
+
+@dataclass
+class CostData:
+    """Native Python representation of cost summary."""
+
+    materials: List[MaterialCostData]
+    total_material_cost: float
+
+
+@dataclass
+class OptimizationData:
+    """Native Python representation of optimization summary."""
+
+    total_boards_used: int
+    total_cost: float
+    total_waste_percentage: float
+    optimization_time: str
 
 
 class Rect:
@@ -65,7 +159,7 @@ class Rect:
 class BoardBin:
     def __init__(
         self,
-        board: BoardModel,
+        board: Board,
         index: int,
         kerf: int,
         trims: Tuple[int, int, int, int],
@@ -82,12 +176,12 @@ class BoardBin:
         self.free_rects: List[Rect] = [
             Rect(self.origin_x, self.origin_y, usable_width, usable_length)
         ]
-        self.placed: List[PlacedCut] = []
+        self.placed: List[PlacedCutData] = []
         self.kerf = kerf
 
     def try_place(
         self, width: int, length: int, label: Optional[str]
-    ) -> Optional[PlacedCut]:
+    ) -> Optional[PlacedCutData]:
         # Choose smallest area free rect that fits to reduce fragmentation
         candidate_idx = -1
         candidate: Optional[Rect] = None
@@ -103,7 +197,7 @@ class BoardBin:
             return None
         # Place at top-left of candidate
         px, py = candidate.x, candidate.y
-        placed = PlacedCut(x=px, y=py, width=width, length=length, label=label)
+        placed = PlacedCutData(x=px, y=py, width=width, length=length, label=label)
         # remove candidate and split
         del self.free_rects[candidate_idx]
         self.free_rects.extend(candidate.split_after_place(width, length, self.kerf))
@@ -131,12 +225,12 @@ class BoardBin:
         area_total = max(self.usable_width, 0) * max(self.usable_length, 0)
         return (area_used / area_total) * 100.0 if area_total > 0 else 0.0
 
-    def waste_pieces(self) -> List[WastePiece]:
-        waste: List[WastePiece] = []
+    def waste_pieces(self) -> List[WastePieceData]:
+        waste: List[WastePieceData] = []
         for rect in self.free_rects:
             if rect.width > 0 and rect.length > 0:
                 waste.append(
-                    WastePiece(
+                    WastePieceData(
                         x=rect.x,
                         y=rect.y,
                         width=rect.width,
@@ -150,9 +244,9 @@ class BoardBin:
 class Optimizer:
     def __init__(
         self,
-        cuts: List[CutRequirement],
-        boards: List[BoardModel],
-        cutting_parameters: CuttingParameters,
+        cuts: List[Cut],
+        boards: List[Board],
+        cutting_parameters: CuttingParams,
     ):
         self.cuts = cuts
         self.kerf = cutting_parameters.kerf
@@ -164,27 +258,25 @@ class Optimizer:
         )
         self.materials = {b.code: b for b in boards}
 
-    def run(self) -> Tuple[List[BoardLayout], CostSummary, OptimizationSummary]:
+    def run(self) -> Tuple[List[BoardLayoutData], CostData, OptimizationData]:
         start = datetime.now(timezone.utc)
-        # Expand cuts by quantity
+        # Expand cuts - cuts now come as individual items
         items: List[
             Tuple[str, int, int, str, bool]
         ] = []  # (board_code, width, length, label, allow_rotation)
         for cut in self.cuts:
-            for _ in range(cut.quantity):
-                items.append(
-                    (
-                        cut.board_code,
-                        cut.width,
-                        cut.length,
-                        cut.label,
-                        cut.allow_rotation,
-                    )
+            items.append(
+                (
+                    cut.board_code,
+                    cut.width,
+                    cut.length,
+                    cut.label or "",
+                    cut.allow_rotation,
                 )
+            )
         # sort by material then by decreasing max(width,length) then area
         items.sort(key=lambda t: (t[0], -max(t[1], t[2]), -(t[1] * t[2])))
 
-        # boards_layout: List[BoardLayout] = []
         boards_by_material: dict[str, List[BoardBin]] = {
             code: [] for code in self.materials.keys()
         }
@@ -223,9 +315,9 @@ class Optimizer:
                 )
 
         # Build layouts and costs
-        layout_list: List[BoardLayout] = []
+        layout_list: List[BoardLayoutData] = []
         total_boards_used = 0
-        material_costs: List[MaterialCostSummary] = []
+        material_costs: List[MaterialCostData] = []
         total_cost = 0.0
         total_usable_area = 0
         total_used_area = 0
@@ -240,7 +332,7 @@ class Optimizer:
                 total_usable_area += board_usable_area
                 total_used_area += used_area
                 layout_list.append(
-                    BoardLayout(
+                    BoardLayoutData(
                         material=mat_code,
                         index=i + 1,
                         cuts_placed=bin.placed,
@@ -253,7 +345,7 @@ class Optimizer:
             cost = count * float(mat.price)
             total_cost += cost
             material_costs.append(
-                MaterialCostSummary(
+                MaterialCostData(
                     material=mat_code,
                     boards_used=count,
                     unit_cost=float(mat.price),
@@ -262,14 +354,14 @@ class Optimizer:
             )
 
         elapsed = (datetime.now(timezone.utc) - start).total_seconds()
-        summary = OptimizationSummary(
+        summary = OptimizationData(
             total_boards_used=total_boards_used,
             total_cost=total_cost,
             total_waste_percentage=(1.0 - (total_used_area / max(total_usable_area, 1)))
             * 100.0,
             optimization_time=f"{elapsed:.3f}s",
         )
-        cost_summary = CostSummary(
+        cost_summary = CostData(
             materials=material_costs, total_material_cost=total_cost
         )
         return layout_list, cost_summary, summary
@@ -290,7 +382,8 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
                 f"Cut {cut.label or ''} {cut.length}x{cut.width} exceeds board {board.code} size {board.length}x{board.width}"
             )
 
-    cutting_params = CuttingParameters(
+    # Convert Pydantic CuttingParameters to native CuttingParams
+    cutting_params_pydantic = CuttingParameters(
         kerf=getattr(config, "KERF", 5.0),
         top_trim=getattr(config, "TOP_TRIM", 0.0),
         bottom_trim=getattr(config, "BOTTOM_TRIM", 0.0),
@@ -298,10 +391,93 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
         right_trim=getattr(config, "RIGHT_TRIM", 0.0),
     )
 
-    # Compute
-    optimizer = Optimizer(request.cuts, boards, cutting_params)
-    boards_layout, cost_summary, summary = optimizer.run()
+    cutting_params = CuttingParams(
+        kerf=cutting_params_pydantic.kerf,
+        top_trim=cutting_params_pydantic.top_trim,
+        bottom_trim=cutting_params_pydantic.bottom_trim,
+        left_trim=cutting_params_pydantic.left_trim,
+        right_trim=cutting_params_pydantic.right_trim,
+    )
+
+    # Convert BoardModel to Board dataclass
+    boards_native = [
+        Board(
+            code=board.code,
+            width=board.width,
+            length=board.length,
+            price=board.price,
+        )
+        for board in boards
+    ]
+
+    # Convert CutRequirement to Cut dataclass (expand by quantity)
+    cuts_native = []
+    for cut_req in request.cuts:
+        for _ in range(cut_req.quantity):
+            cuts_native.append(
+                Cut(
+                    board_code=cut_req.board_code,
+                    width=cut_req.width,
+                    length=cut_req.length,
+                    label=cut_req.label,
+                    allow_rotation=cut_req.allow_rotation,
+                )
+            )
+
+    # Compute optimization
+    optimizer = Optimizer(cuts_native, boards_native, cutting_params)
+    boards_layout_data, cost_data, optimization_data = optimizer.run()
     duration_ms = int((time.time() - start_time) * 1000)
+
+    # Convert native dataclasses back to Pydantic models for database storage
+    boards_layout = [
+        BoardLayout(
+            material=layout.material,
+            index=layout.index,
+            cuts_placed=[
+                PlacedCut(
+                    x=cut.x,
+                    y=cut.y,
+                    width=cut.width,
+                    length=cut.length,
+                    label=cut.label,
+                )
+                for cut in layout.cuts_placed
+            ],
+            utilization_percentage=layout.utilization_percentage,
+            waste_pieces=[
+                WastePiece(
+                    x=waste.x,
+                    y=waste.y,
+                    width=waste.width,
+                    length=waste.length,
+                    reusable=waste.reusable,
+                )
+                for waste in layout.waste_pieces
+            ],
+        )
+        for layout in boards_layout_data
+    ]
+
+    cost_summary = CostSummary(
+        materials=[
+            MaterialCostSummary(
+                material=mat.material,
+                boards_used=mat.boards_used,
+                unit_cost=mat.unit_cost,
+                total_cost=mat.total_cost,
+            )
+            for mat in cost_data.materials
+        ],
+        total_material_cost=cost_data.total_material_cost,
+    )
+
+    summary = OptimizationSummary(
+        total_boards_used=optimization_data.total_boards_used,
+        total_cost=optimization_data.total_cost,
+        total_waste_percentage=optimization_data.total_waste_percentage,
+        optimization_time=optimization_data.optimization_time,
+    )
 
     # Save to database
     optimization = OptimizationModel(
