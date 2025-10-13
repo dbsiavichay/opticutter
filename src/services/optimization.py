@@ -42,7 +42,6 @@ class Board:
 class Cut:
     """Native Python representation of a cut requirement."""
 
-    board_code: str
     width: int
     length: int
     label: Optional[str] = None
@@ -58,6 +57,17 @@ class CuttingParams:
     bottom_trim: int = 0
     left_trim: int = 0
     right_trim: int = 0
+
+
+@dataclass
+class MaterialParams:
+    """Native Python representation of material parameters."""
+
+    material_code: str
+    width: int
+    length: int
+    price: float
+    thickness: int = 0
 
 
 @dataclass
@@ -159,16 +169,16 @@ class Rect:
 class BoardBin:
     def __init__(
         self,
-        board: Board,
+        material: MaterialParams,
         index: int,
         kerf: int,
         trims: Tuple[int, int, int, int],
     ):
-        self.board = board
+        self.material = material
         self.index = index
         left, top, right, bottom = trims
-        usable_width = max(board.width - (left + right), 0)
-        usable_length = max(board.length - (top + bottom), 0)
+        usable_width = max(material.width - (left + right), 0)
+        usable_length = max(material.length - (top + bottom), 0)
         self.usable_width = usable_width
         self.usable_length = usable_length
         self.origin_x = left
@@ -245,10 +255,11 @@ class Optimizer:
     def __init__(
         self,
         cuts: List[Cut],
-        boards: List[Board],
+        material_params: MaterialParams,
         cutting_parameters: CuttingParams,
     ):
         self.cuts = cuts
+        self.material = material_params
         self.kerf = cutting_parameters.kerf
         self.trims = (
             cutting_parameters.left_trim,
@@ -256,33 +267,28 @@ class Optimizer:
             cutting_parameters.right_trim,
             cutting_parameters.bottom_trim,
         )
-        self.materials = {b.code: b for b in boards}
 
     def run(self) -> Tuple[List[BoardLayoutData], CostData, OptimizationData]:
         start = datetime.now(timezone.utc)
-        # Expand cuts - cuts now come as individual items
+        # Prepare cuts list with dimensions and metadata
         items: List[
-            Tuple[str, int, int, str, bool]
-        ] = []  # (board_code, width, length, label, allow_rotation)
+            Tuple[int, int, str, bool]
+        ] = []  # (width, length, label, allow_rotation)
         for cut in self.cuts:
             items.append(
                 (
-                    cut.board_code,
                     cut.width,
                     cut.length,
                     cut.label or "",
                     cut.allow_rotation,
                 )
             )
-        # sort by material then by decreasing max(width,length) then area
-        items.sort(key=lambda t: (t[0], -max(t[1], t[2]), -(t[1] * t[2])))
+        # Sort by decreasing max(width,length) then area for better packing
+        items.sort(key=lambda t: (-max(t[0], t[1]), -(t[0] * t[1])))
 
-        boards_by_material: dict[str, List[BoardBin]] = {
-            code: [] for code in self.materials.keys()
-        }
+        boards: List[BoardBin] = []
 
-        for mat_code, width, length, label, allow_rotate in items:
-            mat = self.materials[mat_code]
+        for width, length, label, allow_rotate in items:
             placed = None
             # Orientation candidates
             candidates: List[Tuple[int, int]] = [(width, length)]
@@ -290,7 +296,7 @@ class Optimizer:
                 candidates.append((length, width))
             # Try place on existing boards first, preferring reuse of waste
             for board_width, board_length in candidates:
-                for bin in boards_by_material[mat_code]:
+                for bin in boards:
                     placed = bin.try_place(board_width, board_length, label)
                     if placed:
                         break
@@ -299,59 +305,51 @@ class Optimizer:
             # If not placed, open a new board and try again
             if not placed:
                 bin = BoardBin(
-                    mat,
-                    index=len(boards_by_material[mat_code]) + 1,
+                    self.material,
+                    index=len(boards) + 1,
                     kerf=self.kerf,
                     trims=self.trims,
                 )
-                boards_by_material[mat_code].append(bin)
+                boards.append(bin)
                 for board_width, board_length in candidates:
                     placed = bin.try_place(board_width, board_length, label)
                     if placed:
                         break
             if not placed:
                 raise ValueError(
-                    f"Unable to place cut {label or ''} {width}x{length} on material {mat_code}"
+                    f"Unable to place cut {label or ''} {width}x{length} on material {self.material.material_code}"
                 )
 
         # Build layouts and costs
         layout_list: List[BoardLayoutData] = []
-        total_boards_used = 0
-        material_costs: List[MaterialCostData] = []
-        total_cost = 0.0
+        total_boards_used = len(boards)
+        total_cost = total_boards_used * float(self.material.price)
         total_usable_area = 0
         total_used_area = 0
 
-        for mat_code, bins in boards_by_material.items():
-            if not bins:
-                continue
-            mat = self.materials[mat_code]
-            for i, bin in enumerate(bins):
-                used_area = sum(p.width * p.length for p in bin.placed)
-                board_usable_area = bin.usable_width * bin.usable_length
-                total_usable_area += board_usable_area
-                total_used_area += used_area
-                layout_list.append(
-                    BoardLayoutData(
-                        material=mat_code,
-                        index=i + 1,
-                        cuts_placed=bin.placed,
-                        utilization_percentage=bin.utilization(),
-                        waste_pieces=bin.waste_pieces(),
-                    )
-                )
-            count = len(bins)
-            total_boards_used += count
-            cost = count * float(mat.price)
-            total_cost += cost
-            material_costs.append(
-                MaterialCostData(
-                    material=mat_code,
-                    boards_used=count,
-                    unit_cost=float(mat.price),
-                    total_cost=cost,
+        for i, bin in enumerate(boards):
+            used_area = sum(p.width * p.length for p in bin.placed)
+            board_usable_area = bin.usable_width * bin.usable_length
+            total_usable_area += board_usable_area
+            total_used_area += used_area
+            layout_list.append(
+                BoardLayoutData(
+                    material=self.material.material_code,
+                    index=i + 1,
+                    cuts_placed=bin.placed,
+                    utilization_percentage=bin.utilization(),
+                    waste_pieces=bin.waste_pieces(),
                 )
             )
+
+        material_costs = [
+            MaterialCostData(
+                material=self.material.material_code,
+                boards_used=total_boards_used,
+                unit_cost=float(self.material.price),
+                total_cost=total_cost,
+            )
+        ]
 
         elapsed = (datetime.now(timezone.utc) - start).total_seconds()
         summary = OptimizationData(
@@ -369,14 +367,18 @@ class Optimizer:
 
 async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeResponse:
     start_time = time.time()
-    board_codes = {request_cut.board_code for request_cut in request.cuts}
-    boards = BoardService.get_boards_by_codes(db, tuple(board_codes))
-    if len(boards) != len(board_codes):
-        missing = board_codes - {board.code for board in boards}
-        raise ValueError(f"Board codes not found: {', '.join(missing)}")
+    # board_codes = {request_cut.board_code for request_cut in request.cuts}
+    boards = BoardService.get_boards_by_codes(db, ("cap",))
+    # if len(boards) != len(board_codes):
+    #     missing = board_codes - {board.code for board in boards}
+    #     raise ValueError(f"Board codes not found: {', '.join(missing)}")
+
+    if not len(boards):
+        raise ValueError(f"Board codes not found")
+
+    board = boards[0]
 
     for cut in request.cuts:
-        board = next((board for board in boards if board.code == cut.board_code), None)
         if cut.length > board.length or cut.width > board.width:
             raise ValueError(
                 f"Cut {cut.label or ''} {cut.length}x{cut.width} exceeds board {board.code} size {board.length}x{board.width}"
@@ -400,15 +402,23 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
     )
 
     # Convert BoardModel to Board dataclass
-    boards_native = [
-        Board(
-            code=board.code,
-            width=board.width,
-            length=board.length,
-            price=board.price,
-        )
-        for board in boards
-    ]
+    # boards_native = [
+    #     Board(
+    #         code=board.code,
+    #         width=board.width,
+    #         length=board.length,
+    #         price=board.price,
+    #     )
+    #     for board in boards
+    # ]
+
+    material_params = MaterialParams(
+        material_code=board.code,
+        width=board.width,
+        length=board.length,
+        price=board.price,
+        thickness=board.thickness,
+    )
 
     # Convert CutRequirement to Cut dataclass (expand by quantity)
     cuts_native = []
@@ -416,7 +426,6 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
         for _ in range(cut_req.quantity):
             cuts_native.append(
                 Cut(
-                    board_code=cut_req.board_code,
                     width=cut_req.width,
                     length=cut_req.length,
                     label=cut_req.label,
@@ -425,7 +434,7 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
             )
 
     # Compute optimization
-    optimizer = Optimizer(cuts_native, boards_native, cutting_params)
+    optimizer = Optimizer(cuts_native, material_params, cutting_params)
     boards_layout_data, cost_data, optimization_data = optimizer.run()
     duration_ms = int((time.time() - start_time) * 1000)
 
@@ -492,7 +501,6 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
 
     # Save cuts
     for cut_req in request.cuts:
-        board = next(board for board in boards if board.code == cut_req.board_code)
         cut_model = OptimizationCutModel(
             index=cut_req.index,
             length=cut_req.length,
