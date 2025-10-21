@@ -401,17 +401,6 @@ async def optimize_cuts(request: OptimizeRequest, db: Session) -> OptimizeRespon
         right_trim=cutting_params_pydantic.right_trim,
     )
 
-    # Convert BoardModel to Board dataclass
-    # boards_native = [
-    #     Board(
-    #         code=board.code,
-    #         width=board.width,
-    #         length=board.length,
-    #         price=board.price,
-    #     )
-    #     for board in boards
-    # ]
-
     material_params = MaterialParams(
         material_code=board.code,
         width=board.width,

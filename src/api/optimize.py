@@ -3,18 +3,44 @@ from sqlalchemy.orm import Session
 
 from src.db import get_db
 from src.models.schemas import OptimizationImageResponse, OptimizeRequest
-from src.schemas import OptimizeResponse
-from src.services.optimization import optimize_cuts
+from src.services.optimization_service import OptimizationService
 from src.services.visualization import visualization_service
 
 router = APIRouter(prefix="/optimize", tags=["optimize"])
 
 
-@router.post("/", response_model=OptimizeResponse)
-async def optimize(
-    req: OptimizeRequest, db: Session = Depends(get_db)
-) -> OptimizeResponse:
-    return await optimize_cuts(req, db)
+# @router.post("/", response_model=OptimizeResponse)
+# async def optimize(
+#     req: OptimizeRequest, db: Session = Depends(get_db)
+# ) -> OptimizeResponse:
+#     # return await optimize_cuts(req, db)
+#     pieces = [
+#         {
+#             "id": c.label,
+#             "width": c.width,
+#             "height": c.length,
+#             "quantity": c.quantity,
+#             "material_id": c.board_code,
+#         }
+#         for c in req.cuts
+#     ]
+#     return OptimizationService.execute(db, pieces)
+
+
+@router.post("/")
+async def optimize(req: OptimizeRequest, db: Session = Depends(get_db)):
+    # return await optimize_cuts(req, db)
+    pieces = [
+        {
+            "id": c.label,
+            "width": c.width,
+            "height": c.length,
+            "quantity": c.quantity,
+            "material_id": c.board_code,
+        }
+        for c in req.cuts
+    ]
+    return OptimizationService.execute(db, pieces)
 
 
 @router.get("/visualize/{request_hash}", response_model=OptimizationImageResponse)
