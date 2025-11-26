@@ -122,11 +122,11 @@ class GuillotineOptimizer:
         )
         self.placed_pieces.append(placed_piece)
 
-        self._split_free_rectangle(best_rect_index, placed_piece)
+        self._split_remainder(best_rect_index, placed_piece)
 
         return True
 
-    def _split_free_rectangle(self, rect_index: int, placed: PlacedPiece):
+    def _split_remainder(self, rect_index: int, placed: PlacedPiece):
         rect = self.remainders[rect_index]
 
         self.remainders.pop(rect_index)

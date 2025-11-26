@@ -4,7 +4,9 @@ from typing import Dict, List, Tuple
 from sqlalchemy.orm import Session
 
 from config import config
+from src.models.models import BoardModel
 from src.schemas.cutting import CuttingParameters
+from src.schemas.optimization import OptimizeRequest, Requirement
 from src.services.board_service import BoardService
 
 from .guillotine import (
@@ -18,21 +20,19 @@ from .guillotine import (
 
 class OptimizationService:
     @staticmethod
-    def _get_pieces_by_material(pieces: List[Dict]) -> Dict[str, List[Dict]]:
-        pieces_by_material = defaultdict(list)
-        for piece in pieces:
-            pieces_by_material[piece["material_id"]].append(piece)
-        return pieces_by_material
+    def _group_requirements_by_board(
+        requirements: List[Requirement],
+    ) -> Dict[str, List[Requirement]]:
+        requirements_by_board = defaultdict(list)
+        for req in requirements:
+            requirements_by_board[req.board_id].append(req)
+        return requirements_by_board
 
     @staticmethod
     def _optimize(
         pieces: List[Dict],
-        material_id: str,
-        material_width: float,
-        material_height: float,
-        material_thickness: float,
+        board: BoardModel,
         cutting_params: CuttingParameters,
-        cost_per_unit: float = 0.0,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
     ) -> Tuple[List[CuttingLayout], List[Piece]]:
@@ -40,11 +40,11 @@ class OptimizationService:
             raise ValueError("La lista de piezas no puede estar vacía")
 
         material = Material(
-            id=material_id,
-            width=material_width,
-            height=material_height,
-            thickness=material_thickness,
-            cost_per_unit=cost_per_unit,
+            id=board.id,
+            width=board.width,
+            height=board.length,
+            thickness=board.thickness,
+            cost_per_unit=board.price,
         )
         piece_objects = []
         for i, p in enumerate(pieces):
@@ -85,15 +85,15 @@ class OptimizationService:
 
     @staticmethod
     def execute(
+        request: OptimizeRequest,
         db: Session,
-        pieces: List[Dict],
-        max_sheets: int = 100,
-        min_rect_size: float = 0.1,
     ) -> Dict:
-        if not pieces:
+        if not request.requirements:
             raise ValueError("La lista de piezas no puede estar vacía")
 
-        pieces_by_material = OptimizationService._get_pieces_by_material(pieces)
+        requirements_by_board = OptimizationService._group_requirements_by_board(
+            request.requirements
+        )
 
         cutting_params = CuttingParameters(
             kerf=getattr(config, "KERF", 5.0),
@@ -102,19 +102,16 @@ class OptimizationService:
             left_trim=getattr(config, "LEFT_TRIM", 0.0),
             right_trim=getattr(config, "RIGHT_TRIM", 0.0),
         )
+
         results = []
-        for material_id, material_pieces in pieces_by_material.items():
-            board = BoardService.get_board_by_code(db, material_id)
+        for board_id, board_requirements in requirements_by_board.items():
+            board = BoardService.get_board_by_code(db, board_id)
             optimized_result = OptimizationService._optimize(
-                pieces=material_pieces,
-                material_id=material_id,
-                material_width=board.width,
-                material_height=board.length,
-                material_thickness=board.thickness,
+                pieces=board_requirements,
+                board=board,
                 cutting_params=cutting_params,
-                cost_per_unit=board.price,
-                max_sheets=max_sheets,
-                min_rect_size=min_rect_size,
+                max_sheets=100,
+                min_rect_size=0.1,
             )
             results.append(optimized_result)
 

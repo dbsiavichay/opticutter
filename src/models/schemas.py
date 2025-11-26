@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field, PositiveInt, confloat
 
@@ -9,23 +9,6 @@ from pydantic import BaseModel, Field, PositiveInt, confloat
 class GrainDirection(str, Enum):
     horizontal = "h"
     vertical = "v"
-
-
-class CutRequirement(BaseModel):
-    index: PositiveInt
-    length: PositiveInt
-    width: PositiveInt
-    quantity: PositiveInt = Field(1, ge=1, le=10000)
-    board_code: str
-    label: Optional[str] = None
-    allow_rotation: bool = True
-
-
-class OptimizeRequest(BaseModel):
-    cuts: List[CutRequirement] = Field(
-        ..., min_length=1, description="List of cuts to optimize"
-    )
-    client_id: int = Field(..., description="Client ID for the optimization")
 
 
 class OptimizationImageResponse(BaseModel):

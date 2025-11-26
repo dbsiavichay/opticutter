@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from src.db import get_db
-from src.models.schemas import OptimizationImageResponse, OptimizeRequest
+from src.models.schemas import OptimizationImageResponse
+from src.schemas.optimization import OptimizeRequest
 from src.services.optimization_service import OptimizationService
 from src.services.visualization import visualization_service
 
@@ -28,19 +29,8 @@ router = APIRouter(prefix="/optimize", tags=["optimize"])
 
 
 @router.post("/")
-async def optimize(req: OptimizeRequest, db: Session = Depends(get_db)):
-    # return await optimize_cuts(req, db)
-    pieces = [
-        {
-            "id": c.label,
-            "width": c.width,
-            "height": c.length,
-            "quantity": c.quantity,
-            "material_id": c.board_code,
-        }
-        for c in req.cuts
-    ]
-    return OptimizationService.execute(db, pieces)
+async def optimize(request: OptimizeRequest, db: Session = Depends(get_db)):
+    return OptimizationService.execute(request, db)
 
 
 @router.get("/visualize/{request_hash}", response_model=OptimizationImageResponse)

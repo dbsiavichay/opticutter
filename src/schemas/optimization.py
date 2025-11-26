@@ -2,9 +2,28 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PositiveInt
 
 from src.models.schemas import ClientResponse
+
+
+class Requirement(BaseModel):
+    index: PositiveInt
+    height: PositiveInt
+    width: PositiveInt
+    quantity: PositiveInt = Field(default=1, le=10000)
+    board_id: str = Field(..., alias="boardId")
+    label: Optional[str] = None
+    allow_rotation: bool = Field(default=True, alias="allowRotation")
+
+
+class OptimizeRequest(BaseModel):
+    requirements: List[Requirement] = Field(
+        ..., min_length=1, description="List of cuts to optimize"
+    )
+    client_id: int = Field(
+        ..., alias="clientId", description="Client ID for the optimization"
+    )
 
 
 # Response models
