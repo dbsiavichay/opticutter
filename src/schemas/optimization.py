@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, PositiveInt
 
@@ -30,20 +30,9 @@ class OptimizeRequest(BaseModel):
 class OptimizeResponse(BaseModel):
     id: int
     client: ClientResponse = Field(..., description="Client information")
-    total_boards_used: int = Field(
-        ..., alias="totalBoardsUsed", description="Total number of boards used"
-    )
-    total_boards_cost: float = Field(
-        ..., alias="totalBoardsCost", description="Total cost of boards used"
-    )
-    total_waste_percentage: float = Field(
-        ..., alias="totalWastePercentage", description="Total waste percentage"
-    )
-    duration_ms: int = Field(
-        ...,
-        alias="durationMs",
-        description="Duration of the optimization in milliseconds",
-    )
+    total_boards_used: int = Field(..., description="Total number of boards used")
+    total_boards_cost: float = Field(..., description="Total cost of boards used")
+    solution: List[Dict] = Field(..., description="Optimization solution details")
 
 
 class PlacedCut(BaseModel):

@@ -5,13 +5,13 @@ from logging.config import fileConfig  # noqa: E402
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from config import config as app_config
+from src.db import Base
+from src.models.models import BoardModel, ClientModel, OptimizationModel  # noqa: F401
 
 # Agregar el directorio raíz al path para poder importar los módulos del proyecto
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), "..")))
 
-from config import config as app_config
-from src.db import Base
-from src.models.models import BoardModel, ClientModel, OptimizationModel  # noqa: F401
 
 # Importar modelos para que Alembic pueda detectarlos automáticamente
 # Cuando crees modelos, descomenta esta línea:

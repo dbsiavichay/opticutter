@@ -37,11 +37,11 @@ class GuillotineOptimizer:
 
         if total_horizontal_trim >= material.width:
             raise ValueError(
-                f"Los trims horizontales ({total_horizontal_trim}) exceden el ancho del material ({material.width})"
+                f"Los trims horizontales ({total_horizontal_trim}) exceden el ancho del material ({material.width})"  # NOQA : E501
             )
         if total_vertical_trim >= material.height:
             raise ValueError(
-                f"Los trims verticales ({total_vertical_trim}) exceden la altura del material ({material.height})"
+                f"Los trims verticales ({total_vertical_trim}) exceden la altura del material ({material.height})"  # NOQA : E501
             )
 
         usable_width = material.width - self.left_trim - self.right_trim

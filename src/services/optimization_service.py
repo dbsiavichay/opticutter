@@ -73,26 +73,21 @@ class OptimizationService:
         return optimizer.optimize(piece_objects)
 
     @staticmethod
-    def _build_response(results: List[Tuple[List[CuttingLayout], List[Piece]]]) -> Dict:
-        return {
-            "solution": {
-                "total_boards_used": sum(len(layouts) for layouts, _ in results),
-                "layouts": [
-                    layout.to_dict() for layouts, _ in results for layout in layouts
-                ],
-            }
-        }
-
-    @staticmethod
     def _save_optimization(
-        client_id: int, requirements: Dict, solution: Dict, db: Session
+        request: OptimizeRequest,
+        solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
+        db: Session,
     ) -> OptimizationModel:
+        total_boards_used = sum(len(layouts) for layouts, _ in solutions)
+
         optimization = OptimizationModel(
-            total_boards_used=solution.get("total_boards_used", 0),
-            total_boards_cost=solution.get("total_boards_cost", 0),
-            requirements=requirements,
-            solution=solution,
-            client_id=client_id,
+            total_boards_used=total_boards_used,
+            total_boards_cost=0,
+            requirements=[r.model_dump() for r in request.requirements],
+            solution=[
+                layout.to_dict() for layouts, _ in solutions for layout in layouts
+            ],
+            client_id=request.client_id,
         )
         db.add(optimization)
         db.commit()
@@ -118,7 +113,7 @@ class OptimizationService:
             right_trim=getattr(config, "RIGHT_TRIM", 0.0),
         )
 
-        results = []
+        solutions = []
         for board_id, board_requirements in requirements_by_board.items():
             board = BoardService.get_board_by_code(db, board_id)
             if not board:
@@ -132,14 +127,6 @@ class OptimizationService:
                 max_sheets=100,
                 min_rect_size=0.1,
             )
-            results.append(optimized_result)
+            solutions.append(optimized_result)
 
-        response = OptimizationService._build_response(results)
-
-        OptimizationService._save_optimization(
-            request.client_id, 
-            [r.model_dump() for r in request.requirements], 
-            response.get("solution", {}), db
-        )
-
-        return response
+        return OptimizationService._save_optimization(request, solutions, db)
