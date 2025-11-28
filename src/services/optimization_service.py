@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 from sqlalchemy.orm import Session
 
 from config import config
-from src.models.models import BoardModel
+from src.models.models import BoardModel, OptimizationModel
 from src.schemas.cutting import CuttingParameters
 from src.schemas.optimization import OptimizeRequest, Requirement
 from src.services.board_service import BoardService
@@ -30,7 +30,7 @@ class OptimizationService:
 
     @staticmethod
     def _optimize(
-        pieces: List[Dict],
+        pieces: List[Requirement],
         board: BoardModel,
         cutting_params: CuttingParameters,
         max_sheets: int = 100,
@@ -50,12 +50,12 @@ class OptimizationService:
         for i, p in enumerate(pieces):
             try:
                 piece = Piece(
-                    id=p.get("id", f"piece_{i+1}"),
-                    width=p["width"],
-                    height=p["height"],
-                    quantity=p.get("quantity", 1),
-                    can_rotate=p.get("can_rotate", True),
-                    priority=p.get("priority", 0),
+                    id=p.board_id or f"piece_{i+1}",
+                    width=p.width,
+                    height=p.height,
+                    quantity=p.quantity,
+                    can_rotate=p.allow_rotation,
+                    priority=p.index,
                 )
                 piece_objects.append(piece)
             except KeyError as e:
@@ -84,6 +84,21 @@ class OptimizationService:
         }
 
     @staticmethod
+    def _save_optimization(
+        client_id: int, requirements: Dict, solution: Dict, db: Session
+    ) -> OptimizationModel:
+        optimization = OptimizationModel(
+            total_boards_used=solution.get("total_boards_used", 0),
+            total_boards_cost=solution.get("total_boards_cost", 0),
+            requirements=requirements,
+            solution=solution,
+            client_id=client_id,
+        )
+        db.add(optimization)
+        db.commit()
+        return optimization
+
+    @staticmethod
     def execute(
         request: OptimizeRequest,
         db: Session,
@@ -106,6 +121,10 @@ class OptimizationService:
         results = []
         for board_id, board_requirements in requirements_by_board.items():
             board = BoardService.get_board_by_code(db, board_id)
+            if not board:
+                continue
+                # raise not found exception
+
             optimized_result = OptimizationService._optimize(
                 pieces=board_requirements,
                 board=board,
@@ -115,4 +134,12 @@ class OptimizationService:
             )
             results.append(optimized_result)
 
-        return OptimizationService._build_response(results)
+        response = OptimizationService._build_response(results)
+
+        OptimizationService._save_optimization(
+            request.client_id, 
+            [r.model_dump() for r in request.requirements], 
+            response.get("solution", {}), db
+        )
+
+        return response
