@@ -11,14 +11,6 @@ class GrainDirection(str, Enum):
     vertical = "v"
 
 
-class OptimizationImageResponse(BaseModel):
-    """Response containing the optimization visualization image."""
-
-    image_base64: str
-    content_type: str = "image/png"
-    request_hash: str
-
-
 # Board schemas for CRUD operations
 class BoardBase(BaseModel):
     code: str = Field(..., min_length=1, max_length=32, description="Unique board code")
