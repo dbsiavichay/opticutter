@@ -5,12 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from config import config
-from src.api.boards import router as boards_router
-from src.api.clients import router as clients_router
-from src.api.cutter import router as cutter_router
-from src.api.health import router as health_router
-from src.api.optimize import router as optimize_router
+from src.api.v1.routes import (
+    boards_router,
+    clients_router,
+    cutter_router,
+    health_router,
+    optimize_router,
+)
+from src.core.config import config
 
 # Configurar logging
 logging.basicConfig(
