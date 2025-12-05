@@ -12,3 +12,4 @@ numpy==2.1.2
 Pillow==10.4.0
 sqlalchemy==2.0.25
 alembic==1.13.1
+reportlab==4.2.5
