@@ -106,6 +106,6 @@ que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
 - **Tests**: `make tests-local` (o `.venv/bin/python -m pytest`). La suite cubre el dominio
   del optimizador, el CRUD genérico vía clients/boards (incluyendo conflictos 409 y 404),
   el flujo completo de optimización + proforma, y los endpoints del sistema.
-- **Lint**: `make lint-check-local` (autoflake / black / isort / flake8).
+- **Lint**: `make lint-check-local` (ruff).
 - **Migraciones**: `alembic upgrade head`; `alembic revision --autogenerate` no debe generar
   diffs cuando los modelos coinciden con el esquema.

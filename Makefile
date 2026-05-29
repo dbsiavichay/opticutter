@@ -1,5 +1,5 @@
 # Makefile para Cutter API
-.PHONY: help build start dev down tests lint-fix lint-check install clean logs redis-cli autoflake-fix autoflake-check
+.PHONY: help build start dev down tests lint-fix lint-check install clean logs redis-cli
 
 help: ## Muestra esta ayuda
 	@grep -E '^[A-Za-z0-9_.-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -28,23 +28,15 @@ tests: ## Ejecuta las pruebas
 tests-local: ## Ejecuta las pruebas localmente
 	pytest -q
 
-lint-fix: ## Corrige errores de formato
-	source .venv/bin/activate && autoflake . && black . && isort . --profile black && flake8 .
+lint-fix: ## Corrige errores de formato y lint
+	source .venv/bin/activate && ruff check --fix . && ruff format .
 
 lint-check: ## Verifica el formato del código
-	docker compose run --no-deps --rm api autoflake . --check
-	docker compose run --no-deps --rm api black . --check
-	docker compose run --no-deps --rm api isort . --check-only --profile black
-	docker compose run --no-deps --rm api flake8 .
+	docker compose run --no-deps --rm api ruff check .
+	docker compose run --no-deps --rm api ruff format --check .
 
 lint-check-local: ## Verifica el formato del código localmente
-	autoflake . --check && black . --check && isort . --check-only --profile black && flake8 .
-
-autoflake-fix: ## Elimina imports no usados y variables no utilizadas
-	autoflake .
-
-autoflake-check: ## Verifica imports no usados sin hacer cambios
-	autoflake . --check
+	ruff check . && ruff format --check .
 
 clean: ## Limpia contenedores e imágenes no utilizadas
 	docker system prune -f
