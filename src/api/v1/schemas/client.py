@@ -1,9 +1,11 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from src.api.v1.schemas.base import CamelModel
 
 
-class ClientBase(BaseModel):
+class ClientBase(CamelModel):
     phone: str = Field(
         ..., min_length=1, max_length=32, description="Client phone number"
     )
@@ -19,7 +21,7 @@ class ClientCreate(ClientBase):
     """Schema for creating a new client"""
 
 
-class ClientUpdate(BaseModel):
+class ClientUpdate(CamelModel):
     """Schema for updating an existing client"""
 
     phone: Optional[str] = Field(
@@ -37,6 +39,3 @@ class ClientResponse(ClientBase):
     """Schema for client responses"""
 
     id: int = Field(..., description="Client ID")
-
-    class Config:
-        from_attributes = True

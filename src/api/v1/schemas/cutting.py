@@ -1,7 +1,9 @@
-from pydantic import BaseModel, conint
+from pydantic import conint
+
+from src.api.v1.schemas.base import CamelModel
 
 
-class CuttingParameters(BaseModel):
+class CuttingParameters(CamelModel):
     kerf: conint(ge=0) = 0
     top_trim: conint(ge=0) = 0
     bottom_trim: conint(ge=0) = 0

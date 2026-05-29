@@ -14,7 +14,9 @@ class ClientRepository(BaseRepository[ClientModel]):
 
     def get_by_phone(self, phone: str) -> Optional[ClientModel]:
         """Obtiene un cliente por teléfono"""
-        return self.db.query(ClientModel).filter(ClientModel.phone == phone).first()
+        return (
+            self.db.query(ClientModel).filter(ClientModel.phone == f"{phone}").first()
+        )
 
     def search(self, search: str, skip: int = 0, limit: int = 100) -> List[ClientModel]:
         """Busca clientes por teléfono, nombre o apellido"""
