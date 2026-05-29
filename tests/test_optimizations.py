@@ -10,7 +10,7 @@ from src.shared.exceptions import EntityNotFoundError, ValidationError
 def _create_client(client):
     return client.post(
         "/api/v1/clients/",
-        json={"phone": "0991112233", "firstName": "Ada", "lastName": "Lovelace"},
+        json={"identifier": "0991112233", "firstName": "Ada", "lastName": "Lovelace"},
     ).json()
 
 

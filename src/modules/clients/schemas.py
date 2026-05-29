@@ -6,14 +6,17 @@ from src.shared.schemas import CamelModel
 
 
 class ClientBase(CamelModel):
-    phone: str = Field(
-        ..., min_length=1, max_length=32, description="Client phone number"
+    identifier: str = Field(
+        ..., min_length=1, max_length=32, description="Client external identifier"
     )
     first_name: Optional[str] = Field(
         None, max_length=64, description="Client first name"
     )
     last_name: Optional[str] = Field(
         None, max_length=64, description="Client last name"
+    )
+    source: Optional[str] = Field(
+        None, max_length=64, description="Client source (e.g. instagram, referral)"
     )
 
 
@@ -24,14 +27,17 @@ class ClientCreate(ClientBase):
 class ClientUpdate(CamelModel):
     """Schema for updating an existing client."""
 
-    phone: Optional[str] = Field(
-        None, min_length=1, max_length=32, description="Client phone number"
+    identifier: Optional[str] = Field(
+        None, min_length=1, max_length=32, description="Client external identifier"
     )
     first_name: Optional[str] = Field(
         None, max_length=64, description="Client first name"
     )
     last_name: Optional[str] = Field(
         None, max_length=64, description="Client last name"
+    )
+    source: Optional[str] = Field(
+        None, max_length=64, description="Client source (e.g. instagram, referral)"
     )
 
 

@@ -88,7 +88,7 @@ class ProformaService:
 
         client_data = [
             ["Nombre:", client_name],
-            ["Teléfono:", client.phone or "N/A"],
+            ["Identificador:", client.identifier or "N/A"],
             ["ID Cliente:", str(client.id)],
         ]
 
