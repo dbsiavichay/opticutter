@@ -3,11 +3,11 @@ from typing import Optional
 from sqlalchemy import Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.infrastructure.database.base import Base
+from src.shared.database import Base
 
 
 class BoardModel(Base):
-    """Modelo ORM para tableros/placas"""
+    """Modelo ORM para tableros/placas."""
 
     __tablename__ = "boards"
 

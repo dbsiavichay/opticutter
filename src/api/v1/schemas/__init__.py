@@ -1,6 +1,4 @@
 from .base import CamelModel
-from .board import BoardCreate, BoardResponse, BoardUpdate
-from .client import ClientCreate, ClientResponse, ClientUpdate
 from .cutting import CuttingParameters
 from .optimization import (
     Material,
@@ -14,12 +12,6 @@ from .optimization import (
 
 __all__ = [
     "CamelModel",
-    "BoardCreate",
-    "BoardResponse",
-    "BoardUpdate",
-    "ClientCreate",
-    "ClientResponse",
-    "ClientUpdate",
     "CuttingParameters",
     "Material",
     "OptimizeRequest",

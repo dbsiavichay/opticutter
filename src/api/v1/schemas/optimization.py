@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import Field, NonNegativeInt, PositiveInt
 
 from src.api.v1.schemas.base import CamelModel
-from src.api.v1.schemas.client import ClientResponse
+from src.modules.clients.schemas import ClientResponse
 
 
 class Requirement(CamelModel):

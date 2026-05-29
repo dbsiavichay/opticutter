@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import Field, PositiveInt, confloat
 
-from src.api.v1.schemas.base import CamelModel
+from src.shared.schemas import CamelModel
 
 
 class BoardBase(CamelModel):
@@ -21,11 +21,11 @@ class BoardBase(CamelModel):
 
 
 class BoardCreate(BoardBase):
-    """Schema for creating a new board"""
+    """Schema for creating a new board."""
 
 
 class BoardUpdate(CamelModel):
-    """Schema for updating an existing board"""
+    """Schema for updating an existing board."""
 
     code: Optional[str] = Field(
         None, min_length=1, max_length=32, description="Unique board code"
@@ -46,6 +46,6 @@ class BoardUpdate(CamelModel):
 
 
 class BoardResponse(BoardBase):
-    """Schema for board responses"""
+    """Schema for board responses."""
 
     id: int = Field(..., description="Board ID")

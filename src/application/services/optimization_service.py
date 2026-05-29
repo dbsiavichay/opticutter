@@ -4,14 +4,15 @@ from typing import Dict, List, Tuple
 from sqlalchemy.orm import Session
 
 from src.api.v1.schemas import CuttingParameters, OptimizeRequest, Requirement
-from src.application.services.board_service import BoardService
 from src.core.config import config
 from src.domain.models.cutting import Material, Piece
 from src.domain.models.cutting.enums import SplitRule
 from src.domain.models.cutting.layout import CuttingLayout
 from src.domain.services.guillotine_optimizer import MultiSheetGuillotineOptimizer
-from src.infrastructure.database.models import BoardModel, OptimizationModel
+from src.infrastructure.database.models import OptimizationModel
 from src.infrastructure.database.repositories import OptimizationRepository
+from src.modules.boards.model import BoardModel
+from src.modules.boards.service import BoardService
 
 
 class OptimizationService:
@@ -113,7 +114,7 @@ class OptimizationService:
 
         solutions = []
         for board_id, board_requirements in requirements_by_board.items():
-            board = self.board_service.get_board_by_code(board_id)
+            board = self.board_service.get_by_code(board_id)
             if not board:
                 continue
 

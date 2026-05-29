@@ -5,13 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from src.api.v1.routes import (
-    boards_router,
-    clients_router,
-    cutter_router,
-    health_router,
-    optimize_router,
-)
+from src.api.v1.routes import cutter_router, health_router, optimize_router
+from src.modules.boards.router import router as boards_router
+from src.modules.clients.router import router as clients_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
 
