@@ -21,9 +21,9 @@ Este proyecto ha sido configurado para usar SQLAlchemy con Alembic para las migr
 
 ## Estructura de archivos
 
-- `config/database.py`: Configuración de SQLAlchemy
-- `src/models/`: Directorio donde irán los modelos de base de datos
-- `alembic/`: Configuración y migraciones de Alembic
+- `src/shared/database.py`: Configuración de SQLAlchemy (`Base`, `engine`, `SessionLocal`, `get_db`)
+- `src/modules/<recurso>/model.py`: Modelos de cada módulo (ej. `src/modules/boards/model.py`)
+- `alembic/`: Configuración y migraciones de Alembic (`alembic/env.py` importa `Base` y los modelos)
 - `alembic.ini`: Archivo de configuración de Alembic
 
 ## Uso básico de Alembic
@@ -55,15 +55,15 @@ alembic downgrade -1
 
 ## Creación de modelos
 
-1. Crea tus modelos en `src/models/` (ej: `src/models/user.py`)
-2. Importa el modelo en `src/models/models.py`
-3. Descomenta la línea de importación en `alembic/env.py`:
+1. Crea el modelo en su módulo, heredando de `Base` (ej: `src/modules/clients/model.py`)
+2. Regístralo para autogeneración importándolo en `alembic/env.py` junto a los demás modelos:
    ```python
-   from src.models import models
+   from src.modules.clients.model import ClientModel  # noqa: F401
+   from src.shared.database import Base
    ```
-4. Crea y aplica la migración:
+3. Crea y aplica la migración:
    ```bash
-   alembic revision --autogenerate -m "Add User model"
+   alembic revision --autogenerate -m "Add Client model"
    alembic upgrade head
    ```
 
@@ -74,7 +74,7 @@ Para usar la base de datos en tus endpoints:
 ```python
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from config.database import get_db
+from src.shared.database import get_db
 
 @app.get("/example")
 def get_data(db: Session = Depends(get_db)):
