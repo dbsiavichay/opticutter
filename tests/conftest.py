@@ -6,13 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from main import app
-from src.shared.database import Base, get_db
-
 # Importar los modelos puebla ``Base.metadata`` antes de ``create_all``.
 import src.modules.boards.model  # noqa: F401,E402
 import src.modules.clients.model  # noqa: F401,E402
 import src.modules.optimizations.model  # noqa: F401,E402
+from main import app
+from src.shared.database import Base, get_db
 
 
 @pytest.fixture
