@@ -36,3 +36,13 @@ POST /api/v1/optimize
 Notas:
 - Si Redis no está disponible, el servicio sigue operando pero sin cacheo.
 - El algoritmo es heurístico y prioriza simplicidad/rapidez. Puede mejorarse con OR-Tools en versiones futuras.
+
+## Documentación
+
+- [Arquitectura](docs/ARCHITECTURE.md) — slices verticales, reglas de dependencia y estructura del proyecto.
+- [Base de datos y migraciones](docs/DATABASE_SETUP.md) — configuración de SQLAlchemy/Alembic y creación de modelos.
+- [Endpoint de visualización](docs/VISUALIZATION_ENDPOINT.md) — generación de imágenes del layout de corte.
+
+## Comandos útiles
+
+Ver `make help` para todas las tareas (build, start, dev, tests, lint, migraciones, etc.).

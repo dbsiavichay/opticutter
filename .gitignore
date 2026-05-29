@@ -1,9 +1,40 @@
-*~
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
 *.py[cod]
-.*
+*.egg-info/
+build/
+dist/
+
+# Tests y cobertura
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Variables de entorno y datos locales
+.env
+*.db
+
+# Editores e IDEs
+*~
+*.swp
+.idea/
+.qodo
+
+# Herramientas locales (no compartidas)
+.claude/
+.mcp.json
+
+# Excepciones: estos sí se versionan
 !.gitignore
 !.dockerignore
+!.editorconfig
+!.env.example
 !.github/
-__pycache__/
-.qodo
-*.db

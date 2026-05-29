@@ -1,0 +1,30 @@
+# Control de versiones
+.git
+.gitignore
+
+# Entornos virtuales
+.venv
+venv
+
+# Cachés y artefactos de Python/tests
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+htmlcov
+.coverage
+
+# Datos y secretos locales
+*.db
+.env
+
+# Tests y documentación (no se necesitan en la imagen)
+tests
+docs
+*.md
+
+# Configuración de herramientas locales
+.github
+.claude
+.mcp.json
+.editorconfig
