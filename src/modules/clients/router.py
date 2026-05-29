@@ -22,7 +22,7 @@ def list_clients(
         100, ge=1, le=1000, description="Maximum number of records to return"
     ),
     search: Optional[str] = Query(
-        None, description="Search query for phone, first name, or last name"
+        None, description="Search query for identifier, first name, or last name"
     ),
     svc: ClientService = Depends(client_service),
 ):
@@ -38,12 +38,14 @@ def get_client(client_id: int, svc: ClientService = Depends(client_service)):
     return svc.get_or_404(client_id)
 
 
-@router.get("/phone/{phone}", response_model=ClientResponse)
-def get_client_by_phone(phone: str, svc: ClientService = Depends(client_service)):
-    """Obtiene un cliente por teléfono."""
-    client = svc.get_by_phone(phone)
+@router.get("/identifier/{identifier}", response_model=ClientResponse)
+def get_client_by_identifier(
+    identifier: str, svc: ClientService = Depends(client_service)
+):
+    """Obtiene un cliente por identificador."""
+    client = svc.get_by_identifier(identifier)
     if client is None:
-        raise EntityNotFoundError("Client", phone)
+        raise EntityNotFoundError("Client", identifier)
     return client
 
 
