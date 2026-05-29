@@ -1,9 +1,8 @@
 from typing import List, Tuple
 
-from src.domain.models.cutting import Material, Piece, PlacedPiece, Rectangle
-from src.domain.models.cutting.enums import SplitRule
-from src.domain.models.cutting.layout import CuttingLayout
-from src.domain.models.cutting.parameters import CuttingParameters
+from src.cutting.enums import SplitRule
+from src.cutting.models import CuttingLayout, Material, Piece, PlacedPiece, Rectangle
+from src.cutting.parameters import CuttingParameters
 
 
 class GuillotineOptimizer:
@@ -31,11 +30,13 @@ class GuillotineOptimizer:
 
         if total_horizontal_trim >= material.width:
             raise ValueError(
-                f"Los trims horizontales ({total_horizontal_trim}) exceden el ancho del material ({material.width})"
+                f"Los trims horizontales ({total_horizontal_trim}) exceden "
+                f"el ancho del material ({material.width})"
             )
         if total_vertical_trim >= material.height:
             raise ValueError(
-                f"Los trims verticales ({total_vertical_trim}) exceden la altura del material ({material.height})"
+                f"Los trims verticales ({total_vertical_trim}) exceden "
+                f"la altura del material ({material.height})"
             )
 
         usable_width = material.width - self.left_trim - self.right_trim

@@ -27,7 +27,7 @@ class VisualizationService:
             title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
             label_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
             small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
-        except:
+        except OSError:
             title_font = ImageFont.load_default()
             label_font = ImageFont.load_default()
             small_font = ImageFont.load_default()

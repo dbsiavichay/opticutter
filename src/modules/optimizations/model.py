@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.infrastructure.database.base import Base
+from src.shared.database import Base
 
 
 class OptimizationModel(Base):
@@ -20,6 +20,6 @@ class OptimizationModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
 
-    client: Mapped["ClientModel"] = relationship(
+    client: Mapped["ClientModel"] = relationship(  # noqa: F821
         "ClientModel", back_populates="optimizations"
     )

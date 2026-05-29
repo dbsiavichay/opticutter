@@ -15,8 +15,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from src.application.services.visualization_service import VisualizationService
-from src.infrastructure.database.models import OptimizationModel
+from src.modules.optimizations.model import OptimizationModel
+from src.modules.optimizations.visualization import VisualizationService
 
 
 class ProformaService:
@@ -122,7 +122,7 @@ class ProformaService:
                         f"{req.get('height', 0)} mm",
                         str(req.get("quantity", 1)),
                         req.get("board_id", "N/A"),
-                        req.get("label", "-")[:20],
+                        (req.get("label") or "-")[:20],
                     ]
                 )
 

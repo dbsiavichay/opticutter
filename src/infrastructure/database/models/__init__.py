@@ -1,3 +1,1 @@
-from .optimization import OptimizationModel
-
-__all__ = ["OptimizationModel"]
+# Los modelos ORM viven ahora en ``src.modules.<recurso>.model``.

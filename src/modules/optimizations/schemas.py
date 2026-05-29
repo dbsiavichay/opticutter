@@ -2,8 +2,8 @@ from typing import List, Optional
 
 from pydantic import Field, NonNegativeInt, PositiveInt
 
-from src.api.v1.schemas.base import CamelModel
 from src.modules.clients.schemas import ClientResponse
+from src.shared.schemas import CamelModel
 
 
 class Requirement(CamelModel):
