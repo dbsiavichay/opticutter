@@ -2,203 +2,110 @@
 
 ## Visión General
 
-Este proyecto ha sido reorganizado siguiendo los principios de **Clean Architecture**. La arquitectura se divide en capas bien definidas, cada una con responsabilidades específicas y dependencias claras.
+Cutter es una API FastAPI para optimización de cortes 2D de melamina (algoritmo
+guillotina). El código se organiza en **módulos verticales (vertical slices)**: cada
+recurso reúne en una sola carpeta su router, su servicio, sus schemas y su modelo ORM.
+Esto reduce el boilerplate, mantiene cohesionado todo lo de un recurso y deja el dominio
+del algoritmo aislado y libre de frameworks.
 
-## Estructura de Capas
+El objetivo de diseño es ser **pragmático y fácil de leer**: SOLID donde aporta, sin
+ceremonia. No hay repositorios por entidad ni capas de "casos de uso" vacías; el CRUD se
+centraliza en una base genérica y los errores en un único handler.
+
+## Estructura
 
 ```
 src/
-├── api/                    # Capa de Presentación (API)
-│   └── v1/
-│       ├── routes/         # Controladores/Endpoints
-│       └── schemas/        # Modelos de Request/Response (Pydantic)
-├── application/            # Capa de Aplicación
-│   └── services/           # Casos de Uso / Servicios de Aplicación
-├── domain/                 # Capa de Dominio
-│   ├── models/            # Modelos de Dominio
-│   │   └── cutting/       # Modelos específicos de corte
-│   └── services/          # Servicios de Dominio (Algoritmos)
-├── infrastructure/         # Capa de Infraestructura
-│   └── database/
-│       ├── models/        # Modelos ORM (SQLAlchemy)
-│       └── repositories/  # Repositorios de Datos
-└── core/                  # Capa Central
-    ├── config/            # Configuración de la aplicación
-    ├── exceptions/        # Excepciones personalizadas
-    └── utils/             # Utilidades compartidas
+├── shared/                 # Núcleo transversal reutilizable
+│   ├── config.py           # Config único (lee de entorno; KERF, trims, CORS, DB...)
+│   ├── database.py         # Base declarativa, engine, SessionLocal, get_db
+│   ├── schemas.py          # CamelModel (contrato camelCase del API)
+│   ├── exceptions.py       # AppError + jerarquía con status_code
+│   ├── errors.py           # register_exception_handlers(app)
+│   └── crud.py             # CRUDService[Model, Create, Update] genérico
+├── modules/                # Un slice por recurso
+│   ├── clients/            # {model, schemas, service, router}.py
+│   ├── boards/             # {model, schemas, service, router}.py
+│   ├── optimizations/      # + proforma.py (PDF) y visualization.py (render)
+│   └── system/             # router.py (health + info del servicio)
+├── cutting/                # DOMINIO puro del algoritmo (sin frameworks)
+│   ├── models.py           # Rectangle, Piece, PlacedPiece, Material, CuttingLayout
+│   ├── enums.py            # SplitRule
+│   ├── parameters.py       # CuttingParameters (dataclass)
+│   └── optimizer.py        # GuillotineOptimizer, MultiSheetGuillotineOptimizer
+main.py                     # Crea la app, registra routers + handlers, CORS desde config
+alembic/                    # Migraciones (env.py importa Base y los modelos de cada módulo)
 ```
 
-## Descripción de Capas
+## Reglas de dependencia
 
-### 1. Capa de Presentación (API)
+Simples y sin ciclos:
 
-**Responsabilidad**: Manejar las solicitudes HTTP y las respuestas.
+- **`cutting/`** no importa frameworks ni módulos. Permanece puro y testeable de forma
+  aislada.
+- **`shared/`** no depende de ningún módulo.
+- **`modules/*`** dependen de `shared/` y de `cutting/`.
+- Dependencias entre módulos solo en una dirección: `optimizations` → `clients`/`boards`
+  (p. ej. reutiliza `ClientResponse` y `BoardService`), nunca al revés.
 
-**Componentes**:
-- **Routes** (`src/api/v1/routes/`): Controladores que definen los endpoints de la API
-  - `boards.py`: CRUD de tableros
-  - `clients.py`: CRUD de clientes
-  - `optimize.py`: Endpoint de optimización
-  - `health.py`: Endpoints de salud
-  - `cutter.py`: Información del servicio
+## Bloques clave
 
-- **Schemas** (`src/api/v1/schemas/`): Modelos Pydantic para validación de entrada/salida
-  - `board.py`: Schemas de Board (Create, Update, Response)
-  - `client.py`: Schemas de Client (Create, Update, Response)
-  - `optimization.py`: Schemas de optimización (Request, Response)
-  - `cutting.py`: Schemas de parámetros de corte
+### `shared/crud.py` — base CRUD genérica
 
-**Principios**:
-- No contiene lógica de negocio
-- Solo valida datos y delega a servicios de aplicación
-- Maneja respuestas HTTP y errores
+`CRUDService[ModelT, CreateT, UpdateT]` centraliza `get`/`get_or_404`/`list`/`create`/
+`update`/`delete` y la traducción de `IntegrityError`. Cada servicio solo declara su
+`model` y, opcionalmente, `conflict_messages` (substring de la restricción → mensaje
+legible) más los métodos específicos del recurso (`search`, `get_by_phone`, ...).
 
-### 2. Capa de Aplicación
+`create` mapea `data.model_dump()` directo a las columnas. Esto elimina los repositorios
+por entidad y el CRUD repetido en los servicios.
 
-**Responsabilidad**: Orquestar la lógica de negocio y coordinar operaciones.
+### `shared/exceptions.py` + `shared/errors.py` — errores centralizados
 
-**Componentes**:
-- **Services** (`src/application/services/`): Casos de uso de la aplicación
-  - `board_service.py`: Operaciones CRUD de tableros
-  - `client_service.py`: Operaciones CRUD de clientes
-  - `optimization_service.py`: Orquestación de optimización
+Una jerarquía con `status_code` propio (`EntityNotFoundError`=404, `ConflictError`=409,
+`BusinessRuleError`/`ValidationError`=422; base `AppError`=400). Los servicios y el dominio
+lanzan estas excepciones **sin conocer FastAPI**; un único handler registrado en
+`register_exception_handlers(app)` las traduce a `{"detail": ...}` con el código correcto.
+Así desaparecen los `if not x: raise HTTPException(404)` repetidos en las rutas.
 
-**Principios**:
-- Coordina entre repositorios y servicios de dominio
-- Maneja transacciones
-- Transforma entre modelos de dominio y modelos de API
+### Inyección con `Depends` + rutas finas
 
-### 3. Capa de Dominio
+Cada módulo expone un *provider* (p. ej. `client_service(db = Depends(get_db))`). Las rutas
+quedan visibles y depurables, sin instanciar servicios a mano ni manejar 404 inline:
 
-**Responsabilidad**: Contener la lógica de negocio pura y los modelos de dominio.
-
-**Componentes**:
-- **Models** (`src/domain/models/cutting/`):
-  - `__init__.py`: Modelos básicos (Rectangle, Piece, PlacedPiece, Material)
-  - `layout.py`: CuttingLayout
-  - `parameters.py`: CuttingParameters
-  - `enums.py`: SplitRule
-
-- **Services** (`src/domain/services/`):
-  - `guillotine_optimizer.py`: Algoritmo de optimización guillotina
-
-**Principios**:
-- No depende de otras capas
-- Contiene lógica de negocio pura
-- Modelos de dominio ricos en comportamiento
-
-### 4. Capa de Infraestructura
-
-**Responsabilidad**: Implementar detalles técnicos y acceso a datos.
-
-**Componentes**:
-- **Database** (`src/infrastructure/database/`):
-  - `base.py`: Clase base para ORM
-  - `session.py`: Configuración de sesión de base de datos
-  - **Models** (`models/`):
-    - `board.py`: Modelo ORM de Board
-    - `client.py`: Modelo ORM de Client
-    - `optimization.py`: Modelo ORM de Optimization
-  - **Repositories** (`repositories/`):
-    - `base.py`: Repository genérico
-    - `board_repository.py`: Repository de Board
-    - `client_repository.py`: Repository de Client
-    - `optimization_repository.py`: Repository de Optimization
-
-**Principios**:
-- Implementa interfaces definidas por capas superiores
-- Maneja persistencia de datos
-- Patrón Repository para abstraer acceso a datos
-
-### 5. Capa Central (Core)
-
-**Responsabilidad**: Proporcionar utilidades y configuración compartida.
-
-**Componentes**:
-- **Config** (`src/core/config/`):
-  - `base.py`: Configuración base
-  - `local.py`: Configuración de desarrollo
-  - `staging.py`: Configuración de staging
-  - `production.py`: Configuración de producción
-
-- **Exceptions** (`src/core/exceptions/`):
-  - `base.py`: Excepciones personalizadas
-
-- **Utils** (`src/core/utils/`):
-  - `hash.py`: Utilidades de hash
-
-## Principios de Clean Architecture Aplicados
-
-### 1. Separación de Responsabilidades
-Cada capa tiene una responsabilidad específica y bien definida.
-
-### 2. Dependencia Invertida
-Las capas internas no dependen de las externas. El flujo de dependencias va:
-```
-API → Application → Domain
-     Infrastructure → Domain
+```python
+@router.get("/{client_id}", response_model=ClientResponse)
+def get_client(client_id: int, svc: ClientService = Depends(client_service)):
+    return svc.get_or_404(client_id)
 ```
 
-### 3. Independencia de Frameworks
-La lógica de negocio (Domain) no depende de FastAPI, SQLAlchemy, etc.
+### `cutting/` — dominio del algoritmo
 
-### 4. Testabilidad
-Cada capa puede ser testeada independientemente usando mocks.
+Dataclasses puras (`Piece`, `Material`, `CuttingLayout`, ...) y los optimizadores
+guillotina. El módulo `optimizations` orquesta este dominio y persiste el resultado; si un
+requerimiento referencia un tablero inexistente, lanza `EntityNotFoundError` (404) en lugar
+de descartarlo en silencio.
 
-### 5. Independencia de Base de Datos
-La lógica de negocio no depende del motor de base de datos específico.
+## Contrato del API
 
-## Flujo de Datos
+Todos los schemas extienden `CamelModel`: el contrato externo usa **camelCase** y aceptan
+también snake_case en input; internamente se trabaja en snake_case. Las respuestas se
+construyen directamente desde los modelos ORM (`from_attributes=True`).
 
-### Ejemplo: Optimización de Cortes
+## Base de datos y migraciones
 
-1. **API Layer**: Recibe la solicitud HTTP
-   - `optimize.py` recibe el request
-   - Valida con `OptimizeRequest` schema
+`shared/database.py` define la `Base` declarativa común; todos los modelos ORM la extienden.
+`alembic/env.py` apunta a `src.shared.database.Base` e **importa los modelos de cada módulo**
+(`src.modules.{clients,boards,optimizations}.model`) para poblar `Base.metadata`, de modo
+que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
+`config.DATABASE_URL`.
 
-2. **Application Layer**: Orquesta el proceso
-   - `OptimizationService` coordina la operación
-   - Obtiene tableros usando `BoardService`
-   - Agrupa requerimientos por tablero
+## Ejecución y verificación
 
-3. **Domain Layer**: Ejecuta la lógica de negocio
-   - `GuillotineOptimizer` calcula el layout óptimo
-   - Usa modelos de dominio (`Material`, `Piece`, `CuttingLayout`)
-
-4. **Infrastructure Layer**: Persiste los datos
-   - `OptimizationRepository` guarda el resultado
-   - `BoardRepository` obtiene información de tableros
-
-5. **API Layer**: Retorna la respuesta
-   - Convierte resultado a `OptimizeResponse`
-   - Retorna JSON al cliente
-
-## Ventajas de Esta Arquitectura
-
-1. **Mantenibilidad**: Código organizado y fácil de entender
-2. **Escalabilidad**: Fácil agregar nuevas funcionalidades
-3. **Testabilidad**: Cada capa puede ser testeada independientemente
-4. **Flexibilidad**: Fácil cambiar implementaciones (ej: cambiar de DB)
-5. **Claridad**: Flujo de datos y responsabilidades claras
-
-## Patrones de Diseño Utilizados
-
-- **Repository Pattern**: Para abstraer el acceso a datos
-- **Service Pattern**: Para encapsular lógica de negocio
-- **DTO Pattern**: Schemas de API para transferencia de datos
-- **Dependency Injection**: A través de FastAPI Depends
-
-## Convenciones de Código
-
-- Los modelos ORM se nombran con sufijo `Model` (ej: `BoardModel`)
-- Los schemas de API se nombran con sufijos descriptivos (ej: `BoardCreate`, `BoardResponse`)
-- Los servicios se nombran con sufijo `Service` (ej: `OptimizationService`)
-- Los repositorios se nombran con sufijo `Repository` (ej: `BoardRepository`)
-
-## Próximos Pasos Recomendados
-
-1. Agregar tests unitarios para cada capa
-2. Implementar cache con Redis
-3. Agregar logging estructurado
-4. Implementar manejo de excepciones centralizado
-5. Agregar métricas y monitoreo
+- **App local**: `make run-local` (`ENVIRONMENT=local python main.py`); SQLite por defecto.
+- **Tests**: `make tests-local` (o `.venv/bin/python -m pytest`). La suite cubre el dominio
+  del optimizador, el CRUD genérico vía clients/boards (incluyendo conflictos 409 y 404),
+  el flujo completo de optimización + proforma, y los endpoints del sistema.
+- **Lint**: `make lint-check-local` (autoflake / black / isort / flake8).
+- **Migraciones**: `alembic upgrade head`; `alembic revision --autogenerate` no debe generar
+  diffs cuando los modelos coinciden con el esquema.

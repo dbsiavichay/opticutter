@@ -5,8 +5,14 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from src.core.config import config as app_config
-from src.infrastructure.database.base import Base
+
+# Importar los modelos de cada módulo puebla ``Base.metadata`` para que
+# ``alembic revision --autogenerate`` detecte las tablas.
+from src.modules.boards.model import BoardModel  # noqa: F401
+from src.modules.clients.model import ClientModel  # noqa: F401
+from src.modules.optimizations.model import OptimizationModel  # noqa: F401
+from src.shared.config import config as app_config
+from src.shared.database import Base
 
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), "..")))
 
