@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from src.api.v1.routes import cutter_router, health_router
 from src.modules.boards.router import router as boards_router
 from src.modules.clients.router import router as clients_router
 from src.modules.optimizations.router import router as optimizations_router
+from src.modules.system.router import router as system_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
 
@@ -51,10 +51,9 @@ app.add_middleware(
 register_exception_handlers(app)
 
 # Incluir rutas
-app.include_router(health_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
 app.include_router(boards_router, prefix="/api/v1")
 app.include_router(clients_router, prefix="/api/v1")
-app.include_router(cutter_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")
 
 
