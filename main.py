@@ -12,7 +12,8 @@ from src.api.v1.routes import (
     health_router,
     optimize_router,
 )
-from src.core.config import config
+from src.shared.config import config
+from src.shared.errors import register_exception_handlers
 
 # Configurar logging
 logging.basicConfig(
@@ -30,14 +31,6 @@ async def lifespan(app: FastAPI):
     logger.info("Cerrando aplicación FastAPI")
 
 
-# Configuración de CORS
-origins = [
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:3001",
-]
-
 # Crear aplicación FastAPI
 app = FastAPI(
     title="Cutter API",
@@ -51,11 +44,15 @@ app = FastAPI(
 # Middlewares
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Manejo centralizado de errores de aplicación
+register_exception_handlers(app)
+
 # Incluir rutas
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(boards_router, prefix="/api/v1")

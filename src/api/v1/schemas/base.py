@@ -1,12 +1,8 @@
-from pydantic import BaseModel, ConfigDict
-from pydantic.alias_generators import to_camel
+"""Shim de compatibilidad. ``CamelModel`` vive ahora en ``src.shared.schemas``.
 
+Se eliminará cuando los schemas importen desde ``src.shared`` (Sesión 4).
+"""
 
-class CamelModel(BaseModel):
-    """Base schema: camelCase en el contrato del API, snake_case internamente."""
+from src.shared.schemas import CamelModel
 
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,  # acepta también snake_case en input
-        from_attributes=True,  # permite construir responses desde modelos ORM
-    )
+__all__ = ["CamelModel"]

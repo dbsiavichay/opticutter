@@ -1,20 +1,8 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+"""Shim de compatibilidad. La sesión vive ahora en ``src.shared.database``.
 
-from src.core.config import config
+Se eliminará cuando todo importe desde ``src.shared`` (Sesión 4).
+"""
 
-engine = create_engine(
-    config.DATABASE_URL,
-    connect_args={"check_same_thread": False},
-)
+from src.shared.database import SessionLocal, engine, get_db
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def get_db():
-    """Dependencia para obtener la sesión de base de datos en FastAPI"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+__all__ = ["SessionLocal", "engine", "get_db"]

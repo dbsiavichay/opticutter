@@ -1,21 +1,8 @@
-import logging
+"""Shim de compatibilidad. La config vive ahora en ``src.shared.config``.
 
-from environs import Env
+Se eliminará cuando todos los módulos importen desde ``src.shared`` (Sesión 4).
+"""
 
-env = Env()
-logger = logging.getLogger(__name__)
+from src.shared.config import Config, config
 
-environment = env("ENVIRONMENT", "local")
-
-if environment == "local":
-    from .local import Config
-elif environment == "staging":
-    from .staging import Config
-elif environment == "production":
-    from .production import Config
-else:
-    raise ValueError("Invalid environment specified.")
-
-logger.info(f"Run environment: {environment}")
-
-config = Config()
+__all__ = ["Config", "config"]
