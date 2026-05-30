@@ -121,7 +121,7 @@ class ProformaService:
                         f"{req.get('width', 0)} mm",
                         f"{req.get('height', 0)} mm",
                         str(req.get("quantity", 1)),
-                        req.get("board_id", "N/A"),
+                        req.get("board_code", "N/A"),
                         (req.get("label") or "-")[:20],
                     ]
                 )

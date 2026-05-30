@@ -28,7 +28,7 @@ def _create_board(client, code="MEL18"):
     ).json()
 
 
-def _optimize_payload(client_id, board_code="MEL18"):
+def _optimize_payload(client_id, board_id):
     return {
         "clientId": client_id,
         "requirements": [
@@ -37,7 +37,7 @@ def _optimize_payload(client_id, board_code="MEL18"):
                 "width": 600,
                 "height": 400,
                 "quantity": 2,
-                "boardId": board_code,
+                "boardId": board_id,
                 "label": "Puerta",
                 "allowRotation": True,
             }
@@ -47,10 +47,11 @@ def _optimize_payload(client_id, board_code="MEL18"):
 
 def test_optimize_returns_solution(client):
     created_client = _create_client(client)
-    _create_board(client)
+    created_board = _create_board(client)
 
     resp = client.post(
-        "/api/v1/optimize/", json=_optimize_payload(created_client["id"])
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -64,17 +65,18 @@ def test_optimize_unknown_board_returns_404(client):
     created_client = _create_client(client)
     resp = client.post(
         "/api/v1/optimize/",
-        json=_optimize_payload(created_client["id"], board_code="NOPE"),
+        json=_optimize_payload(created_client["id"], board_id=99999),
     )
     assert resp.status_code == 404
-    assert "Board NOPE" in resp.json()["detail"]
+    assert "Board 99999" in resp.json()["detail"]
 
 
 def test_proforma_pdf_and_base64(client):
     created_client = _create_client(client)
-    _create_board(client)
+    created_board = _create_board(client)
     optimization = client.post(
-        "/api/v1/optimize/", json=_optimize_payload(created_client["id"])
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
     ).json()
     opt_id = optimization["id"]
 
