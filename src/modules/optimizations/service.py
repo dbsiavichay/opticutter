@@ -51,11 +51,13 @@ class OptimizationService:
         )
 
         solutions = []
+        board_codes: Dict[int, str] = {}
         for board_id, board_requirements in requirements_by_board.items():
-            board = self.board_service.get_by_code(board_id)
+            board = self.board_service.get(board_id)
             if board is None:
                 raise EntityNotFoundError("Board", board_id)
 
+            board_codes[board_id] = board.code
             solutions.append(
                 self._optimize(
                     pieces=board_requirements,
@@ -64,12 +66,12 @@ class OptimizationService:
                 )
             )
 
-        return self._save_optimization(request, solutions)
+        return self._save_optimization(request, solutions, board_codes)
 
     def _group_requirements_by_board(
         self, requirements: List[Requirement]
-    ) -> Dict[str, List[Requirement]]:
-        """Agrupa los requerimientos por código de tablero."""
+    ) -> Dict[int, List[Requirement]]:
+        """Agrupa los requerimientos por ID de tablero."""
         requirements_by_board = defaultdict(list)
         for req in requirements:
             requirements_by_board[req.board_id].append(req)
@@ -100,7 +102,7 @@ class OptimizationService:
             try:
                 piece_objects.append(
                     Piece(
-                        id=p.board_id or f"piece_{i+1}",
+                        id=p.label or f"piece_{i+1}",
                         width=p.width,
                         height=p.height,
                         quantity=p.quantity,
@@ -124,6 +126,7 @@ class OptimizationService:
         self,
         request: OptimizeRequest,
         solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
+        board_codes: Dict[int, str],
     ) -> OptimizationModel:
         """Guarda los resultados de la optimización en la base de datos."""
         total_boards_used = sum(len(layouts) for layouts, _ in solutions)
@@ -131,7 +134,10 @@ class OptimizationService:
         optimization = OptimizationModel(
             total_boards_used=total_boards_used,
             total_boards_cost=0,
-            requirements=[r.model_dump() for r in request.requirements],
+            requirements=[
+                {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
+                for r in request.requirements
+            ],
             solution=[
                 layout.to_dict() for layouts, _ in solutions for layout in layouts
             ],

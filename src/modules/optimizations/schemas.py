@@ -11,7 +11,7 @@ class Requirement(CamelModel):
     height: PositiveInt
     width: PositiveInt
     quantity: PositiveInt = Field(default=1, le=10000)
-    board_id: str
+    board_id: int
     label: Optional[str] = None
     allow_rotation: bool = True
 
