@@ -61,6 +61,22 @@ def test_optimize_returns_solution(client):
     assert "placedPieces" in data["solution"][0]
 
 
+def test_optimize_computes_total_boards_cost(client):
+    """El costo total debe ser nº de tableros usados * precio del tablero."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totalBoardsUsed"] >= 1
+    assert data["totalBoardsCost"] == pytest.approx(data["totalBoardsUsed"] * 45.5)
+    assert data["totalBoardsCost"] > 0
+
+
 def test_optimize_unknown_board_returns_404(client):
     created_client = _create_client(client)
     resp = client.post(

@@ -151,6 +151,7 @@ class CuttingLayout:
                 "height": self.material.height,
                 "thickness": self.material.thickness,
                 "area": self.material.area,
+                "cost_per_unit": self.material.cost_per_unit,
             },
             "placed_pieces": [p.to_dict() for p in self.placed_pieces],
             "statistics": {
