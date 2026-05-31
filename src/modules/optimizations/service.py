@@ -130,10 +130,15 @@ class OptimizationService:
     ) -> OptimizationModel:
         """Guarda los resultados de la optimización en la base de datos."""
         total_boards_used = sum(len(layouts) for layouts, _ in solutions)
+        total_boards_cost = sum(
+            layout.material.cost_per_unit
+            for layouts, _ in solutions
+            for layout in layouts
+        )
 
         optimization = OptimizationModel(
             total_boards_used=total_boards_used,
-            total_boards_cost=0,
+            total_boards_cost=total_boards_cost,
             requirements=[
                 {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
                 for r in request.requirements
