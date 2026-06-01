@@ -6,7 +6,7 @@ def _payload(code="MEL18", name="Melamina 18mm"):
         "code": code,
         "name": name,
         "description": "Tablero estándar",
-        "length": 2440,
+        "height": 2440,
         "width": 1220,
         "thickness": 18,
         "grainDirection": "v",

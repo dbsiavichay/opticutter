@@ -11,8 +11,12 @@ class BoardBase(CamelModel):
     description: Optional[str] = Field(
         None, max_length=256, description="Board description"
     )
-    length: PositiveInt = Field(..., description="Board length in mm")
-    width: PositiveInt = Field(..., description="Board width in mm")
+    height: PositiveInt = Field(
+        ..., description="Board height (largo, primera medida) in mm"
+    )
+    width: PositiveInt = Field(
+        ..., description="Board width (ancho, segunda medida) in mm"
+    )
     thickness: PositiveInt = Field(..., description="Board thickness in mm")
     grain_direction: Optional[str] = Field(
         None, description="Grain direction of the board"
@@ -36,8 +40,12 @@ class BoardUpdate(CamelModel):
     description: Optional[str] = Field(
         None, max_length=256, description="Board description"
     )
-    length: Optional[PositiveInt] = Field(None, description="Board length in mm")
-    width: Optional[PositiveInt] = Field(None, description="Board width in mm")
+    height: Optional[PositiveInt] = Field(
+        None, description="Board height (largo, primera medida) in mm"
+    )
+    width: Optional[PositiveInt] = Field(
+        None, description="Board width (ancho, segunda medida) in mm"
+    )
     thickness: Optional[PositiveInt] = Field(None, description="Board thickness in mm")
     grain_direction: Optional[str] = Field(
         None, description="Grain direction of the board"

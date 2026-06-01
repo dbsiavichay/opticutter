@@ -7,13 +7,13 @@ from PIL import Image, ImageDraw, ImageFont
 class VisualizationService:
     @staticmethod
     def generate_cutting_layout_image(
-        solutions: List[dict], width: int = 2400, height: int = 1600
+        layouts: List[dict], width: int = 2400, height: int = 1600
     ) -> io.BytesIO:
         boards_per_row = 2
         board_margin = 60
         info_height = 100
 
-        num_boards = len(solutions)
+        num_boards = len(layouts)
         num_rows = (num_boards + boards_per_row - 1) // boards_per_row
 
         total_height = (
@@ -41,11 +41,11 @@ class VisualizationService:
 
         y_offset = info_height
 
-        for idx, solution in enumerate(solutions):
+        for idx, layout in enumerate(layouts):
             row = idx // boards_per_row
             col = idx % boards_per_row
 
-            material = solution.get("material", {})
+            material = layout.get("material", {})
             board_width = material.get("width", 1220)
             board_height = material.get("height", 2440)
 
@@ -82,7 +82,7 @@ class VisualizationService:
                 (board_x + 10, board_y - 25), board_label, fill="black", font=label_font
             )
 
-            efficiency = solution.get("statistics", {}).get("efficiency", 0)
+            efficiency = layout.get("statistics", {}).get("efficiency", 0)
             efficiency_text = f"Eficiencia: {efficiency:.1f}%"
             draw.text(
                 (board_x + 200, board_y - 25),
@@ -91,7 +91,7 @@ class VisualizationService:
                 font=small_font,
             )
 
-            placed_pieces = solution.get("placed_pieces", [])
+            placed_pieces = layout.get("placed_pieces", [])
             for piece in placed_pieces:
                 px = board_x + int(piece["x"] * scale)
                 py = board_y + int(piece["y"] * scale)
@@ -105,7 +105,7 @@ class VisualizationService:
                     width=2,
                 )
 
-                piece_label = f"{int(piece['width'])}x{int(piece['height'])}"
+                piece_label = f"{int(piece['height'])}x{int(piece['width'])}"
                 text_bbox = draw.textbbox((0, 0), piece_label, font=small_font)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
@@ -117,7 +117,7 @@ class VisualizationService:
                         (text_x, text_y), piece_label, fill="black", font=small_font
                     )
 
-            remainders = solution.get("remainders", [])
+            remainders = layout.get("remainders", [])
             for remainder in remainders:
                 rx = board_x + int(remainder["x"] * scale)
                 ry = board_y + int(remainder["y"] * scale)

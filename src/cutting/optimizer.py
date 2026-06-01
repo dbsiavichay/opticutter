@@ -413,7 +413,7 @@ class MultiSheetGuillotineOptimizer:
             sheet_count += 1
 
             material = Material(
-                id=f"{self.material_template.id}_{sheet_count}",
+                id=self.material_template.id,
                 width=self.material_template.width,
                 height=self.material_template.height,
                 thickness=self.material_template.thickness,
@@ -438,6 +438,7 @@ class MultiSheetGuillotineOptimizer:
                     material=material,
                     placed_pieces=placed,
                     remainders=optimizer.remainders,
+                    sheet_number=sheet_count,
                 )
                 self.layouts.append(layout)
                 remaining_pieces = unplaced

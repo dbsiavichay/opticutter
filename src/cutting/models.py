@@ -124,6 +124,7 @@ class CuttingLayout:
     material: Material
     placed_pieces: List[PlacedPiece] = field(default_factory=list)
     remainders: List[Rectangle] = field(default_factory=list)
+    sheet_number: int = 1
 
     @property
     def used_area(self) -> float:
@@ -146,7 +147,8 @@ class CuttingLayout:
         """Convierte a diccionario para serialización"""
         return {
             "material": {
-                "id": self.material.id,
+                "board_id": self.material.id,
+                "sheet_number": self.sheet_number,
                 "width": self.material.width,
                 "height": self.material.height,
                 "thickness": self.material.thickness,

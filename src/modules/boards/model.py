@@ -15,7 +15,7 @@ class BoardModel(Base):
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(128), unique=True)
     description: Mapped[Optional[str]] = mapped_column(String(256))
-    length: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)
     thickness: Mapped[int] = mapped_column(Integer)
     grain_direction: Mapped[Optional[str]] = mapped_column(String(4))

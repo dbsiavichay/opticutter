@@ -15,7 +15,7 @@ class OptimizationModel(Base):
     total_boards_used: Mapped[int] = mapped_column(Integer)
     total_boards_cost: Mapped[float] = mapped_column(Float)
     requirements: Mapped[dict] = mapped_column(JSON)
-    solution: Mapped[dict] = mapped_column(JSON)
+    layouts: Mapped[dict] = mapped_column(JSON)
     materials_summary: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

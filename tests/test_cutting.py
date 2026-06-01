@@ -72,6 +72,7 @@ def test_guillotine_places_pieces_and_reports_efficiency():
         material=material,
         placed_pieces=placed,
         remainders=optimizer.remainders,
+        sheet_number=1,
     )
     assert layout.used_area == 600 * 400
     assert layout.waste_area == material.area - layout.used_area
@@ -79,7 +80,8 @@ def test_guillotine_places_pieces_and_reports_efficiency():
 
     as_dict = layout.to_dict()
     assert as_dict["statistics"]["pieces_count"] == 1
-    assert as_dict["material"]["id"] == "m1"
+    assert as_dict["material"]["board_id"] == "m1"
+    assert as_dict["material"]["sheet_number"] == 1
 
 
 def test_guillotine_empty_pieces_returns_empty():
@@ -117,8 +119,11 @@ def test_multisheet_uses_several_sheets_when_needed():
     assert len(layouts) >= 2
     assert remaining == []
     assert all(isinstance(layout, CuttingLayout) for layout in layouts)
-    # El id del material incluye el número de hoja.
-    assert layouts[0].material.id == "board_1"
+    # El material conserva el board_id original; el número de hoja vive en el layout.
+    assert layouts[0].material.id == "board"
+    assert [layout.sheet_number for layout in layouts] == list(
+        range(1, len(layouts) + 1)
+    )
 
 
 def test_multisheet_empty_returns_empty():

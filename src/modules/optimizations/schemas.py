@@ -10,8 +10,8 @@ class MaterialSummary(CamelModel):
     board_id: int
     board_code: str
     board_name: str
-    width: float
     height: float
+    width: float
     thickness: float
     count: int
     total_area_m2: float
@@ -21,13 +21,25 @@ class MaterialSummary(CamelModel):
 
 
 class Requirement(CamelModel):
-    index: NonNegativeInt
-    height: PositiveInt
-    width: PositiveInt
+    priority: NonNegativeInt = Field(
+        ..., description="Cutting priority; higher values are placed first"
+    )
+    height: PositiveInt = Field(
+        ..., description="Piece height (alto, primera medida) in mm"
+    )
+    width: PositiveInt = Field(
+        ..., description="Piece width (ancho, segunda medida) in mm"
+    )
     quantity: PositiveInt = Field(default=1, le=10000)
-    board_id: int
-    label: Optional[str] = None
-    allow_rotation: bool = True
+    board_id: int = Field(..., description="Target board ID for this piece")
+    label: Optional[str] = Field(default=None, description="Human-friendly piece label")
+    can_rotate: bool = Field(
+        default=True,
+        description=(
+            "If true, the optimizer may swap height↔width (rotate 90°) to improve "
+            "yield. Set false for pieces with a fixed orientation (grain/pattern)."
+        ),
+    )
 
 
 class OptimizeRequest(CamelModel):
@@ -38,9 +50,12 @@ class OptimizeRequest(CamelModel):
 
 
 class Material(CamelModel):
-    id: int = Field(..., description="Unique identifier for the material")
-    width: float = Field(..., description="Width of the material")
-    height: float = Field(..., description="Height of the material")
+    board_id: int = Field(..., description="Board ID this sheet was cut from")
+    sheet_number: int = Field(
+        ..., description="Sheet number within the board (1-based)"
+    )
+    height: float = Field(..., description="Height of the material (alto)")
+    width: float = Field(..., description="Width of the material (ancho)")
     thickness: float = Field(..., description="Thickness of the material")
     area: float = Field(..., description="Area of the material")
 
@@ -49,25 +64,45 @@ class PlacedPiece(CamelModel):
     piece_id: str = Field(..., description="Unique identifier for the placed piece")
     x: float = Field(..., description="X position of the placed piece")
     y: float = Field(..., description="Y position of the placed piece")
-    width: float = Field(..., description="Width of the placed piece")
-    height: float = Field(..., description="Height of the placed piece")
+    height: float = Field(
+        ..., description="Height of the placed piece (alto, after rotation)"
+    )
+    width: float = Field(
+        ..., description="Width of the placed piece (ancho, after rotation)"
+    )
     rotated: bool = Field(..., description="Indicates if the piece is rotated")
+    original_height: float = Field(
+        ..., description="Piece height (alto) before rotation"
+    )
+    original_width: float = Field(
+        ..., description="Piece width (ancho) before rotation"
+    )
 
 
 class Remainder(CamelModel):
     x: float = Field(..., description="X position of the remainder")
     y: float = Field(..., description="Y position of the remainder")
-    width: float = Field(..., description="Width of the remainder")
-    height: float = Field(..., description="Height of the remainder")
+    height: float = Field(..., description="Height of the remainder (alto)")
+    width: float = Field(..., description="Width of the remainder (ancho)")
 
 
-class Solution(CamelModel):
-    material: Material = Field(..., description="Material used in the solution")
+class LayoutStatistics(CamelModel):
+    used_area: float = Field(..., description="Total area occupied by placed pieces")
+    waste_area: float = Field(..., description="Unused area of the sheet")
+    efficiency: float = Field(..., description="Material usage efficiency (percentage)")
+    pieces_count: int = Field(..., description="Number of pieces placed on the sheet")
+
+
+class Layout(CamelModel):
+    material: Material = Field(..., description="Material/sheet used in this layout")
     placed_pieces: List[PlacedPiece] = Field(
-        ..., description="List of placed pieces in the solution"
+        ..., description="Pieces placed on this sheet"
+    )
+    statistics: LayoutStatistics = Field(
+        ..., description="Usage metrics for this sheet"
     )
     remainders: List[Remainder] = Field(
-        ..., description="List of remainders in the solution"
+        ..., description="Leftover rectangles on this sheet"
     )
 
 
@@ -76,7 +111,9 @@ class OptimizeResponse(CamelModel):
     client: ClientResponse = Field(..., description="Client information")
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")
-    solution: List[Solution] = Field(..., description="Optimization solution details")
+    layouts: List[Layout] = Field(
+        ..., description="Per-sheet cutting layouts of the optimization"
+    )
     materials_summary: Optional[List[MaterialSummary]] = Field(
         default=None, description="Aggregated materials grouped by board type"
     )
