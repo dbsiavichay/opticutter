@@ -6,6 +6,20 @@ from src.modules.clients.schemas import ClientResponse
 from src.shared.schemas import CamelModel
 
 
+class MaterialSummary(CamelModel):
+    board_id: int
+    board_code: str
+    board_name: str
+    width: float
+    height: float
+    thickness: float
+    count: int
+    total_area_m2: float
+    avg_efficiency: float
+    cost_per_unit: float
+    total_cost: float
+
+
 class Requirement(CamelModel):
     index: NonNegativeInt
     height: PositiveInt
@@ -63,3 +77,6 @@ class OptimizeResponse(CamelModel):
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")
     solution: List[Solution] = Field(..., description="Optimization solution details")
+    materials_summary: Optional[List[MaterialSummary]] = Field(
+        default=None, description="Aggregated materials grouped by board type"
+    )
