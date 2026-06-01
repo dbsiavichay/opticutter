@@ -20,7 +20,7 @@ def _create_board(client, code="MEL18"):
         json={
             "code": code,
             "name": f"Melamina {code}",
-            "length": 2440,
+            "height": 2440,
             "width": 1220,
             "thickness": 18,
             "price": 45.5,
@@ -33,19 +33,19 @@ def _optimize_payload(client_id, board_id):
         "clientId": client_id,
         "requirements": [
             {
-                "index": 0,
-                "width": 600,
+                "priority": 0,
                 "height": 400,
+                "width": 600,
                 "quantity": 2,
                 "boardId": board_id,
                 "label": "Puerta",
-                "allowRotation": True,
+                "canRotate": True,
             }
         ],
     }
 
 
-def test_optimize_returns_solution(client):
+def test_optimize_returns_layouts(client):
     created_client = _create_client(client)
     created_board = _create_board(client)
 
@@ -57,8 +57,13 @@ def test_optimize_returns_solution(client):
     data = resp.json()
     assert data["client"]["id"] == created_client["id"]
     assert data["totalBoardsUsed"] >= 1
-    assert len(data["solution"]) >= 1
-    assert "placedPieces" in data["solution"][0]
+    assert len(data["layouts"]) >= 1
+    layout = data["layouts"][0]
+    assert "placedPieces" in layout
+    assert layout["material"]["boardId"] == created_board["id"]
+    assert layout["material"]["sheetNumber"] == 1
+    assert "efficiency" in layout["statistics"]
+    assert layout["placedPieces"][0]["originalWidth"] == 600
 
 
 def test_optimize_computes_total_boards_cost(client):

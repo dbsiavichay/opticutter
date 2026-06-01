@@ -50,7 +50,7 @@ class OptimizationService:
             right_trim=config.RIGHT_TRIM,
         )
 
-        solutions = []
+        board_results = []
         board_codes: Dict[int, str] = {}
         board_names: Dict[int, str] = {}
         for board_id, board_requirements in requirements_by_board.items():
@@ -60,7 +60,7 @@ class OptimizationService:
 
             board_codes[board_id] = board.code
             board_names[board_id] = board.name
-            solutions.append(
+            board_results.append(
                 self._optimize(
                     pieces=board_requirements,
                     board=board,
@@ -68,7 +68,7 @@ class OptimizationService:
                 )
             )
 
-        return self._save_optimization(request, solutions, board_codes, board_names)
+        return self._save_optimization(request, board_results, board_codes, board_names)
 
     def _group_requirements_by_board(
         self, requirements: List[Requirement]
@@ -94,7 +94,7 @@ class OptimizationService:
         material = Material(
             id=board.id,
             width=board.width,
-            height=board.length,
+            height=board.height,
             thickness=board.thickness,
             cost_per_unit=board.price,
         )
@@ -108,8 +108,8 @@ class OptimizationService:
                         width=p.width,
                         height=p.height,
                         quantity=p.quantity,
-                        can_rotate=p.allow_rotation,
-                        priority=p.index,
+                        can_rotate=p.can_rotate,
+                        priority=p.priority,
                     )
                 )
             except ValueError as e:
@@ -126,16 +126,15 @@ class OptimizationService:
 
     def _build_materials_summary(
         self,
-        solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
+        board_results: List[Tuple[List[CuttingLayout], List[Piece]]],
         board_codes: Dict[int, str],
         board_names: Dict[int, str],
     ) -> List[dict]:
         """Agrega los layouts por tipo de tablero con métricas y costos."""
         summary: Dict[int, dict] = {}
-        for layouts, _ in solutions:
+        for layouts, _ in board_results:
             for layout in layouts:
-                # MultiSheetGuillotineOptimizer genera IDs con formato "{board_id}_{sheet_n}"
-                bid = int(str(layout.material.id).split("_")[0])
+                bid = layout.material.id
                 if bid not in summary:
                     summary[bid] = {
                         "board_id": bid,
@@ -168,15 +167,15 @@ class OptimizationService:
     def _save_optimization(
         self,
         request: OptimizeRequest,
-        solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
+        board_results: List[Tuple[List[CuttingLayout], List[Piece]]],
         board_codes: Dict[int, str],
         board_names: Dict[int, str],
     ) -> OptimizationModel:
         """Guarda los resultados de la optimización en la base de datos."""
-        total_boards_used = sum(len(layouts) for layouts, _ in solutions)
+        total_boards_used = sum(len(layouts) for layouts, _ in board_results)
         total_boards_cost = sum(
             layout.material.cost_per_unit
-            for layouts, _ in solutions
+            for layouts, _ in board_results
             for layout in layouts
         )
 
@@ -187,11 +186,11 @@ class OptimizationService:
                 {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
                 for r in request.requirements
             ],
-            solution=[
-                layout.to_dict() for layouts, _ in solutions for layout in layouts
+            layouts=[
+                layout.to_dict() for layouts, _ in board_results for layout in layouts
             ],
             materials_summary=self._build_materials_summary(
-                solutions, board_codes, board_names
+                board_results, board_codes, board_names
             ),
             client_id=request.client_id,
         )

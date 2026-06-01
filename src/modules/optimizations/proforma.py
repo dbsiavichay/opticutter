@@ -112,14 +112,14 @@ class ProformaService:
 
         requirements = optimization.requirements
         if isinstance(requirements, list):
-            req_data = [["#", "Ancho", "Alto", "Cantidad", "Tablero", "Etiqueta"]]
+            req_data = [["#", "Alto", "Ancho", "Cantidad", "Tablero", "Etiqueta"]]
 
             for idx, req in enumerate(requirements, 1):
                 req_data.append(
                     [
                         str(idx),
-                        f"{req.get('width', 0)} mm",
                         f"{req.get('height', 0)} mm",
+                        f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
                         req.get("board_code", "N/A"),
                         (req.get("label") or "-")[:20],
@@ -165,7 +165,7 @@ class ProformaService:
 
         story.append(Paragraph("RESUMEN DE MATERIALES", heading_style))
 
-        solutions = optimization.solution
+        layouts = optimization.layouts
         materials_summary = optimization.materials_summary
 
         mat_data = [
@@ -187,7 +187,7 @@ class ProformaService:
                     [
                         entry.get("board_code", "N/A"),
                         entry.get("board_name", "N/A")[:22],
-                        f"{entry.get('width', 0):.0f}×{entry.get('height', 0):.0f} mm",
+                        f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         str(entry.get("count", 0)),
                         f"{entry.get('total_area_m2', 0):.2f} m²",
                         f"{entry.get('avg_efficiency', 0):.1f}%",
@@ -262,9 +262,9 @@ class ProformaService:
         story.append(Paragraph("DISPOSICIÓN DE CORTES", heading_style))
         story.append(Spacer(1, 0.1 * inch))
 
-        if isinstance(solutions, list) and len(solutions) > 0:
+        if isinstance(layouts, list) and len(layouts) > 0:
             img_buffer = VisualizationService.generate_cutting_layout_image(
-                solutions, width=2400, height=1600
+                layouts, width=2400, height=1600
             )
             img = Image(img_buffer, width=6.5 * inch, height=4.3 * inch)
             story.append(img)
