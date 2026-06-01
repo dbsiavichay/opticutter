@@ -52,12 +52,14 @@ class OptimizationService:
 
         solutions = []
         board_codes: Dict[int, str] = {}
+        board_names: Dict[int, str] = {}
         for board_id, board_requirements in requirements_by_board.items():
             board = self.board_service.get(board_id)
             if board is None:
                 raise EntityNotFoundError("Board", board_id)
 
             board_codes[board_id] = board.code
+            board_names[board_id] = board.name
             solutions.append(
                 self._optimize(
                     pieces=board_requirements,
@@ -66,7 +68,7 @@ class OptimizationService:
                 )
             )
 
-        return self._save_optimization(request, solutions, board_codes)
+        return self._save_optimization(request, solutions, board_codes, board_names)
 
     def _group_requirements_by_board(
         self, requirements: List[Requirement]
@@ -122,11 +124,53 @@ class OptimizationService:
         )
         return optimizer.optimize(piece_objects)
 
+    def _build_materials_summary(
+        self,
+        solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
+        board_codes: Dict[int, str],
+        board_names: Dict[int, str],
+    ) -> List[dict]:
+        """Agrega los layouts por tipo de tablero con métricas y costos."""
+        summary: Dict[int, dict] = {}
+        for layouts, _ in solutions:
+            for layout in layouts:
+                # MultiSheetGuillotineOptimizer genera IDs con formato "{board_id}_{sheet_n}"
+                bid = int(str(layout.material.id).split("_")[0])
+                if bid not in summary:
+                    summary[bid] = {
+                        "board_id": bid,
+                        "board_code": board_codes.get(bid, "N/A"),
+                        "board_name": board_names.get(bid, "N/A"),
+                        "width": layout.material.width,
+                        "height": layout.material.height,
+                        "thickness": layout.material.thickness,
+                        "count": 0,
+                        "total_area_m2": 0.0,
+                        "_efficiencies": [],
+                        "cost_per_unit": layout.material.cost_per_unit,
+                        "total_cost": 0.0,
+                    }
+                entry = summary[bid]
+                entry["count"] += 1
+                entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
+                entry["_efficiencies"].append(layout.efficiency * 100)
+                entry["total_cost"] += layout.material.cost_per_unit
+
+        result = []
+        for entry in summary.values():
+            effs = entry.pop("_efficiencies")
+            entry["avg_efficiency"] = round(sum(effs) / len(effs), 2) if effs else 0.0
+            entry["total_area_m2"] = round(entry["total_area_m2"], 4)
+            entry["total_cost"] = round(entry["total_cost"], 2)
+            result.append(entry)
+        return result
+
     def _save_optimization(
         self,
         request: OptimizeRequest,
         solutions: List[Tuple[List[CuttingLayout], List[Piece]]],
         board_codes: Dict[int, str],
+        board_names: Dict[int, str],
     ) -> OptimizationModel:
         """Guarda los resultados de la optimización en la base de datos."""
         total_boards_used = sum(len(layouts) for layouts, _ in solutions)
@@ -146,6 +190,9 @@ class OptimizationService:
             solution=[
                 layout.to_dict() for layouts, _ in solutions for layout in layouts
             ],
+            materials_summary=self._build_materials_summary(
+                solutions, board_codes, board_names
+            ),
             client_id=request.client_id,
         )
         self.db.add(optimization)

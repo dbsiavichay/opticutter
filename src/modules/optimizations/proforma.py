@@ -166,55 +166,50 @@ class ProformaService:
         story.append(Paragraph("RESUMEN DE MATERIALES", heading_style))
 
         solutions = optimization.solution
-        materials_summary = {}
-
-        if isinstance(solutions, list):
-            for sol in solutions:
-                material = sol.get("material", {})
-                mat_id = material.get("id", "N/A")
-
-                if mat_id not in materials_summary:
-                    materials_summary[mat_id] = {
-                        "id": mat_id,
-                        "width": material.get("width", 0),
-                        "height": material.get("height", 0),
-                        "thickness": material.get("thickness", 0),
-                        "count": 0,
-                        "area": material.get("area", 0),
-                        "efficiency": [],
-                    }
-
-                materials_summary[mat_id]["count"] += 1
-                stats = sol.get("statistics", {})
-                materials_summary[mat_id]["efficiency"].append(
-                    stats.get("efficiency", 0)
-                )
+        materials_summary = optimization.materials_summary
 
         mat_data = [
-            ["Tablero", "Dimensiones", "Cantidad", "Área Total", "Eficiencia Prom."]
+            [
+                "Código",
+                "Nombre",
+                "Dimensiones",
+                "Cant.",
+                "Área Total",
+                "Efic. Prom.",
+                "P. Unit.",
+                "Subtotal",
+            ]
         ]
 
-        for mat_id, mat_info in materials_summary.items():
-            avg_efficiency = (
-                sum(mat_info["efficiency"]) / len(mat_info["efficiency"])
-                if mat_info["efficiency"]
-                else 0
-            )
-            total_area = mat_info["area"] * mat_info["count"] / 1_000_000
-
-            mat_data.append(
-                [
-                    str(mat_id),
-                    f"{mat_info['width']:.0f} x {mat_info['height']:.0f} mm",
-                    str(mat_info["count"]),
-                    f"{total_area:.2f} m²",
-                    f"{avg_efficiency:.1f}%",
-                ]
-            )
+        if isinstance(materials_summary, list) and materials_summary:
+            for entry in materials_summary:
+                mat_data.append(
+                    [
+                        entry.get("board_code", "N/A"),
+                        entry.get("board_name", "N/A")[:22],
+                        f"{entry.get('width', 0):.0f}×{entry.get('height', 0):.0f} mm",
+                        str(entry.get("count", 0)),
+                        f"{entry.get('total_area_m2', 0):.2f} m²",
+                        f"{entry.get('avg_efficiency', 0):.1f}%",
+                        f"${entry.get('cost_per_unit', 0):.2f}",
+                        f"${entry.get('total_cost', 0):.2f}",
+                    ]
+                )
+        else:
+            mat_data.append(["Sin datos de materiales", "", "", "", "", "", "", ""])
 
         mat_table = Table(
             mat_data,
-            colWidths=[1.2 * inch, 1.5 * inch, 1 * inch, 1.2 * inch, 1.1 * inch],
+            colWidths=[
+                0.8 * inch,
+                1.4 * inch,
+                1.2 * inch,
+                0.5 * inch,
+                0.8 * inch,
+                0.7 * inch,
+                0.7 * inch,
+                0.8 * inch,
+            ],
         )
         mat_table.setStyle(
             TableStyle(
@@ -223,11 +218,11 @@ class ProformaService:
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
                     ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 10),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
                     ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 1), (-1, -1), 9),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 1), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
                     ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                     (
                         "ROWBACKGROUNDS",

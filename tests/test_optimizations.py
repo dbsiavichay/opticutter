@@ -123,3 +123,25 @@ def test_service_rejects_empty_requirements(db_session):
 def test_service_get_or_404(db_session):
     with pytest.raises(EntityNotFoundError):
         OptimizationService(db_session).get_or_404(123456)
+
+
+def test_optimize_includes_materials_summary(client):
+    """materials_summary agrupa por tipo de tablero con código, cantidad y costo."""
+    created_client = _create_client(client)
+    created_board = _create_board(client, code="MEL18")
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    summary = data.get("materialsSummary")
+    assert summary is not None and len(summary) == 1
+
+    entry = summary[0]
+    assert entry["boardCode"] == "MEL18"
+    assert entry["boardName"] == "Melamina MEL18"
+    assert entry["count"] == data["totalBoardsUsed"]
+    assert entry["totalCost"] == pytest.approx(data["totalBoardsCost"])
