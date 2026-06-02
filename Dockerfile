@@ -8,8 +8,10 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Toolchain de compilación solo en el builder (no llega a la imagen final).
+# fonts-dejavu-core: fuente TrueType para el diagrama de cortes (Pillow). El stage
+# dev hereda de builder, así que aquí queda disponible para desarrollo/tests.
 RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends build-essential && \
+    apt-get install -y --no-install-recommends build-essential fonts-dejavu-core && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -48,6 +50,14 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /src
+
+# fonts-dejavu-core: fuente TrueType para el diagrama de cortes (Pillow). La imagen
+# slim no trae fuentes; sin esto Pillow cae a su bitmap por defecto y se rompen las
+# tildes y el símbolo ×.
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends fonts-dejavu-core && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copia el virtualenv ya construido (solo deps de producción, sin toolchain).
 COPY --from=builder /opt/venv /opt/venv

@@ -1,0 +1,93 @@
+"""Tests de la agrupación de layouts por patrón de corte (lógica pura)."""
+
+from src.modules.optimizations.patterns import (
+    base_label,
+    group_layouts,
+    layout_signature,
+)
+
+
+def _layout(sheet_number, pieces, board_id=18):
+    """Construye un layout mínimo con la forma de ``CuttingLayout.to_dict``."""
+    return {
+        "material": {"board_id": board_id, "sheet_number": sheet_number},
+        "placed_pieces": [
+            {
+                "piece_id": pid,
+                "x": x,
+                "y": y,
+                "width": w,
+                "height": h,
+                "rotated": rot,
+            }
+            for (pid, x, y, w, h, rot) in pieces
+        ],
+        "remainders": [],
+    }
+
+
+def test_base_label_strips_single_instance_suffix():
+    assert base_label("piece_1_5") == "piece_1"
+    assert base_label("Puerta_2") == "Puerta"
+    assert base_label("Puerta") == "Puerta"
+    assert base_label("") == ""
+
+
+def test_signature_ignores_instance_suffix_and_sheet_number():
+    a = _layout(1, [("Puerta_1", 0, 0, 670, 1700, False)])
+    b = _layout(7, [("Puerta_9", 0, 0, 670, 1700, False)])
+    assert layout_signature(a) == layout_signature(b)
+
+
+def test_signature_ignores_piece_order():
+    a = _layout(1, [("A", 0, 0, 100, 200, False), ("B", 300, 0, 100, 200, False)])
+    b = _layout(1, [("B", 300, 0, 100, 200, False), ("A", 0, 0, 100, 200, False)])
+    assert layout_signature(a) == layout_signature(b)
+
+
+def test_group_collapses_identical_patterns():
+    layouts = [
+        _layout(1, [("piece_1_1", 0, 0, 670, 1700, False)]),
+        _layout(2, [("piece_1_2", 0, 0, 670, 1700, False)]),
+        _layout(3, [("piece_1_3", 0, 0, 670, 1700, False)]),
+    ]
+    groups = group_layouts(layouts)
+    assert len(groups) == 1
+    group = groups[0]
+    assert group["pattern_id"] == 1
+    assert group["count"] == 3
+    assert group["sheet_numbers"] == [1, 2, 3]
+    assert group["board_id"] == 18
+    assert group["layout"] is layouts[0]
+
+
+def test_group_keeps_different_labels_separate():
+    layouts = [
+        _layout(1, [("Puerta", 0, 0, 670, 1700, False)]),
+        _layout(2, [("Cajon", 0, 0, 670, 1700, False)]),
+    ]
+    groups = group_layouts(layouts)
+    assert len(groups) == 2
+    assert [g["pattern_id"] for g in groups] == [1, 2]
+    assert all(g["count"] == 1 for g in groups)
+
+
+def test_group_keeps_different_geometry_separate():
+    layouts = [
+        _layout(1, [("A", 0, 0, 670, 1700, False)]),
+        _layout(2, [("A", 0, 0, 800, 1700, False)]),
+    ]
+    groups = group_layouts(layouts)
+    assert len(groups) == 2
+
+
+def test_group_preserves_first_appearance_order():
+    layouts = [
+        _layout(1, [("A", 0, 0, 100, 100, False)]),
+        _layout(2, [("B", 0, 0, 200, 200, False)]),
+        _layout(3, [("A", 0, 0, 100, 100, False)]),
+    ]
+    groups = group_layouts(layouts)
+    assert len(groups) == 2
+    assert groups[0]["count"] == 2 and groups[0]["sheet_numbers"] == [1, 3]
+    assert groups[1]["count"] == 1 and groups[1]["sheet_numbers"] == [2]
