@@ -70,6 +70,13 @@ class Config:
 
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
+    # Datos de la empresa para la proforma PDF
+    COMPANY_NAME = env("COMPANY_NAME", "EMPRESA MADERABLE S.A.")
+    COMPANY_RUC = env("COMPANY_RUC", "1234567890001")
+    COMPANY_ADDRESS = env("COMPANY_ADDRESS", "Av. Principal 123")
+    COMPANY_PHONE = env("COMPANY_PHONE", "(02) 234-5678")
+    COMPANY_EMAIL = env("COMPANY_EMAIL", "info@maderable.com")
+
     def get_cors_origins(self) -> List[str]:
         """Lista de orígenes permitidos para CORS."""
         return self.CORS_ORIGINS

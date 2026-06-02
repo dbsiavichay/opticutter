@@ -1,17 +1,85 @@
 import io
-from typing import List
+from typing import List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
+
+# Rutas de fuentes a probar en orden (macOS primero, luego Linux/Docker).
+_FONT_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/Library/Fonts/Arial.ttf",
+]
+
+# Paleta del diagrama (alineada con la marca de la proforma).
+COLOR_TITLE = "#1976D2"
+COLOR_BOARD_OUTLINE = "#37474F"
+COLOR_PIECE_FILL = "#E3F2FD"
+COLOR_PIECE_OUTLINE = "#1976D2"
+COLOR_DIM = "#0D47A1"
+COLOR_LABEL = "#212121"
+COLOR_EFFICIENCY = "#2E7D32"
+COLOR_WASTE_FILL = "#FFEBEE"
+COLOR_WASTE_OUTLINE = "#D32F2F"
+
+
+def _load_font(size: int) -> ImageFont.FreeTypeFont:
+    """Carga una fuente TrueType escalable; cae al bitmap por defecto si no hay."""
+    for path in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _text_size(text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
+    """Mide el ancho y alto de un texto con la fuente dada."""
+    bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def _text_image(
+    text: str, font: ImageFont.ImageFont, fill: str, pad: int = 2
+) -> Image.Image:
+    """Renderiza el texto en una imagen RGBA transparente (para pegar/rotar)."""
+    bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    img = Image.new("RGBA", (tw + 2 * pad, th + 2 * pad), (0, 0, 0, 0))
+    ImageDraw.Draw(img).text((pad - bbox[0], pad - bbox[1]), text, font=font, fill=fill)
+    return img
+
+
+def _fit_label(
+    text: str, font: ImageFont.ImageFont, max_width: int, max_height: int
+) -> Optional[str]:
+    """Devuelve la etiqueta (truncada con … si hace falta) o None si no entra."""
+    tw, th = _text_size(text, font)
+    if th > max_height or max_width < 24:
+        return None
+    if tw <= max_width:
+        return text
+    truncated = text
+    while truncated and _text_size(truncated + "…", font)[0] > max_width:
+        truncated = truncated[:-1]
+    return (truncated + "…") if truncated else None
 
 
 class VisualizationService:
     @staticmethod
     def generate_cutting_layout_image(
         layouts: List[dict], width: int = 2400, height: int = 1600
-    ) -> io.BytesIO:
+    ) -> Tuple[io.BytesIO, Tuple[int, int]]:
+        """Dibuja los tableros con sus piezas.
+
+        El alto de cada pieza se acota sobre el borde izquierdo (texto vertical) y el
+        ancho sobre el borde inferior; la etiqueta de la pieza va centrada. Devuelve el
+        buffer PNG y sus dimensiones en px para incrustarlo respetando la proporción.
+        """
         boards_per_row = 2
         board_margin = 60
-        info_height = 100
+        info_height = 180
 
         num_boards = len(layouts)
         num_rows = (num_boards + boards_per_row - 1) // boards_per_row
@@ -23,21 +91,13 @@ class VisualizationService:
         img = Image.new("RGB", (width, total_height), color="white")
         draw = ImageDraw.Draw(img)
 
-        try:
-            title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 36)
-            label_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-            small_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
-        except OSError:
-            title_font = ImageFont.load_default()
-            label_font = ImageFont.load_default()
-            small_font = ImageFont.load_default()
+        title_font = _load_font(44)
+        header_font = _load_font(26)
+        dim_font = _load_font(26)
+        label_font = _load_font(28)
+        legend_font = _load_font(24)
 
-        draw.text(
-            (width // 2 - 200, 30),
-            "Optimización de Cortes",
-            fill="black",
-            font=title_font,
-        )
+        VisualizationService._draw_header(draw, width, title_font, legend_font)
 
         y_offset = info_height
 
@@ -73,66 +133,138 @@ class VisualizationService:
                     board_x + scaled_board_width,
                     board_y + scaled_board_height,
                 ],
-                outline="black",
-                width=2,
+                outline=COLOR_BOARD_OUTLINE,
+                width=3,
             )
 
-            board_label = f"Tablero {idx + 1}"
+            board_label = (
+                f"Tablero {idx + 1}  ·  {int(board_height)}×{int(board_width)} mm"
+            )
             draw.text(
-                (board_x + 10, board_y - 25), board_label, fill="black", font=label_font
+                (board_x, board_y - 36), board_label, fill="black", font=header_font
             )
-
+            label_w, _ = _text_size(board_label, header_font)
             efficiency = layout.get("statistics", {}).get("efficiency", 0)
-            efficiency_text = f"Eficiencia: {efficiency:.1f}%"
             draw.text(
-                (board_x + 200, board_y - 25),
-                efficiency_text,
-                fill="green",
-                font=small_font,
+                (board_x + label_w + 30, board_y - 36),
+                f"Eficiencia: {efficiency:.1f}%",
+                fill=COLOR_EFFICIENCY,
+                font=header_font,
             )
 
-            placed_pieces = layout.get("placed_pieces", [])
-            for piece in placed_pieces:
-                px = board_x + int(piece["x"] * scale)
-                py = board_y + int(piece["y"] * scale)
-                pw = int(piece["width"] * scale)
-                ph = int(piece["height"] * scale)
-
-                draw.rectangle(
-                    [px, py, px + pw, py + ph],
-                    fill="#E3F2FD",
-                    outline="#1976D2",
-                    width=2,
+            for piece in layout.get("placed_pieces", []):
+                VisualizationService._draw_piece(
+                    img,
+                    draw,
+                    board_x,
+                    board_y,
+                    scale,
+                    piece,
+                    dim_font,
+                    label_font,
                 )
 
-                piece_label = f"{int(piece['height'])}x{int(piece['width'])}"
-                text_bbox = draw.textbbox((0, 0), piece_label, font=small_font)
-                text_width = text_bbox[2] - text_bbox[0]
-                text_height = text_bbox[3] - text_bbox[1]
-
-                if pw > text_width + 10 and ph > text_height + 10:
-                    text_x = px + (pw - text_width) // 2
-                    text_y = py + (ph - text_height) // 2
-                    draw.text(
-                        (text_x, text_y), piece_label, fill="black", font=small_font
-                    )
-
-            remainders = layout.get("remainders", [])
-            for remainder in remainders:
+            for remainder in layout.get("remainders", []):
                 rx = board_x + int(remainder["x"] * scale)
                 ry = board_y + int(remainder["y"] * scale)
                 rw = int(remainder["width"] * scale)
                 rh = int(remainder["height"] * scale)
-
                 if rw > 5 and rh > 5:
                     draw.rectangle(
                         [rx, ry, rx + rw, ry + rh],
-                        fill="#FFEBEE",
-                        outline="#D32F2F",
+                        fill=COLOR_WASTE_FILL,
+                        outline=COLOR_WASTE_OUTLINE,
                         width=1,
                     )
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         buffer.seek(0)
-        return buffer
+        return buffer, (width, total_height)
+
+    @staticmethod
+    def _draw_header(
+        draw: ImageDraw.ImageDraw,
+        width: int,
+        title_font: ImageFont.ImageFont,
+        legend_font: ImageFont.ImageFont,
+    ) -> None:
+        """Dibuja el título centrado y la leyenda de colores."""
+        title = "Optimización de Cortes"
+        title_w, _ = _text_size(title, title_font)
+        draw.text(
+            ((width - title_w) // 2, 24), title, fill=COLOR_TITLE, font=title_font
+        )
+
+        legend = [
+            (COLOR_PIECE_FILL, COLOR_PIECE_OUTLINE, "Pieza"),
+            (COLOR_WASTE_FILL, COLOR_WASTE_OUTLINE, "Retazo / Desperdicio"),
+        ]
+        x = 60
+        box = 26
+        y = 92
+        for fill, outline, text in legend:
+            draw.rectangle(
+                [x, y, x + box, y + box], fill=fill, outline=outline, width=2
+            )
+            draw.text((x + box + 10, y), text, fill="black", font=legend_font)
+            tw, _ = _text_size(text, legend_font)
+            x += box + 10 + tw + 50
+
+    @staticmethod
+    def _draw_piece(
+        img: Image.Image,
+        draw: ImageDraw.ImageDraw,
+        board_x: int,
+        board_y: int,
+        scale: float,
+        piece: dict,
+        dim_font: ImageFont.ImageFont,
+        label_font: ImageFont.ImageFont,
+    ) -> None:
+        """Dibuja una pieza con el alto acotado a la izquierda, el ancho abajo y la
+        etiqueta al centro."""
+        px = board_x + int(piece["x"] * scale)
+        py = board_y + int(piece["y"] * scale)
+        pw = int(piece["width"] * scale)
+        ph = int(piece["height"] * scale)
+
+        draw.rectangle(
+            [px, py, px + pw, py + ph],
+            fill=COLOR_PIECE_FILL,
+            outline=COLOR_PIECE_OUTLINE,
+            width=2,
+        )
+
+        pad = 4
+
+        # Ancho (segunda medida) sobre el borde inferior, texto horizontal.
+        ancho = _text_image(str(int(piece["width"])), dim_font, COLOR_DIM)
+        if ancho.width <= pw - 2 * pad and ancho.height <= ph - 2 * pad:
+            img.paste(
+                ancho,
+                (px + (pw - ancho.width) // 2, py + ph - ancho.height - pad),
+                ancho,
+            )
+
+        # Alto (primera medida) sobre el borde izquierdo, texto vertical.
+        alto = _text_image(str(int(piece["height"])), dim_font, COLOR_DIM).rotate(
+            90, expand=True
+        )
+        if alto.height <= ph - 2 * pad and alto.width <= pw - 2 * pad:
+            img.paste(alto, (px + pad, py + (ph - alto.height) // 2), alto)
+
+        # Etiqueta de la pieza al centro (omitir las auto-generadas piece_N).
+        piece_id = str(piece.get("piece_id", ""))
+        if piece_id and not piece_id.startswith("piece_"):
+            label = _fit_label(piece_id, label_font, pw - 2 * pad, ph - 2 * pad)
+            if label:
+                label_img = _text_image(label, label_font, COLOR_LABEL)
+                img.paste(
+                    label_img,
+                    (
+                        px + (pw - label_img.width) // 2,
+                        py + (ph - label_img.height) // 2,
+                    ),
+                    label_img,
+                )
