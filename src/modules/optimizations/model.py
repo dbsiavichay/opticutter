@@ -17,6 +17,7 @@ class OptimizationModel(Base):
     requirements: Mapped[dict] = mapped_column(JSON)
     layouts: Mapped[dict] = mapped_column(JSON)
     materials_summary: Mapped[dict] = mapped_column(JSON, nullable=True)
+    layout_groups: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))

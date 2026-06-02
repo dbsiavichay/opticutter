@@ -1,7 +1,9 @@
 import io
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
+
+from src.modules.optimizations.patterns import base_label
 
 # Rutas de fuentes a probar en orden (macOS primero, luego Linux/Docker).
 _FONT_CANDIDATES = [
@@ -13,7 +15,6 @@ _FONT_CANDIDATES = [
 ]
 
 # Paleta del diagrama (alineada con la marca de la proforma).
-COLOR_TITLE = "#1976D2"
 COLOR_BOARD_OUTLINE = "#37474F"
 COLOR_PIECE_FILL = "#E3F2FD"
 COLOR_PIECE_OUTLINE = "#1976D2"
@@ -68,148 +69,121 @@ def _fit_label(
 
 class VisualizationService:
     @staticmethod
-    def generate_cutting_layout_image(
-        layouts: List[dict], width: int = 2400, height: int = 1600
+    def generate_layout_image(
+        group: dict, target_long: int = 2000
     ) -> Tuple[io.BytesIO, Tuple[int, int]]:
-        """Dibuja los tableros con sus piezas.
+        """Dibuja un único patrón de corte ocupando todo el lienzo.
 
-        El alto de cada pieza se acota sobre el borde izquierdo (texto vertical) y el
-        ancho sobre el borde inferior; la etiqueta de la pieza va centrada. Devuelve el
-        buffer PNG y sus dimensiones en px para incrustarlo respetando la proporción.
+        El lienzo adopta el aspecto del tablero para que, incrustado a página
+        completa, lo llene al máximo. El alto de cada pieza se acota sobre el borde
+        izquierdo (texto vertical) y el ancho sobre el borde inferior; la etiqueta va
+        centrada. Devuelve el buffer PNG y sus dimensiones en px para incrustarlo
+        respetando la proporción.
         """
-        boards_per_row = 2
-        board_margin = 60
-        info_height = 180
+        layout = group.get("layout", group)
+        count = group.get("count", 1)
+        material = layout.get("material", {})
+        board_width = material.get("width", 1220)
+        board_height = material.get("height", 2440)
 
-        num_boards = len(layouts)
-        num_rows = (num_boards + boards_per_row - 1) // boards_per_row
+        margin = 60
+        info_height = 150
 
-        total_height = (
-            info_height + num_rows * (height // num_rows + board_margin) + board_margin
-        )
+        scale = target_long / max(board_width, board_height)
+        scaled_board_width = int(board_width * scale)
+        scaled_board_height = int(board_height * scale)
 
-        img = Image.new("RGB", (width, total_height), color="white")
+        canvas_width = scaled_board_width + 2 * margin
+        canvas_height = info_height + scaled_board_height + 2 * margin
+
+        img = Image.new("RGB", (canvas_width, canvas_height), color="white")
         draw = ImageDraw.Draw(img)
 
-        title_font = _load_font(44)
-        header_font = _load_font(26)
+        header_font = _load_font(36)
         dim_font = _load_font(26)
-        label_font = _load_font(28)
-        legend_font = _load_font(24)
+        label_font = _load_font(30)
+        legend_font = _load_font(32)
 
-        VisualizationService._draw_header(draw, width, title_font, legend_font)
+        VisualizationService._draw_legend(draw, margin, 24, legend_font)
 
-        y_offset = info_height
+        board_x = margin
+        board_y = info_height
 
-        for idx, layout in enumerate(layouts):
-            row = idx // boards_per_row
-            col = idx % boards_per_row
+        badge = f"  ·  ×{count}" if count > 1 else ""
+        board_label = (
+            f"Tablero {group.get('pattern_id', 1)}{badge}  ·  "
+            f"{int(board_height)}×{int(board_width)} mm"
+        )
+        draw.text((board_x, board_y - 48), board_label, fill="black", font=header_font)
+        label_w, _ = _text_size(board_label, header_font)
+        efficiency = layout.get("statistics", {}).get("efficiency", 0)
+        draw.text(
+            (board_x + label_w + 30, board_y - 48),
+            f"Eficiencia: {efficiency:.1f}%",
+            fill=COLOR_EFFICIENCY,
+            font=header_font,
+        )
 
-            material = layout.get("material", {})
-            board_width = material.get("width", 1220)
-            board_height = material.get("height", 2440)
+        draw.rectangle(
+            [
+                board_x,
+                board_y,
+                board_x + scaled_board_width,
+                board_y + scaled_board_height,
+            ],
+            outline=COLOR_BOARD_OUTLINE,
+            width=3,
+        )
 
-            available_width = (
-                width - (boards_per_row + 1) * board_margin
-            ) // boards_per_row
-            available_height = (
-                total_height - info_height - (num_rows + 1) * board_margin
-            ) // num_rows
-
-            scale_x = available_width / board_width
-            scale_y = available_height / board_height
-            scale = min(scale_x, scale_y) * 0.9
-
-            scaled_board_width = int(board_width * scale)
-            scaled_board_height = int(board_height * scale)
-
-            board_x = board_margin + col * (available_width + board_margin)
-            board_y = y_offset + row * (available_height + board_margin)
-
-            draw.rectangle(
-                [
-                    board_x,
-                    board_y,
-                    board_x + scaled_board_width,
-                    board_y + scaled_board_height,
-                ],
-                outline=COLOR_BOARD_OUTLINE,
-                width=3,
+        for piece in layout.get("placed_pieces", []):
+            VisualizationService._draw_piece(
+                img, draw, board_x, board_y, scale, piece, dim_font, label_font
             )
 
-            board_label = (
-                f"Tablero {idx + 1}  ·  {int(board_height)}×{int(board_width)} mm"
-            )
-            draw.text(
-                (board_x, board_y - 36), board_label, fill="black", font=header_font
-            )
-            label_w, _ = _text_size(board_label, header_font)
-            efficiency = layout.get("statistics", {}).get("efficiency", 0)
-            draw.text(
-                (board_x + label_w + 30, board_y - 36),
-                f"Eficiencia: {efficiency:.1f}%",
-                fill=COLOR_EFFICIENCY,
-                font=header_font,
-            )
-
-            for piece in layout.get("placed_pieces", []):
-                VisualizationService._draw_piece(
-                    img,
-                    draw,
-                    board_x,
-                    board_y,
-                    scale,
-                    piece,
-                    dim_font,
-                    label_font,
+        for remainder in layout.get("remainders", []):
+            rx = board_x + int(remainder["x"] * scale)
+            ry = board_y + int(remainder["y"] * scale)
+            rw = int(remainder["width"] * scale)
+            rh = int(remainder["height"] * scale)
+            if rw > 5 and rh > 5:
+                draw.rectangle(
+                    [rx, ry, rx + rw, ry + rh],
+                    fill=COLOR_WASTE_FILL,
+                    outline=COLOR_WASTE_OUTLINE,
+                    width=1,
                 )
-
-            for remainder in layout.get("remainders", []):
-                rx = board_x + int(remainder["x"] * scale)
-                ry = board_y + int(remainder["y"] * scale)
-                rw = int(remainder["width"] * scale)
-                rh = int(remainder["height"] * scale)
-                if rw > 5 and rh > 5:
-                    draw.rectangle(
-                        [rx, ry, rx + rw, ry + rh],
-                        fill=COLOR_WASTE_FILL,
-                        outline=COLOR_WASTE_OUTLINE,
-                        width=1,
-                    )
 
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         buffer.seek(0)
-        return buffer, (width, total_height)
+        return buffer, (canvas_width, canvas_height)
 
     @staticmethod
-    def _draw_header(
+    def _draw_legend(
         draw: ImageDraw.ImageDraw,
-        width: int,
-        title_font: ImageFont.ImageFont,
+        x: int,
+        y: int,
         legend_font: ImageFont.ImageFont,
     ) -> None:
-        """Dibuja el título centrado y la leyenda de colores."""
-        title = "Optimización de Cortes"
-        title_w, _ = _text_size(title, title_font)
-        draw.text(
-            ((width - title_w) // 2, 24), title, fill=COLOR_TITLE, font=title_font
-        )
-
+        """Dibuja la leyenda de colores (pieza vs retazo)."""
         legend = [
             (COLOR_PIECE_FILL, COLOR_PIECE_OUTLINE, "Pieza"),
             (COLOR_WASTE_FILL, COLOR_WASTE_OUTLINE, "Retazo / Desperdicio"),
         ]
-        x = 60
-        box = 26
-        y = 92
+        box = 32
         for fill, outline, text in legend:
             draw.rectangle(
                 [x, y, x + box, y + box], fill=fill, outline=outline, width=2
             )
-            draw.text((x + box + 10, y), text, fill="black", font=legend_font)
+            th = _text_size(text, legend_font)[1]
+            draw.text(
+                (x + box + 12, y + (box - th) // 2),
+                text,
+                fill="black",
+                font=legend_font,
+            )
             tw, _ = _text_size(text, legend_font)
-            x += box + 10 + tw + 50
+            x += box + 12 + tw + 50
 
     @staticmethod
     def _draw_piece(
@@ -254,8 +228,9 @@ class VisualizationService:
         if alto.height <= ph - 2 * pad and alto.width <= pw - 2 * pad:
             img.paste(alto, (px + pad, py + (ph - alto.height) // 2), alto)
 
-        # Etiqueta de la pieza al centro (omitir las auto-generadas piece_N).
-        piece_id = str(piece.get("piece_id", ""))
+        # Etiqueta de la pieza al centro: usar la etiqueta base (sin sufijo de
+        # instancia) y omitir las auto-generadas piece_N.
+        piece_id = base_label(str(piece.get("piece_id", "")))
         if piece_id and not piece_id.startswith("piece_"):
             label = _fit_label(piece_id, label_font, pw - 2 * pad, ph - 2 * pad)
             if label:

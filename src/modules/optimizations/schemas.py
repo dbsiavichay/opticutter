@@ -106,6 +106,16 @@ class Layout(CamelModel):
     )
 
 
+class LayoutGroup(CamelModel):
+    pattern_id: int = Field(..., description="1-based index of the unique cut pattern")
+    count: int = Field(..., description="Number of sheets sharing this pattern")
+    sheet_numbers: List[int] = Field(
+        ..., description="Sheet numbers that use this pattern"
+    )
+    board_id: int = Field(..., description="Board ID the pattern is cut from")
+    layout: Layout = Field(..., description="Representative layout for this pattern")
+
+
 class OptimizeResponse(CamelModel):
     id: int
     client: ClientResponse = Field(..., description="Client information")
@@ -116,4 +126,7 @@ class OptimizeResponse(CamelModel):
     )
     materials_summary: Optional[List[MaterialSummary]] = Field(
         default=None, description="Aggregated materials grouped by board type"
+    )
+    layout_groups: Optional[List[LayoutGroup]] = Field(
+        default=None, description="Cutting layouts deduplicated by identical pattern"
     )

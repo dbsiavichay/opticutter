@@ -10,6 +10,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (
     HRFlowable,
     Image,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -18,6 +19,7 @@ from reportlab.platypus import (
 )
 
 from src.modules.optimizations.model import OptimizationModel
+from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
 from src.shared.config import config
 
@@ -102,12 +104,10 @@ class ProformaService:
         story.append(Spacer(1, 0.2 * inch))
         story.append(ProformaService._build_totals_table(optimization))
 
-        story.append(Spacer(1, 0.3 * inch))
+        story.append(PageBreak())
         story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
         story.append(Spacer(1, 0.08 * inch))
-        layout_image = ProformaService._build_layout_image(optimization)
-        if layout_image is not None:
-            story.append(layout_image)
+        story.extend(ProformaService._build_layout_pages(optimization))
 
         story.append(Spacer(1, 0.3 * inch))
         story.append(
@@ -342,24 +342,40 @@ class ProformaService:
         return summary_table
 
     @staticmethod
-    def _build_layout_image(optimization: OptimizationModel):
+    def _build_layout_pages(optimization: OptimizationModel) -> List:
+        """Una imagen por patrón, cada una a página completa ocupando el máximo."""
         layouts = optimization.layouts
         if not (isinstance(layouts, list) and layouts):
-            return None
+            return []
 
-        img_buffer, (img_w, img_h) = VisualizationService.generate_cutting_layout_image(
-            layouts, width=2400, height=1600
-        )
-        draw_width = CONTENT_WIDTH
-        draw_height = draw_width * (img_h / img_w)
-        max_height = 8.5 * inch
-        if draw_height > max_height:
-            draw_height = max_height
-            draw_width = draw_height * (img_w / img_h)
+        # Usa los grupos persistidos; recompútalos para optimizaciones antiguas que
+        # se guardaron antes de existir el campo ``layout_groups``.
+        groups = optimization.layout_groups
+        if not (isinstance(groups, list) and groups):
+            groups = group_layouts(layouts)
 
-        image = Image(img_buffer, width=draw_width, height=draw_height)
-        image.hAlign = "CENTER"
-        return image
+        flowables: List = []
+        # Cada imagen ocupa casi toda la página; el tope deja sitio al encabezado de
+        # sección en la primera (las demás van solas tras un salto de página).
+        max_height = 9.3 * inch
+        for idx, group in enumerate(groups):
+            if idx > 0:
+                flowables.append(PageBreak())
+
+            img_buffer, (img_w, img_h) = VisualizationService.generate_layout_image(
+                group
+            )
+            draw_width = CONTENT_WIDTH
+            draw_height = draw_width * (img_h / img_w)
+            if draw_height > max_height:
+                draw_height = max_height
+                draw_width = draw_height * (img_w / img_h)
+
+            image = Image(img_buffer, width=draw_width, height=draw_height)
+            image.hAlign = "CENTER"
+            flowables.append(image)
+
+        return flowables
 
 
 def _section(title: str, heading_style) -> List:

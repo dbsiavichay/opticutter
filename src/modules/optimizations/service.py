@@ -15,6 +15,7 @@ from src.cutting import (
 from src.modules.boards.model import BoardModel
 from src.modules.boards.service import BoardService
 from src.modules.optimizations.model import OptimizationModel
+from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.schemas import OptimizeRequest, Requirement
 from src.shared.config import config
 from src.shared.database import get_db
@@ -179,6 +180,10 @@ class OptimizationService:
             for layout in layouts
         )
 
+        layout_dicts = [
+            layout.to_dict() for layouts, _ in board_results for layout in layouts
+        ]
+
         optimization = OptimizationModel(
             total_boards_used=total_boards_used,
             total_boards_cost=total_boards_cost,
@@ -186,12 +191,11 @@ class OptimizationService:
                 {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
                 for r in request.requirements
             ],
-            layouts=[
-                layout.to_dict() for layouts, _ in board_results for layout in layouts
-            ],
+            layouts=layout_dicts,
             materials_summary=self._build_materials_summary(
                 board_results, board_codes, board_names
             ),
+            layout_groups=group_layouts(layout_dicts),
             client_id=request.client_id,
         )
         self.db.add(optimization)

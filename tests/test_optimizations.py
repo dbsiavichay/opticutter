@@ -130,6 +130,46 @@ def test_service_get_or_404(db_session):
         OptimizationService(db_session).get_or_404(123456)
 
 
+def test_optimize_deduplicates_identical_patterns(client):
+    """Varias hojas con el mismo patrón se colapsan en un grupo con su conteo."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    # Una pieza grande (1700×670) entra una sola vez por tablero → 5 hojas idénticas.
+    payload = {
+        "clientId": created_client["id"],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 1700,
+                "width": 670,
+                "quantity": 5,
+                "boardId": created_board["id"],
+                "label": "",
+                "canRotate": True,
+            }
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # El conteo físico se mantiene en 5 (layouts, totales y resumen de materiales).
+    assert data["totalBoardsUsed"] == 5
+    assert len(data["layouts"]) == 5
+    assert data["materialsSummary"][0]["count"] == 5
+
+    # Pero los patrones se deduplican en un único grupo con count == 5.
+    groups = data["layoutGroups"]
+    assert len(groups) == 1
+    group = groups[0]
+    assert group["patternId"] == 1
+    assert group["count"] == 5
+    assert len(group["sheetNumbers"]) == 5
+    assert group["boardId"] == created_board["id"]
+    assert group["layout"]["material"]["boardId"] == created_board["id"]
+
+
 def test_optimize_includes_materials_summary(client):
     """materials_summary agrupa por tipo de tablero con código, cantidad y costo."""
     created_client = _create_client(client)
