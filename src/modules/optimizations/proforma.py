@@ -1,6 +1,7 @@
 import base64
 import io
 from datetime import datetime
+from pathlib import Path
 from typing import List, Union
 
 from fastapi.responses import StreamingResponse
@@ -9,6 +10,7 @@ from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     HRFlowable,
     Image,
@@ -25,21 +27,79 @@ from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
 from src.shared.config import config
 
-# Paleta de marca de la proforma.
-BRAND_BLUE = colors.HexColor("#1976D2")
-DARK_BLUE = colors.HexColor("#0D47A1")
-LIGHT_BLUE = colors.HexColor("#E3F2FD")
+# Paleta de marca MADERABLE (muestreada del membrete oficial).
+BRAND_CORAL = colors.HexColor("#E8564B")  # acento principal / cabeceras de tabla
+BRAND_ORANGE = colors.HexColor("#EC7829")  # banda del pie de página
+BRAND_BLACK = colors.HexColor("#1D1D1B")  # logo / texto / reglas
+LIGHT_CORAL = colors.HexColor("#FCE9E6")  # fondo de la caja de totales
 ZEBRA_GREY = colors.HexColor("#F5F5F5")
 TEXT_GREY = colors.HexColor("#424242")
 
-PAGE_WIDTH, _ = A4
+PAGE_WIDTH, PAGE_HEIGHT = A4
 LEFT_MARGIN = RIGHT_MARGIN = 0.5 * inch
 CONTENT_WIDTH = PAGE_WIDTH - LEFT_MARGIN - RIGHT_MARGIN
 
+ASSETS_DIR = Path(__file__).parent / "assets"
+LOGO_PATH = ASSETS_DIR / "header.jpg"
+WATERMARK_PATH = ASSETS_DIR / "watermark.jpg"
+ICON_WHATSAPP = ASSETS_DIR / "whatsapp.jpg"
+ICON_EMAIL = ASSETS_DIR / "email.jpg"
+ICON_ADDRESS = ASSETS_DIR / "address.jpg"
 
-def _draw_page_footer(canvas, doc) -> None:
-    """Dibuja el pie con la marca de generación y el número de página."""
+
+def _scaled_image(path: Path, width: float) -> Image:
+    """Imagen escalada a ``width`` conservando su relación de aspecto."""
+    img_width, img_height = ImageReader(str(path)).getSize()
+    height = width * img_height / img_width
+    return Image(str(path), width=width, height=height)
+
+
+def _draw_watermark(canvas) -> None:
+    """Marca de agua tenue centrada (se dibuja debajo del contenido)."""
+    reader = ImageReader(str(WATERMARK_PATH))
+    img_width, img_height = reader.getSize()
+    wm_width = 3.8 * inch
+    wm_height = wm_width * img_height / img_width
+    canvas.drawImage(
+        reader,
+        (PAGE_WIDTH - wm_width) / 2,
+        (PAGE_HEIGHT - wm_height) / 2,
+        width=wm_width,
+        height=wm_height,
+        mask="auto",
+    )
+
+
+def _draw_footer_accent(canvas) -> None:
+    """Banda angular naranja con muesca negra en el borde inferior (estilo membrete)."""
+    band_h = 12
+    slant = 20
+    x0 = PAGE_WIDTH * 0.52
+
+    canvas.setFillColor(BRAND_BLACK)
+    notch = canvas.beginPath()
+    notch.moveTo(x0 - 44, 0)
+    notch.lineTo(x0 + 6, 0)
+    notch.lineTo(x0 + 6 + slant, band_h)
+    notch.lineTo(x0 - 44 + slant, band_h)
+    notch.close()
+    canvas.drawPath(notch, fill=1, stroke=0)
+
+    canvas.setFillColor(BRAND_ORANGE)
+    band = canvas.beginPath()
+    band.moveTo(x0, 0)
+    band.lineTo(PAGE_WIDTH, 0)
+    band.lineTo(PAGE_WIDTH, band_h)
+    band.lineTo(x0 + slant, band_h)
+    band.close()
+    canvas.drawPath(band, fill=1, stroke=0)
+
+
+def _draw_page_decoration(canvas, doc) -> None:
+    """Marca de agua, acento de pie y línea de generación/página en cada hoja."""
     canvas.saveState()
+    _draw_watermark(canvas)
+    _draw_footer_accent(canvas)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.grey)
     canvas.drawString(
@@ -115,7 +175,11 @@ class ProformaService:
             )
         )
 
-        doc.build(story, onFirstPage=_draw_page_footer, onLaterPages=_draw_page_footer)
+        doc.build(
+            story,
+            onFirstPage=_draw_page_decoration,
+            onLaterPages=_draw_page_decoration,
+        )
         buffer.seek(0)
         return buffer
 
@@ -153,83 +217,139 @@ class ProformaService:
         story.append(Spacer(1, 0.08 * inch))
         story.extend(ProformaService._build_layout_pages(carrier))
 
-        doc.build(story, onFirstPage=_draw_page_footer, onLaterPages=_draw_page_footer)
+        doc.build(
+            story,
+            onFirstPage=_draw_page_decoration,
+            onLaterPages=_draw_page_decoration,
+        )
         buffer.seek(0)
         return buffer
 
     @staticmethod
     def _build_header(carrier: ProformaCarrier, styles, title: str) -> List:
-        """Encabezado tipo factura: datos de empresa + bloque de documento."""
-        name_style = ParagraphStyle(
-            "CompanyName",
-            parent=styles["Normal"],
-            fontSize=18,
-            leading=22,
-            textColor=colors.white,
-            fontName="Helvetica-Bold",
-        )
-        detail_style = ParagraphStyle(
-            "CompanyDetail",
-            parent=styles["Normal"],
-            fontSize=9,
-            leading=13,
-            textColor=colors.white,
-        )
-        doc_title_style = ParagraphStyle(
-            "DocTitle",
-            parent=styles["Normal"],
-            fontSize=16,
-            leading=20,
-            textColor=colors.white,
-            fontName="Helvetica-Bold",
-            alignment=TA_RIGHT,
-        )
-        doc_detail_style = ParagraphStyle(
-            "DocDetail",
-            parent=styles["Normal"],
-            fontSize=10,
-            leading=15,
-            textColor=colors.white,
-            alignment=TA_RIGHT,
-        )
-
-        left_cell = [
-            Paragraph(config.COMPANY_NAME, name_style),
-            Spacer(1, 4),
-            Paragraph(
-                f"RUC: {config.COMPANY_RUC}<br/>"
-                f"{config.COMPANY_ADDRESS}<br/>"
-                f"Tel: {config.COMPANY_PHONE}<br/>"
-                f"{config.COMPANY_EMAIL}",
-                detail_style,
-            ),
-        ]
-        right_cell = [
-            Paragraph(title, doc_title_style),
-            Paragraph(
-                f"N° {carrier.reference}<br/>"
-                f"Fecha: {datetime.now().strftime('%d/%m/%Y')}",
-                doc_detail_style,
-            ),
-        ]
+        """Membrete MADERABLE: logo + contacto, regla negra y franja de título."""
+        logo = _scaled_image(LOGO_PATH, 1.9 * inch)
+        logo.hAlign = "LEFT"
 
         header_table = Table(
-            [[left_cell, right_cell]],
-            colWidths=[CONTENT_WIDTH * 0.6, CONTENT_WIDTH * 0.4],
+            [[logo, ProformaService._build_contact_block(styles)]],
+            colWidths=[CONTENT_WIDTH * 0.38, CONTENT_WIDTH * 0.62],
         )
         header_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, -1), BRAND_BLUE),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 16),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-                    ("TOPPADDING", (0, 0), (-1, -1), 14),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+                    ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
                 ]
             )
         )
-        return [header_table]
+
+        rule = HRFlowable(
+            width="100%",
+            thickness=1.5,
+            color=BRAND_BLACK,
+            spaceBefore=10,
+            spaceAfter=10,
+        )
+
+        title_style = ParagraphStyle(
+            "DocTitle",
+            parent=styles["Normal"],
+            fontSize=16,
+            leading=20,
+            textColor=BRAND_CORAL,
+            fontName="Helvetica-Bold",
+            alignment=TA_LEFT,
+        )
+        meta_style = ParagraphStyle(
+            "DocMeta",
+            parent=styles["Normal"],
+            fontSize=10,
+            leading=14,
+            textColor=BRAND_BLACK,
+            alignment=TA_RIGHT,
+        )
+        title_bar = Table(
+            [
+                [
+                    Paragraph(title, title_style),
+                    Paragraph(
+                        f"N° {carrier.reference}<br/>"
+                        f"Fecha: {datetime.now().strftime('%d/%m/%Y')}",
+                        meta_style,
+                    ),
+                ]
+            ],
+            colWidths=[CONTENT_WIDTH * 0.5, CONTENT_WIDTH * 0.5],
+        )
+        title_bar.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+
+        return [header_table, rule, title_bar]
+
+    @staticmethod
+    def _build_contact_block(styles) -> Table:
+        """Bloque de contacto con iconos: WhatsApp, correo y sucursales."""
+        text_style = ParagraphStyle(
+            "Contact",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=BRAND_BLACK,
+            alignment=TA_LEFT,
+        )
+        icon_w = 0.18 * inch
+
+        rows = [
+            [
+                _scaled_image(ICON_WHATSAPP, icon_w),
+                Paragraph(config.COMPANY_PHONE, text_style),
+            ],
+            [
+                _scaled_image(ICON_EMAIL, icon_w),
+                Paragraph(config.COMPANY_EMAIL, text_style),
+            ],
+        ]
+        for branch in config.COMPANY_BRANCHES:
+            rows.append(
+                [
+                    _scaled_image(ICON_ADDRESS, icon_w),
+                    Paragraph(
+                        f"<b>{branch['name']}</b> {branch['address']}", text_style
+                    ),
+                ]
+            )
+
+        table = Table(rows, colWidths=[icon_w + 8, 4.0 * inch])
+        table.hAlign = "RIGHT"
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (0, -1), 6),
+                    ("RIGHTPADDING", (1, 0), (1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]
+            )
+        )
+        return table
 
     @staticmethod
     def _build_client_table(carrier: ProformaCarrier) -> Table:
@@ -455,7 +575,7 @@ def _heading_style(styles) -> ParagraphStyle:
         "SectionHeading",
         parent=styles["Heading2"],
         fontSize=13,
-        textColor=DARK_BLUE,
+        textColor=BRAND_BLACK,
         spaceAfter=2,
         spaceBefore=4,
         fontName="Helvetica-Bold",
@@ -478,7 +598,7 @@ def _section(title: str, heading_style) -> List:
     return [
         Paragraph(title, heading_style),
         HRFlowable(
-            width="100%", thickness=1.2, color=BRAND_BLUE, spaceBefore=2, spaceAfter=8
+            width="100%", thickness=1.2, color=BRAND_CORAL, spaceBefore=2, spaceAfter=8
         ),
     ]
 
@@ -489,12 +609,12 @@ def _totals_table(rows: List[List[str]]) -> Table:
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), LIGHT_BLUE),
-                ("BOX", (0, 0), (-1, -1), 1, BRAND_BLUE),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#BBDEFB")),
+                ("BACKGROUND", (0, 0), (-1, -1), LIGHT_CORAL),
+                ("BOX", (0, 0), (-1, -1), 1, BRAND_CORAL),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#F5C9C3")),
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, -1), 11),
-                ("TEXTCOLOR", (0, 0), (-1, -1), DARK_BLUE),
+                ("TEXTCOLOR", (0, 0), (-1, -1), BRAND_BLACK),
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
                 ("TOPPADDING", (0, 0), (-1, -1), 8),
@@ -511,7 +631,7 @@ def _data_table_style(header_size: int, body_size: int) -> TableStyle:
     """Estilo común para tablas de datos con cabecera azul y filas zebra."""
     return TableStyle(
         [
-            ("BACKGROUND", (0, 0), (-1, 0), BRAND_BLUE),
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND_CORAL),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
