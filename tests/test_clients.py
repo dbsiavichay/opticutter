@@ -31,6 +31,29 @@ def test_get_missing_client_returns_404(client):
     assert "no encontrado" in resp.json()["detail"]
 
 
+def test_resolve_creates_then_is_idempotent(client):
+    """``POST /clients/resolve`` crea la primera vez y luego devuelve el mismo id."""
+    first = client.post("/api/v1/clients/resolve", json=_payload())
+    assert first.status_code == 200
+    created = first.json()
+    assert created["identifier"] == "0991112233"
+
+    second = client.post("/api/v1/clients/resolve", json=_payload(first="Ignored"))
+    assert second.status_code == 200
+    assert second.json()["id"] == created["id"]
+    # No se duplica ni se sobrescribe el cliente existente.
+    assert second.json()["firstName"] == "Ada"
+    assert len(client.get("/api/v1/clients/").json()) == 1
+
+
+def test_resolve_returns_existing_created_client(client):
+    """Si el cliente ya existe (creado por POST /clients), resolve lo reutiliza."""
+    created = client.post("/api/v1/clients/", json=_payload()).json()
+    resolved = client.post("/api/v1/clients/resolve", json=_payload())
+    assert resolved.status_code == 200
+    assert resolved.json()["id"] == created["id"]
+
+
 def test_list_and_search_clients(client):
     client.post(
         "/api/v1/clients/", json=_payload(identifier="0990000001", first="Grace")

@@ -115,13 +115,17 @@ def test_proforma_pdf_and_base64(client):
     ).json()
     opt_hash = optimization["optimizationHash"]
 
-    pdf = client.get(f"/api/v1/optimize/{opt_hash}/proforma")
+    pdf = client.get(
+        f"/api/v1/optimize/{opt_hash}/proforma",
+        params={"clientId": created_client["id"]},
+    )
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
     b64 = client.get(
-        f"/api/v1/optimize/{opt_hash}/proforma", params={"format": "base64"}
+        f"/api/v1/optimize/{opt_hash}/proforma",
+        params={"clientId": created_client["id"], "format": "base64"},
     )
     assert b64.status_code == 200
     body = b64.json()
@@ -132,7 +136,45 @@ def test_proforma_pdf_and_base64(client):
 
 def test_proforma_missing_optimization_returns_404(client):
     """Un hash que no está en caché (expiró o nunca existió) responde 404."""
-    assert client.get(f"/api/v1/optimize/{'0' * 64}/proforma").status_code == 404
+    resp = client.get(f"/api/v1/optimize/{'0' * 64}/proforma", params={"clientId": 1})
+    assert resp.status_code == 404
+
+
+def test_proforma_requires_client_id(client):
+    """La proforma exige ``clientId`` (la optimización es anónima)."""
+    assert client.get(f"/api/v1/optimize/{'0' * 64}/proforma").status_code == 422
+
+
+def test_optimize_without_client_is_anonymous(client):
+    """``POST /optimize`` sin ``clientId`` responde 200 con ``client`` nulo y el
+    mismo hash que con cliente (el cómputo es agnóstico del cliente)."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    with_client = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    ).json()
+
+    anon_payload = _optimize_payload(created_client["id"], created_board["id"])
+    anon_payload.pop("clientId")
+    anon = client.post("/api/v1/optimize/", json=anon_payload)
+
+    assert anon.status_code == 200
+    data = anon.json()
+    assert data["client"] is None
+    assert data["optimizationHash"] == with_client["optimizationHash"]
+
+
+def test_optimize_unknown_client_returns_404(client):
+    """Si se envía un ``clientId`` inexistente, la respuesta es 404."""
+    created_board = _create_board(client)
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(client_id=99999, board_id=created_board["id"]),
+    )
+    assert resp.status_code == 404
+    assert "Client 99999" in resp.json()["detail"]
 
 
 def test_optimize_does_not_persist(client, db_session):

@@ -15,6 +15,16 @@ def create_client(data: ClientCreate, svc: ClientService = Depends(client_servic
     return svc.create(data)
 
 
+@router.post("/resolve", response_model=ClientResponse)
+def resolve_client(data: ClientCreate, svc: ClientService = Depends(client_service)):
+    """Obtiene el cliente por identificador o lo crea (idempotente).
+
+    Pensado para el bot: resuelve al cliente justo antes de una acción comercial
+    (proforma u orden) en una sola llamada, sin GET + POST condicional.
+    """
+    return svc.resolve(data)
+
+
 @router.get("/", response_model=List[ClientResponse])
 def list_clients(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
