@@ -113,14 +113,16 @@ def test_proforma_pdf_and_base64(client):
         "/api/v1/optimize/",
         json=_optimize_payload(created_client["id"], created_board["id"]),
     ).json()
-    opt_id = optimization["id"]
+    opt_hash = optimization["optimizationHash"]
 
-    pdf = client.get(f"/api/v1/optimize/{opt_id}/proforma")
+    pdf = client.get(f"/api/v1/optimize/{opt_hash}/proforma")
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
-    b64 = client.get(f"/api/v1/optimize/{opt_id}/proforma", params={"format": "base64"})
+    b64 = client.get(
+        f"/api/v1/optimize/{opt_hash}/proforma", params={"format": "base64"}
+    )
     assert b64.status_code == 200
     body = b64.json()
     assert body["format"] == "base64"
@@ -129,19 +131,35 @@ def test_proforma_pdf_and_base64(client):
 
 
 def test_proforma_missing_optimization_returns_404(client):
-    assert client.get("/api/v1/optimize/999999/proforma").status_code == 404
+    """Un hash que no está en caché (expiró o nunca existió) responde 404."""
+    assert client.get(f"/api/v1/optimize/{'0' * 64}/proforma").status_code == 404
+
+
+def test_optimize_does_not_persist(client, db_session):
+    """El dual-write se retiró: ``POST /optimize`` no escribe en BD."""
+    from src.modules.optimizations.model import OptimizationModel
+
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["id"] is None
+    assert db_session.query(OptimizationModel).count() == 0
 
 
 def test_service_rejects_empty_requirements(db_session):
-    """La guarda defensiva de ``execute`` lanza ValidationError (422)."""
+    """La guarda defensiva de ``compute`` lanza ValidationError (422)."""
     request = OptimizeRequest.model_construct(requirements=[], client_id=1)
     with pytest.raises(ValidationError):
-        OptimizationService(db_session).execute(request)
+        OptimizationService(db_session).compute(request)
 
 
-def test_service_get_or_404(db_session):
+def test_service_cached_payload_404(db_session):
     with pytest.raises(EntityNotFoundError):
-        OptimizationService(db_session).get_or_404(123456)
+        OptimizationService(db_session).get_cached_payload("nope")
 
 
 def test_optimize_deduplicates_identical_patterns(client):

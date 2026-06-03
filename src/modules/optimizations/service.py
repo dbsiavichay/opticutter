@@ -16,9 +16,14 @@ from src.cutting import (
 )
 from src.modules.boards.model import BoardModel
 from src.modules.boards.service import BoardService
-from src.modules.optimizations.model import OptimizationModel
+from src.modules.clients.model import ClientModel
+from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.patterns import group_layouts
-from src.modules.optimizations.schemas import OptimizeRequest, Requirement
+from src.modules.optimizations.schemas import (
+    OptimizeRequest,
+    OptimizeResponse,
+    Requirement,
+)
 from src.shared.cache import cache
 from src.shared.config import config
 from src.shared.database import get_db
@@ -26,23 +31,50 @@ from src.shared.exceptions import EntityNotFoundError, ValidationError
 
 
 class OptimizationService:
-    """Orquesta el dominio de corte (``cutting``), cachea por hash y persiste."""
+    """Orquesta el dominio de corte (``cutting``) y cachea el resultado por hash.
+
+    El cómputo es determinista y efímero: se cachea por un hash de las entradas y
+    **no** se persiste en BD (la orden es la fuente de verdad durable). El hash es
+    el identificador con el que se recupera la proforma.
+    """
 
     def __init__(self, db: Session):
         self.db = db
         self.board_service = BoardService(db)
 
-    def get_or_404(self, optimization_id: int) -> OptimizationModel:
-        """Obtiene una optimización por ID o lanza 404."""
-        optimization = self.db.get(OptimizationModel, optimization_id)
-        if optimization is None:
-            raise EntityNotFoundError("Optimization", optimization_id)
-        return optimization
-
-    def execute(self, request: OptimizeRequest) -> OptimizationModel:
-        """Ejecuta la optimización (cache-first) y la persiste (dual-write)."""
+    def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
+        """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``."""
         payload, optimization_hash = self.compute(request)
-        return self._save_optimization_from_payload(payload, optimization_hash)
+        client = self.db.get(ClientModel, payload["client_id"])
+        if client is None:
+            raise EntityNotFoundError("Client", payload["client_id"])
+        return OptimizeResponse(
+            id=None,
+            client=client,
+            optimization_hash=optimization_hash,
+            total_boards_used=payload["total_boards_used"],
+            total_boards_cost=payload["total_boards_cost"],
+            layouts=payload["layouts"],
+            materials_summary=payload["materials_summary"],
+            layout_groups=payload["layout_groups"],
+        )
+
+    def get_cached_payload(self, optimization_hash: str) -> dict:
+        """Recupera el payload cacheado por hash o lanza 404 si expiró/no existe."""
+        payload = cache.get_json(optimization_hash)
+        if payload is None:
+            raise EntityNotFoundError("Optimization", optimization_hash)
+        return payload
+
+    def build_carrier_from_hash(self, optimization_hash: str) -> ProformaCarrier:
+        """Portador de proforma para una optimización cacheada (por hash)."""
+        payload = self.get_cached_payload(optimization_hash)
+        client = self.db.get(ClientModel, payload["client_id"])
+        if client is None:
+            raise EntityNotFoundError("Client", payload["client_id"])
+        return ProformaCarrier.from_payload(
+            payload, client, reference=f"OPT-{optimization_hash[:8]}"
+        )
 
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
         """Calcula (o recupera de caché) el resultado de la optimización.
@@ -249,25 +281,6 @@ class OptimizationService:
             "layout_groups": group_layouts(layout_dicts),
             "client_id": request.client_id,
         }
-
-    def _save_optimization_from_payload(
-        self, payload: dict, optimization_hash: str
-    ) -> OptimizationModel:
-        """Persiste una fila de ``optimizations`` desde un payload (dual-write)."""
-        optimization = OptimizationModel(
-            total_boards_used=payload["total_boards_used"],
-            total_boards_cost=payload["total_boards_cost"],
-            requirements=payload["requirements"],
-            layouts=payload["layouts"],
-            materials_summary=payload["materials_summary"],
-            layout_groups=payload["layout_groups"],
-            client_id=payload["client_id"],
-            optimization_hash=optimization_hash,
-        )
-        self.db.add(optimization)
-        self.db.commit()
-        self.db.refresh(optimization)
-        return optimization
 
 
 def optimization_service(db: Session = Depends(get_db)) -> OptimizationService:
