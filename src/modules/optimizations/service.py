@@ -43,11 +43,17 @@ class OptimizationService:
         self.board_service = BoardService(db)
 
     def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
-        """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``."""
+        """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``.
+
+        El cómputo es agnóstico del cliente: solo se resuelve (y valida) el cliente
+        cuando la petición trae ``client_id``. Sin él, la respuesta es anónima.
+        """
         payload, optimization_hash = self.compute(request)
-        client = self.db.get(ClientModel, payload["client_id"])
-        if client is None:
-            raise EntityNotFoundError("Client", payload["client_id"])
+        client = None
+        if request.client_id is not None:
+            client = self.db.get(ClientModel, request.client_id)
+            if client is None:
+                raise EntityNotFoundError("Client", request.client_id)
         return OptimizeResponse(
             id=None,
             client=client,
@@ -66,12 +72,18 @@ class OptimizationService:
             raise EntityNotFoundError("Optimization", optimization_hash)
         return payload
 
-    def build_carrier_from_hash(self, optimization_hash: str) -> ProformaCarrier:
-        """Portador de proforma para una optimización cacheada (por hash)."""
+    def build_carrier_from_hash(
+        self, optimization_hash: str, client_id: int
+    ) -> ProformaCarrier:
+        """Portador de proforma para una optimización cacheada (por hash).
+
+        La optimización es anónima; el cliente se aporta al renderizar (la proforma
+        necesita sus datos para el encabezado del documento).
+        """
         payload = self.get_cached_payload(optimization_hash)
-        client = self.db.get(ClientModel, payload["client_id"])
+        client = self.db.get(ClientModel, client_id)
         if client is None:
-            raise EntityNotFoundError("Client", payload["client_id"])
+            raise EntityNotFoundError("Client", client_id)
         return ProformaCarrier.from_payload(
             payload, client, reference=f"OPT-{optimization_hash[:8]}"
         )
@@ -279,7 +291,6 @@ class OptimizationService:
                 board_results, board_codes, board_names
             ),
             "layout_groups": group_layouts(layout_dicts),
-            "client_id": request.client_id,
         }
 
 

@@ -19,6 +19,9 @@ def optimize(
 @router.get("/{optimization_hash}/proforma")
 def get_proforma(
     optimization_hash: str,
+    client_id: int = Query(
+        ..., alias="clientId", description="Cliente para el encabezado de la proforma"
+    ),
     format: str = Query(
         default="pdf",
         description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
@@ -27,6 +30,6 @@ def get_proforma(
     svc: OptimizationService = Depends(optimization_service),
 ):
     """Genera la proforma PDF de una optimización cacheada (por hash)."""
-    carrier = svc.build_carrier_from_hash(optimization_hash)
+    carrier = svc.build_carrier_from_hash(optimization_hash, client_id)
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
     return pdf_response(pdf_buffer, f"proforma_{optimization_hash[:8]}.pdf", format)

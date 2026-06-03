@@ -46,7 +46,14 @@ class OptimizeRequest(CamelModel):
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="List of cuts to optimize"
     )
-    client_id: int = Field(..., description="Client ID for the optimization")
+    client_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Optional client ID. The optimization is client-agnostic (the result "
+            "and its hash do not depend on the client); only proformas and orders "
+            "require a client, resolved at that point."
+        ),
+    )
 
 
 class Material(CamelModel):
@@ -121,7 +128,9 @@ class OptimizeResponse(CamelModel):
         default=None,
         description="Deprecated: optimizations are no longer persisted; use the hash",
     )
-    client: ClientResponse = Field(..., description="Client information")
+    client: Optional[ClientResponse] = Field(
+        default=None, description="Client information (only when a client_id is sent)"
+    )
     optimization_hash: Optional[str] = Field(
         default=None, description="Deterministic hash of the optimization inputs"
     )
