@@ -14,15 +14,15 @@ _FONT_CANDIDATES = [
     "/Library/Fonts/Arial.ttf",
 ]
 
-# Paleta del diagrama (alineada con la marca de la proforma).
-COLOR_BOARD_OUTLINE = "#37474F"
-COLOR_PIECE_FILL = "#E3F2FD"
-COLOR_PIECE_OUTLINE = "#1976D2"
-COLOR_DIM = "#0D47A1"
+# Paleta del diagrama (alineada con la marca MADERABLE de la proforma).
+COLOR_BOARD_OUTLINE = "#1D1D1B"
+COLOR_PIECE_FILL = "#FCE9E6"
+COLOR_PIECE_OUTLINE = "#E8564B"
+COLOR_DIM = "#1D1D1B"
 COLOR_LABEL = "#212121"
 COLOR_EFFICIENCY = "#2E7D32"
-COLOR_WASTE_FILL = "#FFEBEE"
-COLOR_WASTE_OUTLINE = "#D32F2F"
+COLOR_WASTE_FILL = "#ECECEC"  # gris neutro: contrasta con el coral de las piezas
+COLOR_WASTE_OUTLINE = "#9E9E9E"
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:

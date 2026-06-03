@@ -74,12 +74,19 @@ class Config:
     ORDER_VALIDITY_DAYS = env.int("ORDER_VALIDITY_DAYS", 15)
     MAX_PENDING_ORDERS_PER_CLIENT = env.int("MAX_PENDING_ORDERS_PER_CLIENT", 3)
 
-    # Datos de la empresa para la proforma PDF
-    COMPANY_NAME = env("COMPANY_NAME", "EMPRESA MADERABLE S.A.")
-    COMPANY_RUC = env("COMPANY_RUC", "1234567890001")
-    COMPANY_ADDRESS = env("COMPANY_ADDRESS", "Av. Principal 123")
-    COMPANY_PHONE = env("COMPANY_PHONE", "(02) 234-5678")
-    COMPANY_EMAIL = env("COMPANY_EMAIL", "info@maderable.com")
+    # Datos de la empresa (membrete de la proforma). Valores dummy por defecto;
+    # los reales se definen en el .env.
+    COMPANY_NAME = env("COMPANY_NAME", "Mi Empresa")
+    COMPANY_TAGLINE = env("COMPANY_TAGLINE", "eslogan de la empresa")
+    COMPANY_EMAIL = env("COMPANY_EMAIL", "correo@empresa.com")
+    COMPANY_PHONE = env("COMPANY_PHONE", "0990000000 / 0990000001")
+    COMPANY_BRANCHES = env.json(
+        "COMPANY_BRANCHES",
+        [
+            {"name": "Sucursal 1", "address": "Calle Principal y Secundaria"},
+            {"name": "Sucursal 2", "address": "Av. Central y Transversal"},
+        ],
+    )
 
     def get_cors_origins(self) -> List[str]:
         """Lista de orígenes permitidos para CORS."""
