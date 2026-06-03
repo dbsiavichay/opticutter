@@ -1,8 +1,36 @@
+import os
+import subprocess
+import sys
+
 from fastapi.testclient import TestClient
 
 from main import app
 
 client = TestClient(app)
+
+
+def test_app_mappers_configure_without_extra_model_imports():
+    """Regresión: la app debe configurar los mappers de SQLAlchemy solo con los
+    modelos que importa ``main`` (vía routers). No debe depender de que algo más
+    importe ``optimizations.model``.
+
+    Se corre en un subproceso aislado porque ``conftest`` importa TODOS los modelos
+    y enmascararía el problema: el 500 ``failed to locate 'OptimizationModel'`` solo
+    aparecía en el runtime real de la app (p. ej. ``GET /clients/identifier/...``).
+    """
+    code = (
+        "import main; "
+        "from sqlalchemy.orm import configure_mappers; "
+        "configure_mappers()"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        env={**os.environ, "ENVIRONMENT": "local"},
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_root_redirect():

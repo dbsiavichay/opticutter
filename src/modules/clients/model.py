@@ -1,7 +1,7 @@
 from typing import Optional
 
 from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
 
@@ -16,7 +16,3 @@ class ClientModel(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     source: Mapped[Optional[str]] = mapped_column(String(64))
-
-    optimizations: Mapped[list["OptimizationModel"]] = relationship(  # noqa: F821
-        "OptimizationModel", back_populates="client"
-    )

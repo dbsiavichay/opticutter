@@ -209,6 +209,82 @@ def test_order_documents_404(client):
     assert client.get("/api/v1/orders/999999/production-sheet").status_code == 404
 
 
+def test_order_export_document(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+
+    resp = client.get(f"/api/v1/orders/{order['id']}/export")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["orderCode"] == order["code"]
+    assert data["status"] == "confirmed"
+    assert data["client"]["id"] == c["id"]
+    assert data["currency"] == "USD"
+    assert data["issuedAt"] is not None
+    assert data["externalInvoiceId"] is None
+
+    # Cobro por tablero: una línea con descripción legible y el código.
+    assert len(data["lines"]) == 1
+    line = data["lines"][0]
+    assert line["boardCode"] == "MEL18"
+    assert "MEL18" in line["description"]
+    assert line["quantity"] == order["totalBoardsUsed"]
+    assert line["unitPrice"] == 45.5
+    assert line["lineTotal"] == line["quantity"] * 45.5
+    assert data["subtotal"] == data["total"] == line["lineTotal"]
+
+
+def test_set_external_invoice_id_and_reflect_in_export(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    oid = order["id"]
+
+    resp = client.post(
+        f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["externalInvoiceId"] == "FAC-001-42"
+
+    # Idempotente con el mismo ID.
+    again = client.post(
+        f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
+    )
+    assert again.status_code == 200
+
+    # El export refleja la factura asociada.
+    exported = client.get(f"/api/v1/orders/{oid}/export").json()
+    assert exported["externalInvoiceId"] == "FAC-001-42"
+
+
+def test_set_external_invoice_id_conflict_on_different_id(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    oid = order["id"]
+
+    client.post(
+        f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
+    )
+    # Otro ID sobre una orden ya facturada → 409 (no pisa la factura emitida).
+    conflict = client.post(
+        f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-999-00"}
+    )
+    assert conflict.status_code == 409
+
+
+def test_billing_seam_404(client):
+    assert client.get("/api/v1/orders/999999/export").status_code == 404
+    assert (
+        client.post(
+            "/api/v1/orders/999999/invoice", json={"externalInvoiceId": "X"}
+        ).status_code
+        == 404
+    )
+
+
 def test_order_expires_lazily_on_read(client, monkeypatch):
     """Una orden vencida se transiciona a ``expired`` al leerla (barrido perezoso)."""
     monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)

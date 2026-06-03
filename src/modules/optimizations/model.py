@@ -2,13 +2,15 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
 
 
 class OptimizationModel(Base):
-    """Modelo ORM para optimizaciones"""
+    """Modelo ORM de la tabla ``optimizations`` (conservada, pero ya sin escrituras:
+    las optimizaciones son cache-only desde S2). Sin relación ORM hacia ``clients``:
+    el cómputo es efímero y la orden es la raíz durable."""
 
     __tablename__ = "optimizations"
 
@@ -23,7 +25,3 @@ class OptimizationModel(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
-
-    client: Mapped["ClientModel"] = relationship(  # noqa: F821
-        "ClientModel", back_populates="optimizations"
-    )
