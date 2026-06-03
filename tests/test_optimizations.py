@@ -66,6 +66,20 @@ def test_optimize_returns_layouts(client):
     assert layout["placedPieces"][0]["originalWidth"] == 600
 
 
+def test_optimize_returns_optimization_hash(client):
+    """La respuesta expone el hash determinista de las entradas."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    optimization_hash = resp.json()["optimizationHash"]
+    assert isinstance(optimization_hash, str) and len(optimization_hash) == 64
+
+
 def test_optimize_computes_total_boards_cost(client):
     """El costo total debe ser nº de tableros usados * precio del tablero."""
     created_client = _create_client(client)

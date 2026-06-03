@@ -119,6 +119,9 @@ class LayoutGroup(CamelModel):
 class OptimizeResponse(CamelModel):
     id: int
     client: ClientResponse = Field(..., description="Client information")
+    optimization_hash: Optional[str] = Field(
+        default=None, description="Deterministic hash of the optimization inputs"
+    )
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")
     layouts: List[Layout] = Field(

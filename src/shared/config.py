@@ -70,6 +70,10 @@ class Config:
 
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
+    # Órdenes: vigencia de la cotización y tope de pendientes por cliente (antiabuso)
+    ORDER_VALIDITY_DAYS = env.int("ORDER_VALIDITY_DAYS", 15)
+    MAX_PENDING_ORDERS_PER_CLIENT = env.int("MAX_PENDING_ORDERS_PER_CLIENT", 3)
+
     # Datos de la empresa para la proforma PDF
     COMPANY_NAME = env("COMPANY_NAME", "EMPRESA MADERABLE S.A.")
     COMPANY_RUC = env("COMPANY_RUC", "1234567890001")

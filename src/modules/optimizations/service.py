@@ -1,3 +1,5 @@
+import hashlib
+import json
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -17,13 +19,14 @@ from src.modules.boards.service import BoardService
 from src.modules.optimizations.model import OptimizationModel
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.schemas import OptimizeRequest, Requirement
+from src.shared.cache import cache
 from src.shared.config import config
 from src.shared.database import get_db
 from src.shared.exceptions import EntityNotFoundError, ValidationError
 
 
 class OptimizationService:
-    """Orquesta el dominio de corte (``cutting``) y persiste optimizaciones."""
+    """Orquesta el dominio de corte (``cutting``), cachea por hash y persiste."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -37,7 +40,18 @@ class OptimizationService:
         return optimization
 
     def execute(self, request: OptimizeRequest) -> OptimizationModel:
-        """Ejecuta la optimización: agrupa por tablero, corta y persiste."""
+        """Ejecuta la optimización (cache-first) y la persiste (dual-write)."""
+        payload, optimization_hash = self.compute(request)
+        return self._save_optimization_from_payload(payload, optimization_hash)
+
+    def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
+        """Calcula (o recupera de caché) el resultado de la optimización.
+
+        Cache-first por un hash determinista de entradas (requerimientos +
+        parámetros de corte + precios de tableros). No escribe en BD: lo reutiliza
+        el módulo de órdenes para congelar el snapshot sin depender de la caché.
+        Devuelve ``(payload, optimization_hash)``.
+        """
         if not request.requirements:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
@@ -51,25 +65,60 @@ class OptimizationService:
             right_trim=config.RIGHT_TRIM,
         )
 
-        board_results = []
-        board_codes: Dict[int, str] = {}
-        board_names: Dict[int, str] = {}
-        for board_id, board_requirements in requirements_by_board.items():
+        boards: Dict[int, BoardModel] = {}
+        for board_id in requirements_by_board:
             board = self.board_service.get(board_id)
             if board is None:
                 raise EntityNotFoundError("Board", board_id)
+            boards[board_id] = board
 
-            board_codes[board_id] = board.code
-            board_names[board_id] = board.name
-            board_results.append(
-                self._optimize(
-                    pieces=board_requirements,
-                    board=board,
-                    cutting_params=cutting_params,
-                )
+        optimization_hash = self._compute_hash(request, cutting_params, boards)
+
+        cached = cache.get_json(optimization_hash)
+        if cached is not None:
+            return cached, optimization_hash
+
+        board_codes = {bid: board.code for bid, board in boards.items()}
+        board_names = {bid: board.name for bid, board in boards.items()}
+        board_results = [
+            self._optimize(
+                pieces=requirements_by_board[bid],
+                board=boards[bid],
+                cutting_params=cutting_params,
             )
+            for bid in requirements_by_board
+        ]
 
-        return self._save_optimization(request, board_results, board_codes, board_names)
+        payload = self._build_result_payload(
+            request, board_results, board_codes, board_names
+        )
+        cache.set_json(optimization_hash, payload)
+        return payload, optimization_hash
+
+    def _compute_hash(
+        self,
+        request: OptimizeRequest,
+        cutting_params: CuttingParameters,
+        boards: Dict[int, BoardModel],
+    ) -> str:
+        """Hash sha256 determinista de las entradas que afectan el resultado.
+
+        No incluye ``client_id`` (el cómputo no depende del cliente); la dedupe de
+        órdenes sí combina ``client_id`` con este hash.
+        """
+        digest_input = {
+            "requirements": [r.model_dump() for r in request.requirements],
+            "params": {
+                "kerf": cutting_params.kerf,
+                "top_trim": cutting_params.top_trim,
+                "bottom_trim": cutting_params.bottom_trim,
+                "left_trim": cutting_params.left_trim,
+                "right_trim": cutting_params.right_trim,
+            },
+            "prices": {str(bid): board.price for bid, board in boards.items()},
+        }
+        canonical = json.dumps(digest_input, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _group_requirements_by_board(
         self, requirements: List[Requirement]
@@ -165,38 +214,55 @@ class OptimizationService:
             result.append(entry)
         return result
 
-    def _save_optimization(
+    def _build_result_payload(
         self,
         request: OptimizeRequest,
         board_results: List[Tuple[List[CuttingLayout], List[Piece]]],
         board_codes: Dict[int, str],
         board_names: Dict[int, str],
-    ) -> OptimizationModel:
-        """Guarda los resultados de la optimización en la base de datos."""
+    ) -> dict:
+        """Arma el payload cacheable/serializable del resultado de optimización.
+
+        Mismas claves que persiste ``optimizations`` y que consumen ``proforma`` y
+        el snapshot de las órdenes.
+        """
         total_boards_used = sum(len(layouts) for layouts, _ in board_results)
         total_boards_cost = sum(
             layout.material.cost_per_unit
             for layouts, _ in board_results
             for layout in layouts
         )
-
         layout_dicts = [
             layout.to_dict() for layouts, _ in board_results for layout in layouts
         ]
-
-        optimization = OptimizationModel(
-            total_boards_used=total_boards_used,
-            total_boards_cost=total_boards_cost,
-            requirements=[
+        return {
+            "total_boards_used": total_boards_used,
+            "total_boards_cost": total_boards_cost,
+            "requirements": [
                 {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
                 for r in request.requirements
             ],
-            layouts=layout_dicts,
-            materials_summary=self._build_materials_summary(
+            "layouts": layout_dicts,
+            "materials_summary": self._build_materials_summary(
                 board_results, board_codes, board_names
             ),
-            layout_groups=group_layouts(layout_dicts),
-            client_id=request.client_id,
+            "layout_groups": group_layouts(layout_dicts),
+            "client_id": request.client_id,
+        }
+
+    def _save_optimization_from_payload(
+        self, payload: dict, optimization_hash: str
+    ) -> OptimizationModel:
+        """Persiste una fila de ``optimizations`` desde un payload (dual-write)."""
+        optimization = OptimizationModel(
+            total_boards_used=payload["total_boards_used"],
+            total_boards_cost=payload["total_boards_cost"],
+            requirements=payload["requirements"],
+            layouts=payload["layouts"],
+            materials_summary=payload["materials_summary"],
+            layout_groups=payload["layout_groups"],
+            client_id=payload["client_id"],
+            optimization_hash=optimization_hash,
         )
         self.db.add(optimization)
         self.db.commit()
