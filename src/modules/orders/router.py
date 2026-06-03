@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
-from src.modules.orders.schemas import OrderCreate, OrderResponse, OrderStatusUpdate
+from src.modules.orders.schemas import (
+    OrderCreate,
+    OrderExportResponse,
+    OrderInvoiceUpdate,
+    OrderResponse,
+    OrderStatusUpdate,
+)
 from src.modules.orders.service import OrderService, order_service
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -52,6 +58,22 @@ def update_order_status(
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
     return svc.transition(order_id, data.status, actor="sales", note=data.note)
+
+
+@router.post("/{order_id}/invoice", response_model=OrderResponse)
+def set_order_invoice(
+    order_id: int,
+    data: OrderInvoiceUpdate,
+    svc: OrderService = Depends(order_service),
+):
+    """Asocia el ID de la factura externa (costura con el proveedor de facturación)."""
+    return svc.set_external_invoice_id(order_id, data.external_invoice_id)
+
+
+@router.get("/{order_id}/export", response_model=OrderExportResponse)
+def export_order(order_id: int, svc: OrderService = Depends(order_service)):
+    """Documento de facturación neutral para el proveedor externo (cobro=tableros)."""
+    return svc.build_export(order_id)
 
 
 @router.get("/{order_id}/proforma")

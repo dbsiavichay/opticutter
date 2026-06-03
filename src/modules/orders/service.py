@@ -16,10 +16,10 @@ from src.modules.orders.model import (
     OrderStatus,
     OrderStatusHistoryModel,
 )
-from src.modules.orders.schemas import OrderCreate
+from src.modules.orders.schemas import OrderCreate, OrderExportLine, OrderExportResponse
 from src.shared.config import config
 from src.shared.database import get_db
-from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
+from src.shared.exceptions import BusinessRuleError, ConflictError, EntityNotFoundError
 
 
 class OrderService:
@@ -158,6 +158,53 @@ class OrderService:
         self.db.refresh(order)
         return order
 
+    def set_external_invoice_id(
+        self, order_id: int, external_invoice_id: str
+    ) -> OrderModel:
+        """Asocia (costura de facturación) el ID de la factura externa a la orden.
+
+        Idempotente con el mismo ID; si ya hay otro asociado lanza ``ConflictError``
+        para no pisar una factura ya emitida.
+        """
+        order = self.get_or_404(order_id)
+        if (
+            order.external_invoice_id is not None
+            and order.external_invoice_id != external_invoice_id
+        ):
+            raise ConflictError(
+                "La orden ya tiene una factura externa asociada "
+                f"({order.external_invoice_id})"
+            )
+        order.external_invoice_id = external_invoice_id
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def build_export(self, order_id: int) -> OrderExportResponse:
+        """Proyecta la orden como documento de facturación neutral (cobro=tableros)."""
+        order = self.get_or_404(order_id)
+        lines = [
+            OrderExportLine(
+                description=_line_description(line),
+                board_code=line.board_code,
+                quantity=line.quantity,
+                unit_price=line.unit_price_snapshot,
+                line_total=line.line_total,
+            )
+            for line in order.lines
+        ]
+        return OrderExportResponse(
+            order_code=order.code,
+            status=OrderStatus(order.status),
+            issued_at=order.confirmed_at or order.created_at,
+            currency=order.currency,
+            client=order.client,
+            lines=lines,
+            subtotal=order.subtotal,
+            total=order.total,
+            external_invoice_id=order.external_invoice_id,
+        )
+
     def _expire_if_stale(self, order: OrderModel) -> bool:
         """Marca como ``expired`` una orden pendiente cuya vigencia ya venció.
 
@@ -225,6 +272,13 @@ class OrderService:
                 f"El cliente ya tiene {active} pedido(s) pendiente(s); "
                 "resuélvalos o espere a que expiren antes de crear otro."
             )
+
+
+def _line_description(line: OrderLineModel) -> str:
+    """Descripción legible de una línea de cobro para la factura externa."""
+    if line.board_code and line.board_name:
+        return f"{line.board_name} ({line.board_code})"
+    return line.board_name or line.board_code or f"Tablero {line.board_id}"
 
 
 def order_service(db: Session = Depends(get_db)) -> OrderService:

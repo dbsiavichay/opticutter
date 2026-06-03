@@ -27,6 +27,41 @@ class OrderStatusUpdate(CamelModel):
     note: Optional[str] = Field(default=None, max_length=512)
 
 
+class OrderInvoiceUpdate(CamelModel):
+    """Asocia el ID de la factura emitida por el proveedor externo de facturación."""
+
+    external_invoice_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Invoice ID assigned by the external billing provider",
+    )
+
+
+class OrderExportLine(CamelModel):
+    """Línea de factura para el proveedor externo (cobro por tablero)."""
+
+    description: str = Field(..., description="Human-readable line description")
+    board_code: Optional[str] = None
+    quantity: int = Field(..., description="Number of boards charged")
+    unit_price: float
+    line_total: float
+
+
+class OrderExportResponse(CamelModel):
+    """Documento de facturación neutral: lo consume el proveedor de facturación."""
+
+    order_code: Optional[str] = None
+    status: OrderStatus
+    issued_at: datetime = Field(..., description="When the order was frozen/confirmed")
+    currency: str
+    client: ClientResponse
+    lines: List[OrderExportLine]
+    subtotal: float
+    total: float
+    external_invoice_id: Optional[str] = None
+
+
 class OrderLineResponse(CamelModel):
     id: int
     board_id: int
