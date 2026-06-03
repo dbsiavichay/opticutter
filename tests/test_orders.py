@@ -1,0 +1,174 @@
+"""Tests del módulo orders: creación (snapshot), idempotencia, tope, estados."""
+
+from datetime import datetime
+
+from src.shared.config import config
+
+
+def _create_client(client, identifier="0991112233"):
+    return client.post(
+        "/api/v1/clients/",
+        json={"identifier": identifier, "firstName": "Ada", "lastName": "Lovelace"},
+    ).json()
+
+
+def _create_board(client, code="MEL18"):
+    return client.post(
+        "/api/v1/boards/",
+        json={
+            "code": code,
+            "name": f"Melamina {code}",
+            "height": 2440,
+            "width": 1220,
+            "thickness": 18,
+            "price": 45.5,
+        },
+    ).json()
+
+
+def _order_payload(client_id, board_id, height=400, width=600, quantity=2):
+    return {
+        "clientId": client_id,
+        "requirements": [
+            {
+                "priority": 0,
+                "height": height,
+                "width": width,
+                "quantity": quantity,
+                "boardId": board_id,
+                "label": "Puerta",
+                "canRotate": True,
+            }
+        ],
+    }
+
+
+def test_create_order_freezes_snapshot_and_charges_boards(client):
+    c = _create_client(client)
+    b = _create_board(client)
+
+    resp = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"]))
+    assert resp.status_code == 201
+    data = resp.json()
+
+    assert data["status"] == "confirmed"
+    assert data["code"] == f"ORD-{datetime.utcnow().year}-{data['id']:04d}"
+    assert data["client"]["id"] == c["id"]
+    assert len(data["optimizationHash"]) == 64
+
+    # Cobro = tableros: una línea por tipo de tablero (desde materials_summary).
+    assert len(data["lines"]) == 1
+    line = data["lines"][0]
+    assert line["boardCode"] == "MEL18"
+    assert line["quantity"] == data["totalBoardsUsed"]
+    assert line["lineTotal"] == line["quantity"] * 45.5
+
+    # Totales inmutables = suma por tableros.
+    assert data["total"] == data["subtotal"] == line["lineTotal"]
+
+    # Lista de corte = piezas (insumo de producción, no se cobra).
+    assert len(data["pieces"]) == 1
+    piece = data["pieces"][0]
+    assert piece["height"] == 400 and piece["width"] == 600
+    assert piece["quantity"] == 2
+
+    # Historial inicial registra la creación.
+    assert data["history"][0]["toStatus"] == "confirmed"
+    assert data["history"][0]["fromStatus"] is None
+
+
+def test_create_order_is_idempotent(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    payload = _order_payload(c["id"], b["id"])
+
+    first = client.post("/api/v1/orders/", json=payload).json()
+    second = client.post("/api/v1/orders/", json=payload).json()
+
+    assert first["id"] == second["id"]
+    assert first["code"] == second["code"]
+    # No se crean dos órdenes para el mismo (cliente, hash).
+    assert len(client.get("/api/v1/orders/").json()) == 1
+
+
+def test_pending_cap_blocks_excess_orders(client, monkeypatch):
+    monkeypatch.setattr(config, "MAX_PENDING_ORDERS_PER_CLIENT", 2)
+    c = _create_client(client)
+    b = _create_board(client)
+
+    # Dos órdenes distintas (distinto hash) → ambas quedan pendientes.
+    assert (
+        client.post(
+            "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
+        ).status_code
+        == 201
+    )
+
+    # La tercera excede el tope de pendientes.
+    third = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=450)
+    )
+    assert third.status_code == 422
+    assert "pendiente" in third.json()["detail"]
+
+
+def test_status_transitions_valid_and_invalid(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    oid = order["id"]
+
+    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "approved"})
+    assert ok.status_code == 200
+    assert ok.json()["status"] == "approved"
+
+    ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "in_production"})
+    assert ok2.status_code == 200
+    assert ok2.json()["status"] == "in_production"
+    # Historial acumulado: creación + 2 transiciones.
+    assert len(ok2.json()["history"]) == 3
+
+    # in_production → completed no es una transición válida.
+    bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "completed"})
+    assert bad.status_code == 422
+    assert "inválida" in bad.json()["detail"]
+
+
+def test_invalid_transition_from_confirmed(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    # confirmed → completed (salta estados) no es válido.
+    bad = client.patch(
+        f"/api/v1/orders/{order['id']}/status", json={"status": "completed"}
+    )
+    assert bad.status_code == 422
+
+
+def test_list_orders_filter_by_status(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    o1 = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
+    ).json()
+    client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500))
+
+    # Aprobar solo la primera.
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "approved"})
+
+    approved = client.get("/api/v1/orders/", params={"status": "approved"}).json()
+    assert [o["id"] for o in approved] == [o1["id"]]
+
+    confirmed = client.get("/api/v1/orders/", params={"status": "confirmed"}).json()
+    assert o1["id"] not in [o["id"] for o in confirmed]
+    assert len(confirmed) == 1
+
+
+def test_get_order_404(client):
+    assert client.get("/api/v1/orders/999999").status_code == 404

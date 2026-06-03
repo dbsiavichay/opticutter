@@ -10,8 +10,36 @@ from sqlalchemy.pool import StaticPool
 import src.modules.boards.model  # noqa: F401,E402
 import src.modules.clients.model  # noqa: F401,E402
 import src.modules.optimizations.model  # noqa: F401,E402
+import src.modules.orders.model  # noqa: F401,E402
 from main import app
+from src.shared.cache import cache
 from src.shared.database import Base, get_db
+
+
+class _InMemoryRedis:
+    """Doble en memoria de Redis: parea ``get``/``set`` sobre strings JSON."""
+
+    def __init__(self):
+        self._store: dict = {}
+
+    def get(self, key):
+        return self._store.get(key)
+
+    def set(self, key, value, ex=None):
+        self._store[key] = value
+        return True
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache():
+    """Aísla la caché de Redis real: cada test usa un doble en memoria limpio."""
+    original_client, original_initialized = cache._client, cache._initialized
+    cache._client = _InMemoryRedis()
+    cache._initialized = True
+    try:
+        yield
+    finally:
+        cache._client, cache._initialized = original_client, original_initialized
 
 
 @pytest.fixture
