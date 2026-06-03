@@ -117,7 +117,10 @@ class LayoutGroup(CamelModel):
 
 
 class OptimizeResponse(CamelModel):
-    id: int
+    id: Optional[int] = Field(
+        default=None,
+        description="Deprecated: optimizations are no longer persisted; use the hash",
+    )
     client: ClientResponse = Field(..., description="Client information")
     optimization_hash: Optional[str] = Field(
         default=None, description="Deterministic hash of the optimization inputs"

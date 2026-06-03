@@ -172,3 +172,71 @@ def test_list_orders_filter_by_status(client):
 
 def test_get_order_404(client):
     assert client.get("/api/v1/orders/999999").status_code == 404
+
+
+def test_order_proforma_pdf_and_base64(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    oid = order["id"]
+
+    pdf = client.get(f"/api/v1/orders/{oid}/proforma")
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert len(pdf.content) > 1000
+
+    b64 = client.get(f"/api/v1/orders/{oid}/proforma", params={"format": "base64"})
+    assert b64.status_code == 200
+    body = b64.json()
+    assert body["format"] == "base64"
+    assert body["mimeType"] == "application/pdf"
+    assert order["code"] in body["filename"]
+
+
+def test_order_production_sheet_pdf(client):
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+
+    sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
+    assert sheet.status_code == 200
+    assert sheet.headers["content-type"] == "application/pdf"
+    assert len(sheet.content) > 1000
+
+
+def test_order_documents_404(client):
+    assert client.get("/api/v1/orders/999999/proforma").status_code == 404
+    assert client.get("/api/v1/orders/999999/production-sheet").status_code == 404
+
+
+def test_order_expires_lazily_on_read(client, monkeypatch):
+    """Una orden vencida se transiciona a ``expired`` al leerla (barrido perezoso)."""
+    monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)
+    c = _create_client(client)
+    b = _create_board(client)
+    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    # Nace confirmed, pero su vigencia ya está vencida (expiresAt en el pasado).
+    assert order["status"] == "confirmed"
+
+    fetched = client.get(f"/api/v1/orders/{order['id']}").json()
+    assert fetched["status"] == "expired"
+    assert fetched["history"][-1]["toStatus"] == "expired"
+    assert fetched["history"][-1]["fromStatus"] == "confirmed"
+
+
+def test_expired_order_frees_pending_cap(client, monkeypatch):
+    """Las pendientes vencidas no cuentan para el tope: se expiran al evaluarlo."""
+    monkeypatch.setattr(config, "MAX_PENDING_ORDERS_PER_CLIENT", 1)
+    monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)
+    c = _create_client(client)
+    b = _create_board(client)
+
+    first = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
+    )
+    assert first.status_code == 201
+    # La primera está vencida; la segunda (distinto hash) no choca con el tope.
+    second = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
+    )
+    assert second.status_code == 201

@@ -2,11 +2,19 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from src.modules.optimizations.carrier import ProformaCarrier
+from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.schemas import OrderCreate, OrderResponse, OrderStatusUpdate
 from src.modules.orders.service import OrderService, order_service
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+_FORMAT_QUERY = Query(
+    default="pdf",
+    description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
+    pattern="^(pdf|base64)$",
+)
 
 
 @router.post("/", response_model=OrderResponse, status_code=201)
@@ -44,3 +52,29 @@ def update_order_status(
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
     return svc.transition(order_id, data.status, actor="sales", note=data.note)
+
+
+@router.get("/{order_id}/proforma")
+def get_order_proforma(
+    order_id: int,
+    format: str = _FORMAT_QUERY,
+    svc: OrderService = Depends(order_service),
+):
+    """Proforma comercial (con precios congelados) renderizada desde el snapshot."""
+    order = svc.get_or_404(order_id)
+    carrier = ProformaCarrier.from_order(order)
+    pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
+    return pdf_response(pdf_buffer, f"proforma_{order.code or order.id}.pdf", format)
+
+
+@router.get("/{order_id}/production-sheet")
+def get_order_production_sheet(
+    order_id: int,
+    format: str = _FORMAT_QUERY,
+    svc: OrderService = Depends(order_service),
+):
+    """Hoja de producción (lista de corte y disposición, SIN precios) para el taller."""
+    order = svc.get_or_404(order_id)
+    carrier = ProformaCarrier.from_order(order)
+    pdf_buffer = ProformaService.generate_production_sheet_pdf(carrier)
+    return pdf_response(pdf_buffer, f"produccion_{order.code or order.id}.pdf", format)
