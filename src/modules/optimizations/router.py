@@ -3,19 +3,22 @@ from fastapi import APIRouter, Depends, Query
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.optimizations.schemas import OptimizeRequest, OptimizeResponse
 from src.modules.optimizations.service import OptimizationService, optimization_service
+from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-router = APIRouter(prefix="/optimize", tags=["optimize"])
+router = APIRouter(prefix="/optimize", tags=["optimize"], responses=ERROR_RESPONSES)
 
 
-@router.post("/", response_model=OptimizeResponse)
+@router.post("/", response_model=DataResponse[OptimizeResponse])
 def optimize(
     request: OptimizeRequest,
     svc: OptimizationService = Depends(optimization_service),
 ):
     """Ejecuta una optimización de cortes (cache-first) y devuelve la solución."""
-    return svc.optimize_response(request)
+    return ok(svc.optimize_response(request))
 
 
+# Exento de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
+# variante base64 son "el archivo, transportado", no un recurso JSON de dominio.
 @router.get("/{optimization_hash}/proforma")
 def get_proforma(
     optimization_hash: str,

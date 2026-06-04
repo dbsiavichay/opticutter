@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -22,16 +22,15 @@ class BoardService(CRUDService[BoardModel, BoardCreate, BoardUpdate]):
         """Obtiene un tablero por código."""
         return self.db.query(BoardModel).filter(BoardModel.code == code).first()
 
-    def search(self, search: str, skip: int = 0, limit: int = 100) -> List[BoardModel]:
-        """Busca tableros por código o nombre."""
+    def search_paginated(
+        self, search: str, limit: int = 20, offset: int = 0
+    ) -> Tuple[List[BoardModel], int]:
+        """Busca tableros por código o nombre; devuelve ``(items, total)``."""
         pattern = f"%{search}%"
-        return (
-            self.db.query(BoardModel)
-            .filter(BoardModel.code.ilike(pattern) | BoardModel.name.ilike(pattern))
-            .offset(skip)
-            .limit(limit)
-            .all()
+        query = self.db.query(BoardModel).filter(
+            BoardModel.code.ilike(pattern) | BoardModel.name.ilike(pattern)
         )
+        return self._paginate(query, limit, offset)
 
 
 def board_service(db: Session = Depends(get_db)) -> BoardService:

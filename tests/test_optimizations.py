@@ -16,7 +16,7 @@ def _create_client(client):
             "lastName": "Lovelace",
             "phone": "0991112233",
         },
-    ).json()
+    ).json()["data"]
 
 
 def _create_board(client, code="MEL18"):
@@ -30,7 +30,7 @@ def _create_board(client, code="MEL18"):
             "thickness": 18,
             "price": 45.5,
         },
-    ).json()
+    ).json()["data"]
 
 
 def _optimize_payload(client_id, board_id):
@@ -59,7 +59,7 @@ def test_optimize_returns_layouts(client):
         json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["client"]["id"] == created_client["id"]
     assert data["totalBoardsUsed"] >= 1
     assert len(data["layouts"]) >= 1
@@ -81,7 +81,7 @@ def test_optimize_returns_optimization_hash(client):
         json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
-    optimization_hash = resp.json()["optimizationHash"]
+    optimization_hash = resp.json()["data"]["optimizationHash"]
     assert isinstance(optimization_hash, str) and len(optimization_hash) == 64
 
 
@@ -95,7 +95,7 @@ def test_optimize_computes_total_boards_cost(client):
         json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["totalBoardsUsed"] >= 1
     assert data["totalBoardsCost"] == pytest.approx(data["totalBoardsUsed"] * 45.5)
     assert data["totalBoardsCost"] > 0
@@ -108,7 +108,7 @@ def test_optimize_unknown_board_returns_404(client):
         json=_optimize_payload(created_client["id"], board_id=99999),
     )
     assert resp.status_code == 404
-    assert "Board 99999" in resp.json()["detail"]
+    assert "Board 99999" in resp.json()["errors"][0]["message"]
 
 
 def test_proforma_pdf_and_base64(client):
@@ -117,7 +117,7 @@ def test_proforma_pdf_and_base64(client):
     optimization = client.post(
         "/api/v1/optimize/",
         json=_optimize_payload(created_client["id"], created_board["id"]),
-    ).json()
+    ).json()["data"]
     opt_hash = optimization["optimizationHash"]
 
     pdf = client.get(
@@ -128,6 +128,7 @@ def test_proforma_pdf_and_base64(client):
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
+    # La proforma PDF/base64 queda exenta de la envoltura (transporte de archivo).
     b64 = client.get(
         f"/api/v1/optimize/{opt_hash}/proforma",
         params={"clientId": created_client["id"], "format": "base64"},
@@ -156,11 +157,11 @@ def test_proforma_blocked_without_client_phone(client):
     no_phone = client.post(
         "/api/v1/clients/",
         json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
-    ).json()
+    ).json()["data"]
     optimization = client.post(
         "/api/v1/optimize/",
         json=_optimize_payload(no_phone["id"], created_board["id"]),
-    ).json()
+    ).json()["data"]
     opt_hash = optimization["optimizationHash"]
 
     resp = client.get(
@@ -168,7 +169,7 @@ def test_proforma_blocked_without_client_phone(client):
         params={"clientId": no_phone["id"]},
     )
     assert resp.status_code == 422
-    assert "celular" in resp.json()["detail"].lower()
+    assert "celular" in resp.json()["errors"][0]["message"].lower()
 
 
 def test_optimize_without_client_is_anonymous(client):
@@ -180,14 +181,14 @@ def test_optimize_without_client_is_anonymous(client):
     with_client = client.post(
         "/api/v1/optimize/",
         json=_optimize_payload(created_client["id"], created_board["id"]),
-    ).json()
+    ).json()["data"]
 
     anon_payload = _optimize_payload(created_client["id"], created_board["id"])
     anon_payload.pop("clientId")
     anon = client.post("/api/v1/optimize/", json=anon_payload)
 
     assert anon.status_code == 200
-    data = anon.json()
+    data = anon.json()["data"]
     assert data["client"] is None
     assert data["optimizationHash"] == with_client["optimizationHash"]
 
@@ -200,7 +201,7 @@ def test_optimize_unknown_client_returns_404(client):
         json=_optimize_payload(client_id=99999, board_id=created_board["id"]),
     )
     assert resp.status_code == 404
-    assert "Client 99999" in resp.json()["detail"]
+    assert "Client 99999" in resp.json()["errors"][0]["message"]
 
 
 def test_optimize_does_not_persist(client, db_session):
@@ -214,7 +215,7 @@ def test_optimize_does_not_persist(client, db_session):
         json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
-    assert resp.json()["id"] is None
+    assert resp.json()["data"]["id"] is None
     assert db_session.query(OptimizationModel).count() == 0
 
 
@@ -252,7 +253,7 @@ def test_optimize_deduplicates_identical_patterns(client):
     }
     resp = client.post("/api/v1/optimize/", json=payload)
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
 
     # El conteo físico se mantiene en 5 (layouts, totales y resumen de materiales).
     assert data["totalBoardsUsed"] == 5
@@ -280,7 +281,7 @@ def test_optimize_includes_materials_summary(client):
         json=_optimize_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
 
     summary = data.get("materialsSummary")
     assert summary is not None and len(summary) == 1

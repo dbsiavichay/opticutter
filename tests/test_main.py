@@ -5,8 +5,20 @@ import sys
 from fastapi.testclient import TestClient
 
 from main import app
+from src.shared.database import get_db
 
 client = TestClient(app)
+
+
+def _board_payload(code="MEL18"):
+    return {
+        "code": code,
+        "name": f"Melamina {code}",
+        "height": 2440,
+        "width": 1220,
+        "thickness": 18,
+        "price": 45.5,
+    }
 
 
 def test_app_mappers_configure_without_extra_model_imports():
@@ -88,3 +100,67 @@ def test_cutter_status():
     assert data["status"] == "operational"
     assert "active_processes" in data
     assert "last_update" in data
+
+
+def test_success_response_has_meta_and_request_id_header(client):
+    """Toda respuesta de éxito trae ``meta`` y ecoa el requestId en el header."""
+    resp = client.post("/api/v1/boards/", json=_board_payload())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert "data" in body
+    meta = body["meta"]
+    assert meta["requestId"]
+    assert meta["timestamp"]
+    assert resp.headers["x-request-id"] == meta["requestId"]
+
+
+def test_incoming_request_id_is_propagated(client):
+    """Un ``X-Request-ID`` entrante se conserva (continuidad de traza) y va en meta."""
+    resp = client.get("/api/v1/boards/999999", headers={"X-Request-ID": "trace-123"})
+    assert resp.status_code == 404
+    assert resp.headers["x-request-id"] == "trace-123"
+    assert resp.json()["meta"]["requestId"] == "trace-123"
+
+
+def test_validation_error_includes_field_path(client):
+    """Validación de request → 422 con ``code`` y ``field`` tipo ``body.<campo>``."""
+    resp = client.post("/api/v1/boards/", json={})
+    assert resp.status_code == 422
+    errors = resp.json()["errors"]
+    assert errors[0]["code"] == "VALIDATION_ERROR"
+    assert any(e["field"] and e["field"].startswith("body.") for e in errors)
+
+
+def test_unknown_route_returns_404_envelope(client):
+    """Una ruta inexistente también responde con la envoltura ``{errors, meta}``."""
+    resp = client.get("/api/v1/nope")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert body["errors"][0]["code"] == "NOT_FOUND"
+    assert body["meta"]["requestId"]
+
+
+def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
+    """Una excepción no controlada se traduce a un 500 con envoltura, sin filtrar."""
+
+    def _boom(self, id):
+        raise RuntimeError("boom")
+
+    from src.modules.boards.service import BoardService
+
+    monkeypatch.setattr(BoardService, "get_or_404", _boom)
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app, raise_server_exceptions=False) as test_client:
+            resp = test_client.get("/api/v1/boards/1")
+        assert resp.status_code == 500
+        body = resp.json()
+        assert body["errors"][0]["code"] == "INTERNAL_SERVER_ERROR"
+        assert body["errors"][0]["message"] == "Error interno del servidor"
+        assert body["meta"]["requestId"]
+    finally:
+        app.dependency_overrides.clear()
