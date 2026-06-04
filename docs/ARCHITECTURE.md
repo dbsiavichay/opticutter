@@ -25,7 +25,8 @@ src/
 │   └── crud.py             # CRUDService[Model, Create, Update] genérico
 ├── modules/                # Un slice por recurso
 │   ├── clients/            # {model, schemas, service, router}.py
-│   ├── boards/             # {model, schemas, service, router}.py
+│   ├── products/           # catálogo multi-tipo: + registry.py y types/<tipo>.py
+│   ├── orders/             # raíz de agregado: snapshot inmutable + máquina de estados
 │   ├── optimizations/      # + proforma.py (PDF) y visualization.py (render)
 │   └── system/             # router.py (health + info del servicio)
 ├── cutting/                # DOMINIO puro del algoritmo (sin frameworks)
@@ -45,8 +46,9 @@ Simples y sin ciclos:
   aislada.
 - **`shared/`** no depende de ningún módulo.
 - **`modules/*`** dependen de `shared/` y de `cutting/`.
-- Dependencias entre módulos solo en una dirección: `optimizations` → `clients`/`boards`
-  (p. ej. reutiliza `ClientResponse` y `BoardService`), nunca al revés.
+- Dependencias entre módulos solo en una dirección: `optimizations` → `clients`/`products`
+  (p. ej. reutiliza `ClientResponse` y `ProductService`; solo optimiza productos tipo
+  `board`), nunca al revés.
 
 ## Bloques clave
 
@@ -96,7 +98,7 @@ construyen directamente desde los modelos ORM (`from_attributes=True`).
 
 `shared/database.py` define la `Base` declarativa común; todos los modelos ORM la extienden.
 `alembic/env.py` apunta a `src.shared.database.Base` e **importa los modelos de cada módulo**
-(`src.modules.{clients,boards,optimizations}.model`) para poblar `Base.metadata`, de modo
+(`src.modules.{clients,products,optimizations,orders}.model`) para poblar `Base.metadata`, de modo
 que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
 `config.DATABASE_URL`.
 
@@ -104,7 +106,7 @@ que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
 
 - **App local**: `make run-local` (`ENVIRONMENT=local python main.py`); SQLite por defecto.
 - **Tests**: `make tests-local` (o `.venv/bin/python -m pytest`). La suite cubre el dominio
-  del optimizador, el CRUD genérico vía clients/boards (incluyendo conflictos 409 y 404),
+  del optimizador, el CRUD genérico vía clients/products (incluyendo conflictos 409 y 404),
   el flujo completo de optimización + proforma, y los endpoints del sistema.
 - **Lint**: `make lint-check-local` (ruff).
 - **Migraciones**: `alembic upgrade head`; `alembic revision --autogenerate` no debe generar

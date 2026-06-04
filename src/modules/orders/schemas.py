@@ -39,11 +39,11 @@ class OrderInvoiceUpdate(CamelModel):
 
 
 class OrderExportLine(CamelModel):
-    """Línea de factura para el proveedor externo (cobro por tablero)."""
+    """Línea de factura para el proveedor externo (cobro por producto)."""
 
     description: str = Field(..., description="Human-readable line description")
-    board_code: Optional[str] = None
-    quantity: int = Field(..., description="Number of boards charged")
+    product_code: Optional[str] = None
+    quantity: int = Field(..., description="Number of units charged")
     unit_price: float
     line_total: float
 
@@ -64,9 +64,9 @@ class OrderExportResponse(CamelModel):
 
 class OrderLineResponse(CamelModel):
     id: int
-    board_id: int
-    board_code: Optional[str] = None
-    board_name: Optional[str] = None
+    product_id: int
+    product_code: Optional[str] = None
+    product_name: Optional[str] = None
     quantity: int = Field(..., description="Number of boards charged (cobro=tableros)")
     unit_price_snapshot: float
     line_total: float
@@ -76,7 +76,7 @@ class OrderLineResponse(CamelModel):
 
 class OrderPieceResponse(CamelModel):
     id: int
-    board_id: int
+    product_id: int
     label: Optional[str] = None
     height: int
     width: int

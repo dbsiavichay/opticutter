@@ -19,19 +19,18 @@ def _create_client(client, identifier="0991112233", phone="0991112233"):
 
 def _create_board(client, code="MEL18"):
     return client.post(
-        "/api/v1/boards/",
+        "/api/v1/products/",
         json={
+            "type": "board",
             "code": code,
             "name": f"Melamina {code}",
-            "height": 2440,
-            "width": 1220,
-            "thickness": 18,
             "price": 45.5,
+            "attributes": {"height": 2440, "width": 1220, "thickness": 18},
         },
     ).json()["data"]
 
 
-def _order_payload(client_id, board_id, height=400, width=600, quantity=2):
+def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
     return {
         "clientId": client_id,
         "requirements": [
@@ -40,7 +39,7 @@ def _order_payload(client_id, board_id, height=400, width=600, quantity=2):
                 "height": height,
                 "width": width,
                 "quantity": quantity,
-                "boardId": board_id,
+                "productId": product_id,
                 "label": "Puerta",
                 "canRotate": True,
             }
@@ -64,7 +63,7 @@ def test_create_order_freezes_snapshot_and_charges_boards(client):
     # Cobro = tableros: una línea por tipo de tablero (desde materials_summary).
     assert len(data["lines"]) == 1
     line = data["lines"][0]
-    assert line["boardCode"] == "MEL18"
+    assert line["productCode"] == "MEL18"
     assert line["quantity"] == data["totalBoardsUsed"]
     assert line["lineTotal"] == line["quantity"] * 45.5
 
@@ -265,10 +264,10 @@ def test_order_export_document(client):
     assert data["issuedAt"] is not None
     assert data["externalInvoiceId"] is None
 
-    # Cobro por tablero: una línea con descripción legible y el código.
+    # Cobro por producto: una línea con descripción legible y el código.
     assert len(data["lines"]) == 1
     line = data["lines"][0]
-    assert line["boardCode"] == "MEL18"
+    assert line["productCode"] == "MEL18"
     assert "MEL18" in line["description"]
     assert line["quantity"] == order["totalBoardsUsed"]
     assert line["unitPrice"] == 45.5

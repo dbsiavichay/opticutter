@@ -90,15 +90,19 @@ class OrderModel(Base):
 
 
 class OrderLineModel(Base):
-    """Línea de COBRO: un tipo de tablero usado (cantidad × precio congelado)."""
+    """Línea de COBRO: un producto facturado (cantidad × precio congelado).
+
+    Hoy el cobro es por tableros usados; el modelo admite cualquier producto
+    (tablero, tapacanto, herraje) para órdenes mixtas futuras.
+    """
 
     __tablename__ = "order_lines"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
-    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id"))
-    board_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    board_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    product_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    product_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer)
     unit_price_snapshot: Mapped[float] = mapped_column(Float)
     line_total: Mapped[float] = mapped_column(Float)
@@ -109,13 +113,16 @@ class OrderLineModel(Base):
 
 
 class OrderPieceModel(Base):
-    """Pieza de la LISTA DE CORTE (insumo de producción; no se cobra)."""
+    """Pieza de la LISTA DE CORTE (insumo de producción; no se cobra).
+
+    ``product_id`` referencia el tablero (producto tipo ``board``) del que se corta.
+    """
 
     __tablename__ = "order_pieces"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
-    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     height: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)

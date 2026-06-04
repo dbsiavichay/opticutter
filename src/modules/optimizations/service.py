@@ -14,8 +14,6 @@ from src.cutting import (
     Piece,
     SplitRule,
 )
-from src.modules.boards.model import BoardModel
-from src.modules.boards.service import BoardService
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
@@ -25,10 +23,16 @@ from src.modules.optimizations.schemas import (
     OptimizeResponse,
     Requirement,
 )
+from src.modules.products.model import ProductModel, ProductType
+from src.modules.products.service import ProductService
 from src.shared.cache import cache
 from src.shared.config import config
 from src.shared.database import get_db
-from src.shared.exceptions import EntityNotFoundError, ValidationError
+from src.shared.exceptions import (
+    BusinessRuleError,
+    EntityNotFoundError,
+    ValidationError,
+)
 
 
 class OptimizationService:
@@ -36,12 +40,13 @@ class OptimizationService:
 
     El cómputo es determinista y efímero: se cachea por un hash de las entradas y
     **no** se persiste en BD (la orden es la fuente de verdad durable). El hash es
-    el identificador con el que se recupera la proforma.
+    el identificador con el que se recupera la proforma. Solo los productos de tipo
+    ``board`` se optimizan; el insumo se resuelve del catálogo de productos.
     """
 
     def __init__(self, db: Session):
         self.db = db
-        self.board_service = BoardService(db)
+        self.product_service = ProductService(db)
 
     def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
         """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``.
@@ -94,14 +99,16 @@ class OptimizationService:
         """Calcula (o recupera de caché) el resultado de la optimización.
 
         Cache-first por un hash determinista de entradas (requerimientos +
-        parámetros de corte + precios de tableros). No escribe en BD: lo reutiliza
-        el módulo de órdenes para congelar el snapshot sin depender de la caché.
-        Devuelve ``(payload, optimization_hash)``.
+        parámetros de corte + precios de los productos). No escribe en BD: lo
+        reutiliza el módulo de órdenes para congelar el snapshot sin depender de la
+        caché. Devuelve ``(payload, optimization_hash)``.
         """
         if not request.requirements:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
-        requirements_by_board = self._group_requirements_by_board(request.requirements)
+        requirements_by_product = self._group_requirements_by_product(
+            request.requirements
+        )
 
         cutting_params = CuttingParameters(
             kerf=config.KERF,
@@ -111,32 +118,36 @@ class OptimizationService:
             right_trim=config.RIGHT_TRIM,
         )
 
-        boards: Dict[int, BoardModel] = {}
-        for board_id in requirements_by_board:
-            board = self.board_service.get(board_id)
-            if board is None:
-                raise EntityNotFoundError("Board", board_id)
-            boards[board_id] = board
+        products: Dict[int, ProductModel] = {}
+        for product_id in requirements_by_product:
+            product = self.product_service.get(product_id)
+            if product is None:
+                raise EntityNotFoundError("Product", product_id)
+            if product.type != ProductType.BOARD.value:
+                raise BusinessRuleError(
+                    f"El producto {product.code} no es un tablero optimizable"
+                )
+            products[product_id] = product
 
-        optimization_hash = self._compute_hash(request, cutting_params, boards)
+        optimization_hash = self._compute_hash(request, cutting_params, products)
 
         cached = cache.get_json(optimization_hash)
         if cached is not None:
             return cached, optimization_hash
 
-        board_codes = {bid: board.code for bid, board in boards.items()}
-        board_names = {bid: board.name for bid, board in boards.items()}
-        board_results = [
+        product_codes = {pid: product.code for pid, product in products.items()}
+        product_names = {pid: product.name for pid, product in products.items()}
+        results = [
             self._optimize(
-                pieces=requirements_by_board[bid],
-                board=boards[bid],
+                pieces=requirements_by_product[pid],
+                product=products[pid],
                 cutting_params=cutting_params,
             )
-            for bid in requirements_by_board
+            for pid in requirements_by_product
         ]
 
         payload = self._build_result_payload(
-            request, board_results, board_codes, board_names
+            request, results, product_codes, product_names
         )
         cache.set_json(optimization_hash, payload)
         return payload, optimization_hash
@@ -145,7 +156,7 @@ class OptimizationService:
         self,
         request: OptimizeRequest,
         cutting_params: CuttingParameters,
-        boards: Dict[int, BoardModel],
+        products: Dict[int, ProductModel],
     ) -> str:
         """Hash sha256 determinista de las entradas que afectan el resultado.
 
@@ -161,24 +172,24 @@ class OptimizationService:
                 "left_trim": cutting_params.left_trim,
                 "right_trim": cutting_params.right_trim,
             },
-            "prices": {str(bid): board.price for bid, board in boards.items()},
+            "prices": {str(pid): product.price for pid, product in products.items()},
         }
         canonical = json.dumps(digest_input, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def _group_requirements_by_board(
+    def _group_requirements_by_product(
         self, requirements: List[Requirement]
     ) -> Dict[int, List[Requirement]]:
-        """Agrupa los requerimientos por ID de tablero."""
-        requirements_by_board = defaultdict(list)
+        """Agrupa los requerimientos por ID de producto (tablero)."""
+        requirements_by_product = defaultdict(list)
         for req in requirements:
-            requirements_by_board[req.board_id].append(req)
-        return requirements_by_board
+            requirements_by_product[req.product_id].append(req)
+        return requirements_by_product
 
     def _optimize(
         self,
         pieces: List[Requirement],
-        board: BoardModel,
+        product: ProductModel,
         cutting_params: CuttingParameters,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
@@ -187,12 +198,13 @@ class OptimizationService:
         if not pieces:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
+        attrs = product.attributes
         material = Material(
-            id=board.id,
-            width=board.width,
-            height=board.height,
-            thickness=board.thickness,
-            cost_per_unit=board.price,
+            id=product.id,
+            width=attrs["width"],
+            height=attrs["height"],
+            thickness=attrs["thickness"],
+            cost_per_unit=product.price,
         )
 
         piece_objects = []
@@ -222,20 +234,20 @@ class OptimizationService:
 
     def _build_materials_summary(
         self,
-        board_results: List[Tuple[List[CuttingLayout], List[Piece]]],
-        board_codes: Dict[int, str],
-        board_names: Dict[int, str],
+        results: List[Tuple[List[CuttingLayout], List[Piece]]],
+        product_codes: Dict[int, str],
+        product_names: Dict[int, str],
     ) -> List[dict]:
         """Agrega los layouts por tipo de tablero con métricas y costos."""
         summary: Dict[int, dict] = {}
-        for layouts, _ in board_results:
+        for layouts, _ in results:
             for layout in layouts:
-                bid = layout.material.id
-                if bid not in summary:
-                    summary[bid] = {
-                        "board_id": bid,
-                        "board_code": board_codes.get(bid, "N/A"),
-                        "board_name": board_names.get(bid, "N/A"),
+                pid = layout.material.id
+                if pid not in summary:
+                    summary[pid] = {
+                        "product_id": pid,
+                        "product_code": product_codes.get(pid, "N/A"),
+                        "product_name": product_names.get(pid, "N/A"),
                         "width": layout.material.width,
                         "height": layout.material.height,
                         "thickness": layout.material.thickness,
@@ -245,7 +257,7 @@ class OptimizationService:
                         "cost_per_unit": layout.material.cost_per_unit,
                         "total_cost": 0.0,
                     }
-                entry = summary[bid]
+                entry = summary[pid]
                 entry["count"] += 1
                 entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
                 entry["_efficiencies"].append(layout.efficiency * 100)
@@ -263,34 +275,36 @@ class OptimizationService:
     def _build_result_payload(
         self,
         request: OptimizeRequest,
-        board_results: List[Tuple[List[CuttingLayout], List[Piece]]],
-        board_codes: Dict[int, str],
-        board_names: Dict[int, str],
+        results: List[Tuple[List[CuttingLayout], List[Piece]]],
+        product_codes: Dict[int, str],
+        product_names: Dict[int, str],
     ) -> dict:
         """Arma el payload cacheable/serializable del resultado de optimización.
 
-        Mismas claves que persiste ``optimizations`` y que consumen ``proforma`` y
-        el snapshot de las órdenes.
+        Mismas claves que consumen ``proforma`` y el snapshot de las órdenes.
         """
-        total_boards_used = sum(len(layouts) for layouts, _ in board_results)
+        total_boards_used = sum(len(layouts) for layouts, _ in results)
         total_boards_cost = sum(
             layout.material.cost_per_unit
-            for layouts, _ in board_results
+            for layouts, _ in results
             for layout in layouts
         )
         layout_dicts = [
-            layout.to_dict() for layouts, _ in board_results for layout in layouts
+            layout.to_dict() for layouts, _ in results for layout in layouts
         ]
         return {
             "total_boards_used": total_boards_used,
             "total_boards_cost": total_boards_cost,
             "requirements": [
-                {**r.model_dump(), "board_code": board_codes.get(r.board_id, "N/A")}
+                {
+                    **r.model_dump(),
+                    "product_code": product_codes.get(r.product_id, "N/A"),
+                }
                 for r in request.requirements
             ],
             "layouts": layout_dicts,
             "materials_summary": self._build_materials_summary(
-                board_results, board_codes, board_names
+                results, product_codes, product_names
             ),
             "layout_groups": group_layouts(layout_dicts),
         }

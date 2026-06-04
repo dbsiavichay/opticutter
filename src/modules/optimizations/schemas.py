@@ -7,9 +7,9 @@ from src.shared.schemas import CamelModel
 
 
 class MaterialSummary(CamelModel):
-    board_id: int
-    board_code: str
-    board_name: str
+    product_id: int
+    product_code: str
+    product_name: str
     height: float
     width: float
     thickness: float
@@ -31,7 +31,7 @@ class Requirement(CamelModel):
         ..., description="Piece width (ancho, segunda medida) in mm"
     )
     quantity: PositiveInt = Field(default=1, le=10000)
-    board_id: int = Field(..., description="Target board ID for this piece")
+    product_id: int = Field(..., description="Target product ID (board) for this piece")
     label: Optional[str] = Field(default=None, description="Human-friendly piece label")
     can_rotate: bool = Field(
         default=True,
@@ -57,7 +57,9 @@ class OptimizeRequest(CamelModel):
 
 
 class Material(CamelModel):
-    board_id: int = Field(..., description="Board ID this sheet was cut from")
+    material_id: int = Field(
+        ..., description="Product ID (board) this sheet was cut from"
+    )
     sheet_number: int = Field(
         ..., description="Sheet number within the board (1-based)"
     )
@@ -119,7 +121,9 @@ class LayoutGroup(CamelModel):
     sheet_numbers: List[int] = Field(
         ..., description="Sheet numbers that use this pattern"
     )
-    board_id: int = Field(..., description="Board ID the pattern is cut from")
+    material_id: int = Field(
+        ..., description="Product ID (board) the pattern is cut from"
+    )
     layout: Layout = Field(..., description="Representative layout for this pattern")
 
 

@@ -22,7 +22,7 @@ Este proyecto ha sido configurado para usar SQLAlchemy con Alembic para las migr
 ## Estructura de archivos
 
 - `src/shared/database.py`: Configuración de SQLAlchemy (`Base`, `engine`, `SessionLocal`, `get_db`)
-- `src/modules/<recurso>/model.py`: Modelos de cada módulo (ej. `src/modules/boards/model.py`)
+- `src/modules/<recurso>/model.py`: Modelos de cada módulo (ej. `src/modules/products/model.py`)
 - `alembic/`: Configuración y migraciones de Alembic (`alembic/env.py` importa `Base` y los modelos)
 - `alembic.ini`: Archivo de configuración de Alembic
 

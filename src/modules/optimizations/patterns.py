@@ -27,7 +27,7 @@ def layout_signature(layout: dict) -> Tuple:
     Ignora el número de hoja, los remanentes (derivados de las piezas) y el sufijo
     de instancia del ``piece_id``.
     """
-    board_id = layout.get("material", {}).get("board_id")
+    material_id = layout.get("material", {}).get("material_id")
     pieces = [
         (
             base_label(str(piece.get("piece_id", ""))),
@@ -40,7 +40,7 @@ def layout_signature(layout: dict) -> Tuple:
         for piece in layout.get("placed_pieces", [])
     ]
     pieces.sort(key=lambda p: (p[1], p[2], p[3], p[4], p[0]))
-    return (board_id, tuple(pieces))
+    return (material_id, tuple(pieces))
 
 
 def group_layouts(layouts: List[dict]) -> List[dict]:
@@ -53,7 +53,7 @@ def group_layouts(layouts: List[dict]) -> List[dict]:
             "pattern_id": 1,
             "count": 5,
             "sheet_numbers": [1, 2, 3, 4, 5],
-            "board_id": 18,
+            "material_id": 18,
             "layout": { ...layout representativo... },
         }
     """
@@ -76,7 +76,7 @@ def group_layouts(layouts: List[dict]) -> List[dict]:
                 "pattern_id": len(groups) + 1,
                 "count": 1,
                 "sheet_numbers": [sheet_number],
-                "board_id": layout.get("material", {}).get("board_id"),
+                "material_id": layout.get("material", {}).get("material_id"),
                 "layout": layout,
             }
         )
