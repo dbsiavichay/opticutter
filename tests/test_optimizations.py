@@ -10,7 +10,12 @@ from src.shared.exceptions import EntityNotFoundError, ValidationError
 def _create_client(client):
     return client.post(
         "/api/v1/clients/",
-        json={"identifier": "0991112233", "firstName": "Ada", "lastName": "Lovelace"},
+        json={
+            "identifier": "0991112233",
+            "firstName": "Ada",
+            "lastName": "Lovelace",
+            "phone": "0991112233",
+        },
     ).json()
 
 
@@ -143,6 +148,27 @@ def test_proforma_missing_optimization_returns_404(client):
 def test_proforma_requires_client_id(client):
     """La proforma exige ``clientId`` (la optimización es anónima)."""
     assert client.get(f"/api/v1/optimize/{'0' * 64}/proforma").status_code == 422
+
+
+def test_proforma_blocked_without_client_phone(client):
+    """Regla de negocio: sin celular registrado no se genera la proforma (422)."""
+    created_board = _create_board(client)
+    no_phone = client.post(
+        "/api/v1/clients/",
+        json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
+    ).json()
+    optimization = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(no_phone["id"], created_board["id"]),
+    ).json()
+    opt_hash = optimization["optimizationHash"]
+
+    resp = client.get(
+        f"/api/v1/optimize/{opt_hash}/proforma",
+        params={"clientId": no_phone["id"]},
+    )
+    assert resp.status_code == 422
+    assert "celular" in resp.json()["detail"].lower()
 
 
 def test_optimize_without_client_is_anonymous(client):

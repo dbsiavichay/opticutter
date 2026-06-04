@@ -16,3 +16,8 @@ class ClientModel(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     source: Mapped[Optional[str]] = mapped_column(String(64))
+    # Celular y email: nullable porque el cliente se crea perezosamente (resolve) antes
+    # de conocerse. Exigir el celular es una regla de negocio al generar proforma/orden,
+    # no un constraint de creación.
+    phone: Mapped[Optional[str]] = mapped_column(String(32))
+    email: Mapped[Optional[str]] = mapped_column(String(128))

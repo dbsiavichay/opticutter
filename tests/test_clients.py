@@ -90,6 +90,31 @@ def test_update_client(client):
     assert resp.json()["lastName"] == "Lovelace"
 
 
+def test_create_client_stores_phone_and_email(client):
+    """``phone`` y ``email`` se almacenan y se devuelven (email opcional)."""
+    payload = {**_payload(), "phone": "0991112233", "email": "ada@example.com"}
+    created = client.post("/api/v1/clients/", json=payload).json()
+    assert created["phone"] == "0991112233"
+    assert created["email"] == "ada@example.com"
+
+
+def test_client_phone_and_email_are_optional_on_create(client):
+    """Sin ``phone``/``email`` el cliente se crea igual (regla se aplica al cotizar)."""
+    created = client.post("/api/v1/clients/", json=_payload()).json()
+    assert created["phone"] is None
+    assert created["email"] is None
+
+
+def test_update_client_phone(client):
+    """``PUT`` permite registrar el celular más tarde (lo usa el bot tras compartir)."""
+    created = client.post("/api/v1/clients/", json=_payload()).json()
+    resp = client.put(f"/api/v1/clients/{created['id']}", json={"phone": "0987654321"})
+    assert resp.status_code == 200
+    assert resp.json()["phone"] == "0987654321"
+    # No pisa el resto de campos.
+    assert resp.json()["firstName"] == "Ada"
+
+
 def test_update_missing_client_returns_404(client):
     resp = client.put("/api/v1/clients/999999", json={"firstName": "Nobody"})
     assert resp.status_code == 404

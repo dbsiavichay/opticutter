@@ -18,6 +18,12 @@ class ClientBase(CamelModel):
     source: Optional[str] = Field(
         None, max_length=64, description="Client source (e.g. instagram, referral)"
     )
+    phone: Optional[str] = Field(
+        None, max_length=32, description="Client mobile phone (celular)"
+    )
+    email: Optional[str] = Field(
+        None, max_length=128, description="Client email (optional)"
+    )
 
 
 class ClientCreate(ClientBase):
@@ -38,6 +44,12 @@ class ClientUpdate(CamelModel):
     )
     source: Optional[str] = Field(
         None, max_length=64, description="Client source (e.g. instagram, referral)"
+    )
+    phone: Optional[str] = Field(
+        None, max_length=32, description="Client mobile phone (celular)"
+    )
+    email: Optional[str] = Field(
+        None, max_length=128, description="Client email (optional)"
     )
 
 

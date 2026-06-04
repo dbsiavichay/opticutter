@@ -17,6 +17,7 @@ from src.cutting import (
 from src.modules.boards.model import BoardModel
 from src.modules.boards.service import BoardService
 from src.modules.clients.model import ClientModel
+from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.schemas import (
@@ -84,6 +85,7 @@ class OptimizationService:
         client = self.db.get(ClientModel, client_id)
         if client is None:
             raise EntityNotFoundError("Client", client_id)
+        require_phone(client)
         return ProformaCarrier.from_payload(
             payload, client, reference=f"OPT-{optimization_hash[:8]}"
         )

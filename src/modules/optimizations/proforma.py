@@ -359,9 +359,11 @@ class ProformaService:
         )
         client_data = [
             ["Nombre:", client_name],
-            ["Identificador:", client.identifier or "N/A"],
-            ["ID Cliente:", str(client.id)],
+            ["Celular:", getattr(client, "phone", None) or "N/A"],
         ]
+        if getattr(client, "email", None):
+            client_data.append(["Email:", client.email])
+        client_data.append(["ID Cliente:", str(client.id)])
         client_table = Table(
             client_data, colWidths=[1.5 * inch, CONTENT_WIDTH - 1.5 * inch]
         )

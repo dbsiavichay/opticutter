@@ -7,7 +7,20 @@ from src.modules.clients.model import ClientModel
 from src.modules.clients.schemas import ClientCreate, ClientUpdate
 from src.shared.crud import CRUDService
 from src.shared.database import get_db
-from src.shared.exceptions import ConflictError
+from src.shared.exceptions import BusinessRuleError, ConflictError
+
+
+def require_phone(client: ClientModel) -> None:
+    """Exige un celular registrado antes de emitir documentos comerciales.
+
+    Regla de negocio dura: ni la proforma ni la orden pueden generarse sin un
+    número de celular válido. El email es opcional y nunca bloquea.
+    """
+    if not (client.phone and client.phone.strip()):
+        raise BusinessRuleError(
+            "El cliente no tiene un número de celular registrado. Solicita y "
+            "registra su celular antes de generar la proforma o el pedido."
+        )
 
 
 class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
