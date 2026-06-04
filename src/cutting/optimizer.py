@@ -310,26 +310,30 @@ class GuillotineOptimizer:
         new_rects = []
 
         if width_leftover > 0:
-            new_rects.append(
-                Rectangle(
-                    rect.x + effective_width,
-                    rect.y,
-                    rect.width - effective_width,
-                    effective_height - self.kerf
-                    if height_leftover > 0
-                    else effective_height,
+            remaining_width = rect.width - effective_width
+            if remaining_width > 0:
+                new_rects.append(
+                    Rectangle(
+                        rect.x + effective_width,
+                        rect.y,
+                        remaining_width,
+                        effective_height - self.kerf
+                        if height_leftover > 0
+                        else effective_height,
+                    )
                 )
-            )
 
         if height_leftover > 0:
-            new_rects.append(
-                Rectangle(
-                    rect.x,
-                    rect.y + effective_height,
-                    rect.width,
-                    rect.height - effective_height,
+            remaining_height = rect.height - effective_height
+            if remaining_height > 0:
+                new_rects.append(
+                    Rectangle(
+                        rect.x,
+                        rect.y + effective_height,
+                        rect.width,
+                        remaining_height,
+                    )
                 )
-            )
 
         return new_rects
 
@@ -345,26 +349,30 @@ class GuillotineOptimizer:
         new_rects = []
 
         if height_leftover > 0:
-            new_rects.append(
-                Rectangle(
-                    rect.x,
-                    rect.y + effective_height,
-                    effective_width - self.kerf
-                    if width_leftover > 0
-                    else effective_width,
-                    rect.height - effective_height,
+            remaining_height = rect.height - effective_height
+            if remaining_height > 0:
+                new_rects.append(
+                    Rectangle(
+                        rect.x,
+                        rect.y + effective_height,
+                        effective_width - self.kerf
+                        if width_leftover > 0
+                        else effective_width,
+                        remaining_height,
+                    )
                 )
-            )
 
         if width_leftover > 0:
-            new_rects.append(
-                Rectangle(
-                    rect.x + effective_width,
-                    rect.y,
-                    rect.width - effective_width,
-                    rect.height,
+            remaining_width = rect.width - effective_width
+            if remaining_width > 0:
+                new_rects.append(
+                    Rectangle(
+                        rect.x + effective_width,
+                        rect.y,
+                        remaining_width,
+                        rect.height,
+                    )
                 )
-            )
 
         return new_rects
 

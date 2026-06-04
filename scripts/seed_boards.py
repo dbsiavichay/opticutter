@@ -1,4 +1,4 @@
-"""Seed script: borra los tableros existentes e inserta 20 nuevos."""
+"""Seed script: borra los tableros existentes e inserta la colección Trend 2026."""
 
 import os
 import sys
@@ -8,210 +8,93 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.modules.boards.model import BoardModel
 from src.shared.database import SessionLocal
 
-BOARDS = [
-    # Colores puros
-    {
-        "code": "MEL-18-BL",
-        "name": "Melamina 18mm Blanco Polar",
-        "description": "Melamina blanco polar liso, uso general en muebles",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 52.00,
-    },
-    {
-        "code": "MEL-18-NG",
-        "name": "Melamina 18mm Negro Azabache",
-        "description": "Melamina negro azabache, acabado mate",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 54.00,
-    },
-    {
-        "code": "MEL-18-GR",
-        "name": "Melamina 18mm Gris Perla",
-        "description": "Melamina gris perla liso para mobiliario moderno",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 54.00,
-    },
-    {
-        "code": "MEL-18-AN",
-        "name": "Melamina 18mm Antracita",
-        "description": "Melamina antracita oscuro acabado suave",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 55.00,
-    },
-    {
-        "code": "MEL-18-BG",
-        "name": "Melamina 18mm Beige Arena",
-        "description": "Melamina beige arena, tono cálido neutro",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 52.00,
-    },
-    {
-        "code": "MEL-18-AZ",
-        "name": "Melamina 18mm Azul Océano",
-        "description": "Melamina azul océano para acentos y frentes",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 56.00,
-    },
-    {
-        "code": "MEL-18-VD",
-        "name": "Melamina 18mm Verde Salvia",
-        "description": "Melamina verde salvia tendencia nórdica",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": None,
-        "price": 56.00,
-    },
-    {
-        "code": "MEL-15-BL",
-        "name": "Melamina 15mm Blanco Polar",
-        "description": "Melamina blanco polar 15mm para laterales y fondos",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 15,
-        "grain_direction": None,
-        "price": 44.00,
-    },
-    {
-        "code": "MEL-25-BL",
-        "name": "Melamina 25mm Blanco Polar",
-        "description": "Melamina blanco polar 25mm para mesones y repisas",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 25,
-        "grain_direction": None,
-        "price": 68.00,
-    },
-    {
-        "code": "MEL-25-NG",
-        "name": "Melamina 25mm Negro Azabache",
-        "description": "Melamina negro azabache 25mm para tops y mesones",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 25,
-        "grain_direction": None,
-        "price": 70.00,
-    },
-    # Maderados
-    {
-        "code": "MEL-18-RB",
-        "name": "Melamina 18mm Roble Natural",
-        "description": "Melamina maderada roble natural veta horizontal",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 58.00,
-    },
-    {
-        "code": "MEL-18-WN",
-        "name": "Melamina 18mm Nogal Oscuro",
-        "description": "Melamina maderada nogal oscuro veta fina",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 60.00,
-    },
-    {
-        "code": "MEL-18-TC",
-        "name": "Melamina 18mm Teca Dorada",
-        "description": "Melamina maderada teca dorada acabado cálido",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 62.00,
-    },
-    {
-        "code": "MEL-18-WG",
-        "name": "Melamina 18mm Wengué",
-        "description": "Melamina maderada wengué veta pronunciada oscura",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 62.00,
-    },
-    {
-        "code": "MEL-18-HP",
-        "name": "Melamina 18mm Haya Perla",
-        "description": "Melamina maderada haya perla tono claro suave",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 58.00,
-    },
-    {
-        "code": "MEL-18-PN",
-        "name": "Melamina 18mm Pino Nórdico",
-        "description": "Melamina maderada pino nórdico veta clara natural",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "V",
-        "price": 56.00,
-    },
-    {
-        "code": "MEL-18-CE",
-        "name": "Melamina 18mm Cerezo",
-        "description": "Melamina maderada cerezo tono rojizo cálido",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 60.00,
-    },
-    {
-        "code": "MEL-18-AC",
-        "name": "Melamina 18mm Acacia",
-        "description": "Melamina maderada acacia veta irregular moderna",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 18,
-        "grain_direction": "H",
-        "price": 61.00,
-    },
-    {
-        "code": "MEL-25-RB",
-        "name": "Melamina 25mm Roble Natural",
-        "description": "Melamina maderada roble natural 25mm para mesones",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 25,
-        "grain_direction": "H",
-        "price": 74.00,
-    },
-    {
-        "code": "MEL-25-WN",
-        "name": "Melamina 25mm Nogal Oscuro",
-        "description": "Melamina maderada nogal oscuro 25mm para tops",
-        "length": 2440,
-        "width": 1220,
-        "thickness": 25,
-        "grain_direction": "H",
-        "price": 76.00,
-    },
+TEXTURE_DESC = {
+    "BS": "acabado Bureau Structure, superficie estructurada suave",
+    "SU": "acabado Super Matt, superficie ultra mate sin brillo",
+    "PE": "acabado Pearl, superficie perlada de tacto sedoso",
+    "PW": "acabado Pure Wood, textura madera pura de alta definición",
+    "RW": "acabado Rift Wood, veta rift de madera aserrada",
+    "SN": "acabado Super Natural, textura ultrarrealista imitación madera",
+}
+
+# (abbr, display_name, category, grain_direction, texture)
+DESIGNS = [
+    # Sólidos
+    ("CSH", "Cashmere",          "SL", None, "BS"),
+    ("GRT", "Gris Ratón",        "SL", None, "SU"),
+    ("ANT", "Antracita",         "SL", None, "PE"),
+    ("NGR", "Negro",             "SL", None, "PE"),
+    ("BNV", "Blanco Nieve",      "SL", None, "BS"),
+    # Robles
+    ("COE", "Costa Evoke",       "RO", "H",  "PW"),
+    ("ARD", "Artesanal Dorado",  "RO", "H",  "PW"),
+    ("BRD", "Barroco Dorado",    "RO", "H",  "RW"),
+    ("BRA", "Barroco Ámbar",     "RO", "H",  "RW"),
+    ("BRR", "Barroco Ristretto", "RO", "H",  "RW"),
+    # Claros
+    ("IBZ", "Ibiza Lineal",      "CL", "H",  "SN"),
+    ("CHA", "Chantillí",         "CL", "H",  "SN"),
+    ("JAP", "Japandi",           "CL", "H",  "SN"),
+    # Cremonas
+    ("COT", "Cotta",             "CR", "H",  "PW"),
+    ("TOR", "Torro",             "CR", "H",  "PW"),
+    ("CAN", "Cannolo",           "CR", "H",  "PW"),
 ]
+
+CATEGORY_LABEL = {"SL": "Sólido", "RO": "Roble", "CL": "Claro", "CR": "Cremona"}
+
+PRICES = {
+    ("SL", 15, False):  48.00,
+    ("SL", 15, True):   56.00,
+    ("SL", 36, False):  95.00,
+    ("SL", 36, True):  112.00,
+    ("RO", 15, False):  62.00,
+    ("RO", 15, True):   72.00,
+    ("RO", 36, False): 122.00,
+    ("RO", 36, True):  140.00,
+    ("CL", 15, False):  58.00,
+    ("CL", 15, True):   68.00,
+    ("CL", 36, False): 115.00,
+    ("CL", 36, True):  132.00,
+    ("CR", 15, False):  64.00,
+    ("CR", 15, True):   75.00,
+    ("CR", 36, False): 126.00,
+    ("CR", 36, True):  145.00,
+}
+
+
+def make_board(abbr, name, cat, grain, texture, thickness, rh, height=2800, width=2070, name_suffix=""):
+    rh_label = " RH" if rh else ""
+    rh_text = ", resistente a la humedad" if rh else ""
+    description = (
+        f"MDP {CATEGORY_LABEL[cat]} {name}, {thickness}mm, {TEXTURE_DESC[texture]}{rh_text}"
+    )
+    return {
+        "code": f"MDP-{cat}-{abbr}-{thickness}{'-RH' if rh else ''}",
+        "name": f"MDP {thickness}mm {name}{name_suffix}{rh_label}",
+        "description": description[:256],
+        "height": height,
+        "width": width,
+        "thickness": thickness,
+        "grain_direction": grain,
+        "price": PRICES[(cat, thickness, rh)],
+    }
+
+
+def build_boards():
+    boards = []
+    for abbr, name, cat, grain, texture in DESIGNS:
+        for thickness in (15, 36):
+            for rh in (False, True):
+                boards.append(make_board(abbr, name, cat, grain, texture, thickness, rh))
+    # Blanco Nieve formato especial 2440 mm
+    for thickness in (15, 36):
+        for rh in (False, True):
+            boards.append(
+                make_board("BNV-SP", "Blanco Nieve", "SL", None, "BS", thickness, rh,
+                           height=2440, width=2070, name_suffix=" Especial")
+            )
+    return boards
 
 
 def main():
@@ -220,7 +103,7 @@ def main():
         deleted = db.query(BoardModel).delete()
         print(f"Eliminados {deleted} tableros existentes.")
 
-        boards = [BoardModel(**data) for data in BOARDS]
+        boards = [BoardModel(**data) for data in build_boards()]
         db.add_all(boards)
         db.commit()
         print(f"Insertados {len(boards)} tableros nuevos.")
