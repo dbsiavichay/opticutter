@@ -5,10 +5,15 @@ from datetime import datetime
 from src.shared.config import config
 
 
-def _create_client(client, identifier="0991112233"):
+def _create_client(client, identifier="0991112233", phone="0991112233"):
     return client.post(
         "/api/v1/clients/",
-        json={"identifier": identifier, "firstName": "Ada", "lastName": "Lovelace"},
+        json={
+            "identifier": identifier,
+            "firstName": "Ada",
+            "lastName": "Lovelace",
+            "phone": phone,
+        },
     ).json()
 
 
@@ -75,6 +80,29 @@ def test_create_order_freezes_snapshot_and_charges_boards(client):
     # Historial inicial registra la creación.
     assert data["history"][0]["toStatus"] == "confirmed"
     assert data["history"][0]["fromStatus"] is None
+
+
+def test_create_order_blocked_without_client_phone(client):
+    """Regla de negocio: sin celular registrado no se crea el pedido (422)."""
+    b = _create_board(client)
+    no_phone = client.post(
+        "/api/v1/clients/",
+        json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
+    ).json()
+
+    resp = client.post("/api/v1/orders/", json=_order_payload(no_phone["id"], b["id"]))
+    assert resp.status_code == 422
+    assert "celular" in resp.json()["detail"].lower()
+    # No se persistió ninguna orden.
+    assert client.get("/api/v1/orders/").json() == []
+
+
+def test_create_order_unknown_client_returns_404(client):
+    """Un ``clientId`` inexistente da 404 limpio antes de congelar nada."""
+    b = _create_board(client)
+    resp = client.post("/api/v1/orders/", json=_order_payload(99999, b["id"]))
+    assert resp.status_code == 404
+    assert "Client 99999" in resp.json()["detail"]
 
 
 def test_create_order_is_idempotent(client):

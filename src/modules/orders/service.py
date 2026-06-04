@@ -4,6 +4,8 @@ from typing import List, Optional
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from src.modules.clients.model import ClientModel
+from src.modules.clients.service import require_phone
 from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
@@ -61,6 +63,13 @@ class OrderService:
 
         Idempotente: un re-POST idéntico devuelve la orden activa existente.
         """
+        # Regla de negocio: el cliente debe existir y tener un celular registrado
+        # antes de congelar cualquier pedido (también bloquea re-POST sin celular).
+        client = self.db.get(ClientModel, data.client_id)
+        if client is None:
+            raise EntityNotFoundError("Client", data.client_id)
+        require_phone(client)
+
         opt_request = OptimizeRequest(
             requirements=data.requirements, client_id=data.client_id
         )
