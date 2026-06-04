@@ -1,4 +1,4 @@
-"""Seed script: borra los tableros existentes e inserta la colección Trend 2026."""
+"""Seed script: borra tableros y tapacantos existentes e inserta la colección Trend 2026."""
 
 import os
 import sys
@@ -123,20 +123,90 @@ def build_boards():
     return boards
 
 
+# --- Tapacantos -----------------------------------------------------------
+#
+# Cada diseño de tablero tiene su tapacanto de PVC coordinado (mapeo 1:1 con
+# DESIGNS). Salvo el Blanco, todos vienen en las 3 medidas estándar:
+#   (tipo, espesor_mm, ancho_mm)
+EDGE_BAND_VARIANTS = [
+    ("Suave", 0.45, 19),
+    ("Duro", 1.00, 40),
+    ("Duro", 1.50, 19),
+]
+
+# TODO: precios PLACEHOLDER (no provistos). Reemplazar con los reales.
+EDGE_PRICES = {
+    (0.45, 19): 12.00,
+    (1.00, 40): 22.00,
+    (1.50, 19): 15.00,
+}
+
+
+def edge_label(abbr, name, cat):
+    """Etiqueta comercial del tapacanto según la categoría del diseño."""
+    if abbr == "BNV":  # el tapacanto se llama "Blanco", no "Blanco Nieve"
+        name = "Blanco"
+    if cat == "RO":
+        return f"Roble {name}"
+    if cat == "CR":
+        return f"{name} Cremona"
+    return name
+
+
+def make_edge_banding(abbr, name, cat, band_type, thickness, width):
+    label = edge_label(abbr, name, cat)
+    thick_txt = f"{thickness:g}"  # 0.45, 1, 1.5 (sin ceros sobrantes)
+    description = (
+        f"Tapacanto PVC {label}, tipo {band_type}, {thick_txt}mm x {width}mm, "
+        f"coordinado con tablero MDP {label}"
+    )
+    return {
+        "type": ProductType.EDGE_BANDING.value,
+        "code": f"TAP-{cat}-{abbr}-{int(round(thickness * 100)):03d}",
+        "name": f"Tapacanto PVC {label} {band_type} {thick_txt}x{width}mm",
+        "description": description[:256],
+        "price": EDGE_PRICES[(thickness, width)],
+        "is_active": True,
+        # Atributos en la forma canónica camelCase del catálogo de productos.
+        "attributes": {
+            "bandType": band_type,
+            "thickness": thickness,
+            "width": width,
+            "color": label,
+        },
+    }
+
+
+def build_edge_bandings():
+    bands = []
+    for abbr, name, cat, _grain, _texture in DESIGNS:
+        # El Blanco no se ofrece en las 3 medidas coordinadas; solo el Suave estándar.
+        variants = [EDGE_BAND_VARIANTS[0]] if abbr == "BNV" else EDGE_BAND_VARIANTS
+        for band_type, thickness, width in variants:
+            bands.append(
+                make_edge_banding(abbr, name, cat, band_type, thickness, width)
+            )
+    return bands
+
+
 def main():
     db = SessionLocal()
     try:
-        deleted = (
-            db.query(ProductModel)
-            .filter(ProductModel.type == ProductType.BOARD.value)
-            .delete()
-        )
-        print(f"Eliminados {deleted} tableros existentes.")
+        for product_type, builder, label in (
+            (ProductType.BOARD, build_boards, "tableros"),
+            (ProductType.EDGE_BANDING, build_edge_bandings, "tapacantos"),
+        ):
+            deleted = (
+                db.query(ProductModel)
+                .filter(ProductModel.type == product_type.value)
+                .delete()
+            )
+            print(f"Eliminados {deleted} {label} existentes.")
 
-        boards = [ProductModel(**data) for data in build_boards()]
-        db.add_all(boards)
+            items = [ProductModel(**data) for data in builder()]
+            db.add_all(items)
+            print(f"Insertados {len(items)} {label} nuevos.")
         db.commit()
-        print(f"Insertados {len(boards)} tableros nuevos.")
     except Exception as e:
         db.rollback()
         print(f"Error: {e}")
