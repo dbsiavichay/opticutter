@@ -12,6 +12,7 @@ from src.modules.orders.router import router as orders_router
 from src.modules.system.router import router as system_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
+from src.shared.middleware import RequestIDMiddleware
 
 # Configurar logging
 logging.basicConfig(
@@ -47,6 +48,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Correlación por request (requestId + header X-Request-ID). Se añade de último
+# para envolver al resto del stack y estar disponible en éxito y en error.
+app.add_middleware(RequestIDMiddleware)
 
 # Manejo centralizado de errores de aplicación
 register_exception_handlers(app)

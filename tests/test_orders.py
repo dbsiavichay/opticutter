@@ -14,7 +14,7 @@ def _create_client(client, identifier="0991112233", phone="0991112233"):
             "lastName": "Lovelace",
             "phone": phone,
         },
-    ).json()
+    ).json()["data"]
 
 
 def _create_board(client, code="MEL18"):
@@ -28,7 +28,7 @@ def _create_board(client, code="MEL18"):
             "thickness": 18,
             "price": 45.5,
         },
-    ).json()
+    ).json()["data"]
 
 
 def _order_payload(client_id, board_id, height=400, width=600, quantity=2):
@@ -54,7 +54,7 @@ def test_create_order_freezes_snapshot_and_charges_boards(client):
 
     resp = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"]))
     assert resp.status_code == 201
-    data = resp.json()
+    data = resp.json()["data"]
 
     assert data["status"] == "confirmed"
     assert data["code"] == f"ORD-{datetime.utcnow().year}-{data['id']:04d}"
@@ -88,13 +88,13 @@ def test_create_order_blocked_without_client_phone(client):
     no_phone = client.post(
         "/api/v1/clients/",
         json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
-    ).json()
+    ).json()["data"]
 
     resp = client.post("/api/v1/orders/", json=_order_payload(no_phone["id"], b["id"]))
     assert resp.status_code == 422
-    assert "celular" in resp.json()["detail"].lower()
+    assert "celular" in resp.json()["errors"][0]["message"].lower()
     # No se persistió ninguna orden.
-    assert client.get("/api/v1/orders/").json() == []
+    assert client.get("/api/v1/orders/").json()["data"] == []
 
 
 def test_create_order_unknown_client_returns_404(client):
@@ -102,7 +102,7 @@ def test_create_order_unknown_client_returns_404(client):
     b = _create_board(client)
     resp = client.post("/api/v1/orders/", json=_order_payload(99999, b["id"]))
     assert resp.status_code == 404
-    assert "Client 99999" in resp.json()["detail"]
+    assert "Client 99999" in resp.json()["errors"][0]["message"]
 
 
 def test_create_order_is_idempotent(client):
@@ -110,13 +110,13 @@ def test_create_order_is_idempotent(client):
     b = _create_board(client)
     payload = _order_payload(c["id"], b["id"])
 
-    first = client.post("/api/v1/orders/", json=payload).json()
-    second = client.post("/api/v1/orders/", json=payload).json()
+    first = client.post("/api/v1/orders/", json=payload).json()["data"]
+    second = client.post("/api/v1/orders/", json=payload).json()["data"]
 
     assert first["id"] == second["id"]
     assert first["code"] == second["code"]
     # No se crean dos órdenes para el mismo (cliente, hash).
-    assert len(client.get("/api/v1/orders/").json()) == 1
+    assert len(client.get("/api/v1/orders/").json()["data"]) == 1
 
 
 def test_pending_cap_blocks_excess_orders(client, monkeypatch):
@@ -143,35 +143,39 @@ def test_pending_cap_blocks_excess_orders(client, monkeypatch):
         "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=450)
     )
     assert third.status_code == 422
-    assert "pendiente" in third.json()["detail"]
+    assert "pendiente" in third.json()["errors"][0]["message"]
 
 
 def test_status_transitions_valid_and_invalid(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     oid = order["id"]
 
     ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "approved"})
     assert ok.status_code == 200
-    assert ok.json()["status"] == "approved"
+    assert ok.json()["data"]["status"] == "approved"
 
     ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "in_production"})
     assert ok2.status_code == 200
-    assert ok2.json()["status"] == "in_production"
+    assert ok2.json()["data"]["status"] == "in_production"
     # Historial acumulado: creación + 2 transiciones.
-    assert len(ok2.json()["history"]) == 3
+    assert len(ok2.json()["data"]["history"]) == 3
 
     # in_production → completed no es una transición válida.
     bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "completed"})
     assert bad.status_code == 422
-    assert "inválida" in bad.json()["detail"]
+    assert "inválida" in bad.json()["errors"][0]["message"]
 
 
 def test_invalid_transition_from_confirmed(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     # confirmed → completed (salta estados) no es válido.
     bad = client.patch(
         f"/api/v1/orders/{order['id']}/status", json={"status": "completed"}
@@ -184,18 +188,19 @@ def test_list_orders_filter_by_status(client):
     b = _create_board(client)
     o1 = client.post(
         "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
-    ).json()
+    ).json()["data"]
     client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500))
 
     # Aprobar solo la primera.
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "approved"})
 
     approved = client.get("/api/v1/orders/", params={"status": "approved"}).json()
-    assert [o["id"] for o in approved] == [o1["id"]]
+    assert [o["id"] for o in approved["data"]] == [o1["id"]]
+    assert approved["meta"]["pagination"]["total"] == 1
 
     confirmed = client.get("/api/v1/orders/", params={"status": "confirmed"}).json()
-    assert o1["id"] not in [o["id"] for o in confirmed]
-    assert len(confirmed) == 1
+    assert o1["id"] not in [o["id"] for o in confirmed["data"]]
+    assert len(confirmed["data"]) == 1
 
 
 def test_get_order_404(client):
@@ -205,7 +210,9 @@ def test_get_order_404(client):
 def test_order_proforma_pdf_and_base64(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     oid = order["id"]
 
     pdf = client.get(f"/api/v1/orders/{oid}/proforma")
@@ -213,6 +220,7 @@ def test_order_proforma_pdf_and_base64(client):
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
+    # PDF/base64 exentos de la envoltura (transporte de archivo).
     b64 = client.get(f"/api/v1/orders/{oid}/proforma", params={"format": "base64"})
     assert b64.status_code == 200
     body = b64.json()
@@ -224,7 +232,9 @@ def test_order_proforma_pdf_and_base64(client):
 def test_order_production_sheet_pdf(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
 
     sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
     assert sheet.status_code == 200
@@ -240,11 +250,13 @@ def test_order_documents_404(client):
 def test_order_export_document(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
 
     resp = client.get(f"/api/v1/orders/{order['id']}/export")
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
 
     assert data["orderCode"] == order["code"]
     assert data["status"] == "confirmed"
@@ -267,14 +279,16 @@ def test_order_export_document(client):
 def test_set_external_invoice_id_and_reflect_in_export(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     oid = order["id"]
 
     resp = client.post(
         f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
     )
     assert resp.status_code == 200
-    assert resp.json()["externalInvoiceId"] == "FAC-001-42"
+    assert resp.json()["data"]["externalInvoiceId"] == "FAC-001-42"
 
     # Idempotente con el mismo ID.
     again = client.post(
@@ -283,14 +297,16 @@ def test_set_external_invoice_id_and_reflect_in_export(client):
     assert again.status_code == 200
 
     # El export refleja la factura asociada.
-    exported = client.get(f"/api/v1/orders/{oid}/export").json()
+    exported = client.get(f"/api/v1/orders/{oid}/export").json()["data"]
     assert exported["externalInvoiceId"] == "FAC-001-42"
 
 
 def test_set_external_invoice_id_conflict_on_different_id(client):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     oid = order["id"]
 
     client.post(
@@ -318,11 +334,13 @@ def test_order_expires_lazily_on_read(client, monkeypatch):
     monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"])).json()
+    order = client.post(
+        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
+    ).json()["data"]
     # Nace confirmed, pero su vigencia ya está vencida (expiresAt en el pasado).
     assert order["status"] == "confirmed"
 
-    fetched = client.get(f"/api/v1/orders/{order['id']}").json()
+    fetched = client.get(f"/api/v1/orders/{order['id']}").json()["data"]
     assert fetched["status"] == "expired"
     assert fetched["history"][-1]["toStatus"] == "expired"
     assert fetched["history"][-1]["fromStatus"] == "confirmed"

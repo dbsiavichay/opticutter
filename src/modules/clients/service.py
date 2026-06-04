@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -56,20 +56,17 @@ class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
                 raise
             return client
 
-    def search(self, search: str, skip: int = 0, limit: int = 100) -> List[ClientModel]:
-        """Busca clientes por identificador, nombre o apellido."""
+    def search_paginated(
+        self, search: str, limit: int = 20, offset: int = 0
+    ) -> Tuple[List[ClientModel], int]:
+        """Busca clientes por identificador, nombre o apellido; ``(items, total)``."""
         pattern = f"%{search}%"
-        return (
-            self.db.query(ClientModel)
-            .filter(
-                ClientModel.identifier.ilike(pattern)
-                | ClientModel.first_name.ilike(pattern)
-                | ClientModel.last_name.ilike(pattern)
-            )
-            .offset(skip)
-            .limit(limit)
-            .all()
+        query = self.db.query(ClientModel).filter(
+            ClientModel.identifier.ilike(pattern)
+            | ClientModel.first_name.ilike(pattern)
+            | ClientModel.last_name.ilike(pattern)
         )
+        return self._paginate(query, limit, offset)
 
 
 def client_service(db: Session = Depends(get_db)) -> ClientService:

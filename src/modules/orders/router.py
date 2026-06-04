@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -13,8 +13,16 @@ from src.modules.orders.schemas import (
     OrderStatusUpdate,
 )
 from src.modules.orders.service import OrderService, order_service
+from src.shared.pagination import PageParams
+from src.shared.responses import (
+    ERROR_RESPONSES,
+    DataResponse,
+    PaginatedResponse,
+    ok,
+    page,
+)
 
-router = APIRouter(prefix="/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["orders"], responses=ERROR_RESPONSES)
 
 _FORMAT_QUERY = Query(
     default="pdf",
@@ -23,59 +31,61 @@ _FORMAT_QUERY = Query(
 )
 
 
-@router.post("/", response_model=OrderResponse, status_code=201)
+@router.post("/", response_model=DataResponse[OrderResponse], status_code=201)
 def create_order(data: OrderCreate, svc: OrderService = Depends(order_service)):
     """Crea (o recupera, por idempotencia) una orden congelando el snapshot."""
-    return svc.create(data)
+    return ok(svc.create(data))
 
 
-@router.get("/", response_model=List[OrderResponse])
+@router.get("/", response_model=PaginatedResponse[OrderResponse])
 def list_orders(
     status: Optional[OrderStatus] = Query(
-        default=None, description="Filter orders by status"
+        default=None, description="Filtra órdenes por estado"
     ),
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(
-        100, ge=1, le=1000, description="Maximum number of records to return"
-    ),
+    paging: PageParams = Depends(),
     svc: OrderService = Depends(order_service),
 ):
     """Lista órdenes con filtro por estado y paginación opcionales."""
-    return svc.list_orders(status=status, skip=skip, limit=limit)
+    items, total = svc.list_orders(
+        status=status, limit=paging.limit, offset=paging.offset
+    )
+    return page(items, total, paging.limit, paging.offset)
 
 
-@router.get("/{order_id}", response_model=OrderResponse)
+@router.get("/{order_id}", response_model=DataResponse[OrderResponse])
 def get_order(order_id: int, svc: OrderService = Depends(order_service)):
     """Obtiene una orden por ID."""
-    return svc.get_or_404(order_id)
+    return ok(svc.get_or_404(order_id))
 
 
-@router.patch("/{order_id}/status", response_model=OrderResponse)
+@router.patch("/{order_id}/status", response_model=DataResponse[OrderResponse])
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdate,
     svc: OrderService = Depends(order_service),
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
-    return svc.transition(order_id, data.status, actor="sales", note=data.note)
+    return ok(svc.transition(order_id, data.status, actor="sales", note=data.note))
 
 
-@router.post("/{order_id}/invoice", response_model=OrderResponse)
+@router.post("/{order_id}/invoice", response_model=DataResponse[OrderResponse])
 def set_order_invoice(
     order_id: int,
     data: OrderInvoiceUpdate,
     svc: OrderService = Depends(order_service),
 ):
     """Asocia el ID de la factura externa (costura con el proveedor de facturación)."""
-    return svc.set_external_invoice_id(order_id, data.external_invoice_id)
+    return ok(svc.set_external_invoice_id(order_id, data.external_invoice_id))
 
 
-@router.get("/{order_id}/export", response_model=OrderExportResponse)
+@router.get("/{order_id}/export", response_model=DataResponse[OrderExportResponse])
 def export_order(order_id: int, svc: OrderService = Depends(order_service)):
     """Documento de facturación neutral para el proveedor externo (cobro=tableros)."""
-    return svc.build_export(order_id)
+    return ok(svc.build_export(order_id))
 
 
+# Exentos de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
+# variante base64 son "el archivo, transportado", no recursos JSON de dominio.
 @router.get("/{order_id}/proforma")
 def get_order_proforma(
     order_id: int,

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -43,20 +43,22 @@ class OrderService:
     def list_orders(
         self,
         status: Optional[OrderStatus] = None,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[OrderModel]:
-        """Lista órdenes (más recientes primero), opcionalmente por estado."""
+        limit: int = 20,
+        offset: int = 0,
+    ) -> Tuple[List[OrderModel], int]:
+        """Lista órdenes (más recientes primero) con conteo total: ``(items, total)``.
+
+        Barre primero las pendientes vencidas (las marca ``expired`` y persiste)
+        para que el filtro por estado, el total y la página reflejen el estado ya
+        expirado, sin que una expiración perezosa desbalancee el conteo.
+        """
+        self._sweep_expired()
         query = self.db.query(OrderModel)
         if status is not None:
             query = query.filter(OrderModel.status == status.value)
-        orders = query.order_by(OrderModel.id.desc()).offset(skip).limit(limit).all()
-        if any([self._expire_if_stale(o) for o in orders]):
-            self.db.commit()
-        if status is not None:
-            # Una orden recién expirada deja de pertenecer al estado consultado.
-            orders = [o for o in orders if o.status == status.value]
-        return orders
+        total = query.count()
+        orders = query.order_by(OrderModel.id.desc()).offset(offset).limit(limit).all()
+        return orders, total
 
     def create(self, data: OrderCreate) -> OrderModel:
         """Recalcula (cache-first), congela el snapshot y crea la orden.
@@ -213,6 +215,22 @@ class OrderService:
             total=order.total,
             external_invoice_id=order.external_invoice_id,
         )
+
+    def _sweep_expired(self) -> None:
+        """Expira (y persiste) las pendientes vencidas antes de contar/paginar.
+
+        Acotado a las pendientes con vigencia vencida, no a toda la tabla.
+        """
+        stale = (
+            self.db.query(OrderModel)
+            .filter(
+                OrderModel.status.in_([s.value for s in PENDING_STATUSES]),
+                OrderModel.expires_at < datetime.utcnow(),
+            )
+            .all()
+        )
+        if any([self._expire_if_stale(o) for o in stale]):
+            self.db.commit()
 
     def _expire_if_stale(self, order: OrderModel) -> bool:
         """Marca como ``expired`` una orden pendiente cuya vigencia ya venció.

@@ -1,8 +1,8 @@
-from typing import Generic, List, Optional, Type, TypeVar
+from typing import Generic, List, Optional, Tuple, Type, TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from src.shared.database import Base
 from src.shared.exceptions import ConflictError, EntityNotFoundError
@@ -36,8 +36,19 @@ class CRUDService(Generic[ModelT, CreateT, UpdateT]):
             raise EntityNotFoundError(self.model.__name__, id)
         return obj
 
-    def list(self, skip: int = 0, limit: int = 100) -> List[ModelT]:
-        return self.db.query(self.model).offset(skip).limit(limit).all()
+    def list_paginated(
+        self, limit: int = 20, offset: int = 0
+    ) -> Tuple[List[ModelT], int]:
+        """Página de registros más su conteo total: ``(items, total)``."""
+        return self._paginate(self.db.query(self.model), limit, offset)
+
+    def _paginate(
+        self, query: Query, limit: int, offset: int
+    ) -> Tuple[List[ModelT], int]:
+        """Cuenta el total y devuelve la página, reusable por búsquedas de slice."""
+        total = query.count()
+        items = query.offset(offset).limit(limit).all()
+        return items, total
 
     def create(self, data: CreateT) -> ModelT:
         return self._persist(self.model(**data.model_dump()))
