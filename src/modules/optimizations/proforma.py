@@ -395,7 +395,7 @@ class ProformaService:
                         f"{req.get('height', 0)} mm",
                         f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
-                        req.get("board_code", "N/A"),
+                        req.get("product_code", "N/A"),
                         Paragraph(req.get("label") or "-", cell_style),
                     ]
                 )
@@ -434,8 +434,8 @@ class ProformaService:
             for entry in materials_summary:
                 mat_data.append(
                     [
-                        entry.get("board_code", "N/A"),
-                        Paragraph(entry.get("board_name", "N/A"), cell_style),
+                        entry.get("product_code", "N/A"),
+                        Paragraph(entry.get("product_name", "N/A"), cell_style),
                         f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         str(entry.get("count", 0)),
                         f"{entry.get('total_area_m2', 0):.2f} m²",
@@ -475,8 +475,8 @@ class ProformaService:
             for entry in materials_summary:
                 mat_data.append(
                     [
-                        entry.get("board_code", "N/A"),
-                        Paragraph(entry.get("board_name", "N/A"), cell_style),
+                        entry.get("product_code", "N/A"),
+                        Paragraph(entry.get("product_name", "N/A"), cell_style),
                         f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         f"{entry.get('thickness', 0):.0f} mm",
                         str(entry.get("count", 0)),

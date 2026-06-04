@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from src.modules.boards.router import router as boards_router
 from src.modules.clients.router import router as clients_router
 from src.modules.optimizations.router import router as optimizations_router
 from src.modules.orders.router import router as orders_router
+from src.modules.products.router import router as products_router
 from src.modules.system.router import router as system_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
@@ -57,7 +57,7 @@ register_exception_handlers(app)
 
 # Incluir rutas
 app.include_router(system_router, prefix="/api/v1")
-app.include_router(boards_router, prefix="/api/v1")
+app.include_router(products_router, prefix="/api/v1")
 app.include_router(clients_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")

@@ -21,19 +21,18 @@ def _create_client(client):
 
 def _create_board(client, code="MEL18"):
     return client.post(
-        "/api/v1/boards/",
+        "/api/v1/products/",
         json={
+            "type": "board",
             "code": code,
             "name": f"Melamina {code}",
-            "height": 2440,
-            "width": 1220,
-            "thickness": 18,
             "price": 45.5,
+            "attributes": {"height": 2440, "width": 1220, "thickness": 18},
         },
     ).json()["data"]
 
 
-def _optimize_payload(client_id, board_id):
+def _optimize_payload(client_id, product_id):
     return {
         "clientId": client_id,
         "requirements": [
@@ -42,7 +41,7 @@ def _optimize_payload(client_id, board_id):
                 "height": 400,
                 "width": 600,
                 "quantity": 2,
-                "boardId": board_id,
+                "productId": product_id,
                 "label": "Puerta",
                 "canRotate": True,
             }
@@ -65,7 +64,7 @@ def test_optimize_returns_layouts(client):
     assert len(data["layouts"]) >= 1
     layout = data["layouts"][0]
     assert "placedPieces" in layout
-    assert layout["material"]["boardId"] == created_board["id"]
+    assert layout["material"]["materialId"] == created_board["id"]
     assert layout["material"]["sheetNumber"] == 1
     assert "efficiency" in layout["statistics"]
     assert layout["placedPieces"][0]["originalWidth"] == 600
@@ -101,14 +100,36 @@ def test_optimize_computes_total_boards_cost(client):
     assert data["totalBoardsCost"] > 0
 
 
-def test_optimize_unknown_board_returns_404(client):
+def test_optimize_unknown_product_returns_404(client):
     created_client = _create_client(client)
     resp = client.post(
         "/api/v1/optimize/",
-        json=_optimize_payload(created_client["id"], board_id=99999),
+        json=_optimize_payload(created_client["id"], product_id=99999),
     )
     assert resp.status_code == 404
-    assert "Board 99999" in resp.json()["errors"][0]["message"]
+    assert "Product 99999" in resp.json()["errors"][0]["message"]
+
+
+def test_optimize_non_board_product_is_rejected(client):
+    """Un producto que no es tablero no es optimizable (regla de negocio 422)."""
+    created_client = _create_client(client)
+    tapacanto = client.post(
+        "/api/v1/products/",
+        json={
+            "type": "edge_banding",
+            "code": "TAP22",
+            "name": "Tapacanto PVC 22mm",
+            "price": 0.8,
+            "attributes": {"length": 50000, "width": 22, "thickness": 1},
+        },
+    ).json()["data"]
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], tapacanto["id"]),
+    )
+    assert resp.status_code == 422
+    assert "no es un tablero" in resp.json()["errors"][0]["message"].lower()
 
 
 def test_proforma_pdf_and_base64(client):
@@ -198,7 +219,7 @@ def test_optimize_unknown_client_returns_404(client):
     created_board = _create_board(client)
     resp = client.post(
         "/api/v1/optimize/",
-        json=_optimize_payload(client_id=99999, board_id=created_board["id"]),
+        json=_optimize_payload(client_id=99999, product_id=created_board["id"]),
     )
     assert resp.status_code == 404
     assert "Client 99999" in resp.json()["errors"][0]["message"]
@@ -245,7 +266,7 @@ def test_optimize_deduplicates_identical_patterns(client):
                 "height": 1700,
                 "width": 670,
                 "quantity": 5,
-                "boardId": created_board["id"],
+                "productId": created_board["id"],
                 "label": "",
                 "canRotate": True,
             }
@@ -267,8 +288,8 @@ def test_optimize_deduplicates_identical_patterns(client):
     assert group["patternId"] == 1
     assert group["count"] == 5
     assert len(group["sheetNumbers"]) == 5
-    assert group["boardId"] == created_board["id"]
-    assert group["layout"]["material"]["boardId"] == created_board["id"]
+    assert group["materialId"] == created_board["id"]
+    assert group["layout"]["material"]["materialId"] == created_board["id"]
 
 
 def test_optimize_includes_materials_summary(client):
@@ -287,7 +308,7 @@ def test_optimize_includes_materials_summary(client):
     assert summary is not None and len(summary) == 1
 
     entry = summary[0]
-    assert entry["boardCode"] == "MEL18"
-    assert entry["boardName"] == "Melamina MEL18"
+    assert entry["productCode"] == "MEL18"
+    assert entry["productName"] == "Melamina MEL18"
     assert entry["count"] == data["totalBoardsUsed"]
     assert entry["totalCost"] == pytest.approx(data["totalBoardsCost"])

@@ -10,14 +10,13 @@ from src.shared.database import get_db
 client = TestClient(app)
 
 
-def _board_payload(code="MEL18"):
+def _product_payload(code="MEL18"):
     return {
+        "type": "board",
         "code": code,
         "name": f"Melamina {code}",
-        "height": 2440,
-        "width": 1220,
-        "thickness": 18,
         "price": 45.5,
+        "attributes": {"height": 2440, "width": 1220, "thickness": 18},
     }
 
 
@@ -104,7 +103,7 @@ def test_cutter_status():
 
 def test_success_response_has_meta_and_request_id_header(client):
     """Toda respuesta de éxito trae ``meta`` y ecoa el requestId en el header."""
-    resp = client.post("/api/v1/boards/", json=_board_payload())
+    resp = client.post("/api/v1/products/", json=_product_payload())
     assert resp.status_code == 201
     body = resp.json()
     assert "data" in body
@@ -116,7 +115,7 @@ def test_success_response_has_meta_and_request_id_header(client):
 
 def test_incoming_request_id_is_propagated(client):
     """Un ``X-Request-ID`` entrante se conserva (continuidad de traza) y va en meta."""
-    resp = client.get("/api/v1/boards/999999", headers={"X-Request-ID": "trace-123"})
+    resp = client.get("/api/v1/products/999999", headers={"X-Request-ID": "trace-123"})
     assert resp.status_code == 404
     assert resp.headers["x-request-id"] == "trace-123"
     assert resp.json()["meta"]["requestId"] == "trace-123"
@@ -124,7 +123,9 @@ def test_incoming_request_id_is_propagated(client):
 
 def test_validation_error_includes_field_path(client):
     """Validación de request → 422 con ``code`` y ``field`` tipo ``body.<campo>``."""
-    resp = client.post("/api/v1/boards/", json={})
+    # ``type`` válido (discriminador) con el resto de campos faltantes: el error
+    # apunta a los subcampos del producto (``body.board.<campo>``).
+    resp = client.post("/api/v1/products/", json={"type": "board"})
     assert resp.status_code == 422
     errors = resp.json()["errors"]
     assert errors[0]["code"] == "VALIDATION_ERROR"
@@ -146,9 +147,9 @@ def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
     def _boom(self, id):
         raise RuntimeError("boom")
 
-    from src.modules.boards.service import BoardService
+    from src.modules.products.service import ProductService
 
-    monkeypatch.setattr(BoardService, "get_or_404", _boom)
+    monkeypatch.setattr(ProductService, "get_or_404", _boom)
 
     def override_get_db():
         yield db_session
@@ -156,7 +157,7 @@ def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app, raise_server_exceptions=False) as test_client:
-            resp = test_client.get("/api/v1/boards/1")
+            resp = test_client.get("/api/v1/products/1")
         assert resp.status_code == 500
         body = resp.json()
         assert body["errors"][0]["code"] == "INTERNAL_SERVER_ERROR"

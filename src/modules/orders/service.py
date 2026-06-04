@@ -102,9 +102,9 @@ class OrderService:
         # Líneas de cobro = tableros usados (desde materials_summary).
         order.lines = [
             OrderLineModel(
-                board_id=m["board_id"],
-                board_code=m.get("board_code"),
-                board_name=m.get("board_name"),
+                product_id=m["product_id"],
+                product_code=m.get("product_code"),
+                product_name=m.get("product_name"),
                 quantity=m["count"],
                 unit_price_snapshot=m["cost_per_unit"],
                 line_total=m["total_cost"],
@@ -116,7 +116,7 @@ class OrderService:
         # Lista de corte = piezas (insumo de producción; no se cobra).
         order.pieces = [
             OrderPieceModel(
-                board_id=r["board_id"],
+                product_id=r["product_id"],
                 label=r.get("label"),
                 height=r["height"],
                 width=r["width"],
@@ -197,7 +197,7 @@ class OrderService:
         lines = [
             OrderExportLine(
                 description=_line_description(line),
-                board_code=line.board_code,
+                product_code=line.product_code,
                 quantity=line.quantity,
                 unit_price=line.unit_price_snapshot,
                 line_total=line.line_total,
@@ -303,9 +303,9 @@ class OrderService:
 
 def _line_description(line: OrderLineModel) -> str:
     """Descripción legible de una línea de cobro para la factura externa."""
-    if line.board_code and line.board_name:
-        return f"{line.board_name} ({line.board_code})"
-    return line.board_name or line.board_code or f"Tablero {line.board_id}"
+    if line.product_code and line.product_name:
+        return f"{line.product_name} ({line.product_code})"
+    return line.product_name or line.product_code or f"Producto {line.product_id}"
 
 
 def order_service(db: Session = Depends(get_db)) -> OrderService:
