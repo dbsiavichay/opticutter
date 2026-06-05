@@ -137,3 +137,166 @@ def test_delete_product(client):
     created = client.post("/api/v1/products/", json=_board_payload()).json()["data"]
     assert client.delete(f"/api/v1/products/{created['id']}").status_code == 204
     assert client.get(f"/api/v1/products/{created['id']}").status_code == 404
+
+
+# --- Emparejamiento tablero -> tapacanto coordinado --------------------------
+
+
+def _seed_board(client, code, name, thickness):
+    return client.post(
+        "/api/v1/products/",
+        json={
+            "type": "board",
+            "code": code,
+            "name": name,
+            "price": 50.0,
+            "attributes": {"height": 2800, "width": 2070, "thickness": thickness},
+        },
+    ).json()["data"]
+
+
+def _seed_edge(client, code, name, band_type, thickness, width, color):
+    return client.post(
+        "/api/v1/products/",
+        json={
+            "type": "edge_banding",
+            "code": code,
+            "name": name,
+            "price": 12.0,
+            "attributes": {
+                "bandType": band_type,
+                "thickness": thickness,
+                "width": width,
+                "color": color,
+            },
+        },
+    ).json()["data"]
+
+
+def _seed_cashmere_catalog(client):
+    """Tablero Cashmere 15 y 36 + sus tapacantos coordinados (estilo seed real)."""
+    _seed_board(client, "MDP-SL-CSH-15", "MDP 15mm Cashmere", 15)
+    _seed_board(client, "MDP-SL-CSH-36", "MDP 36mm Cashmere", 36)
+    _seed_edge(
+        client,
+        "TAP-SL-CSH-045",
+        "Tapacanto Cashmere Suave 0.45x19mm",
+        "Suave",
+        0.45,
+        19,
+        "Cashmere",
+    )
+    _seed_edge(
+        client,
+        "TAP-SL-CSH-100",
+        "Tapacanto Cashmere Duro 1x40mm",
+        "Duro",
+        1.0,
+        40,
+        "Cashmere",
+    )
+    _seed_edge(
+        client,
+        "TAP-SL-CSH-150",
+        "Tapacanto Cashmere Duro 1.5x19mm",
+        "Duro",
+        1.5,
+        19,
+        "Cashmere",
+    )
+
+
+def test_edge_bandings_for_15mm_board(client):
+    _seed_cashmere_catalog(client)
+    board = client.get("/api/v1/products/code/MDP-SL-CSH-15").json()["data"]
+
+    resp = client.get(f"/api/v1/products/{board['id']}/edge-bandings")
+    assert resp.status_code == 200
+    bands = resp.json()["data"]
+    # 15mm -> ancho 19: Suave 0.45 y Duro 1.5 (ordenados por grosor)
+    assert [b["attributes"]["width"] for b in bands] == [19, 19]
+    assert [b["attributes"]["bandType"] for b in bands] == ["Suave", "Duro"]
+
+    # El enum BandType acepta la entrada sin distinguir mayúsculas ("suave").
+    suave = client.get(
+        f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "suave"}
+    ).json()["data"]
+    assert len(suave) == 1
+    assert suave[0]["code"] == "TAP-SL-CSH-045"
+
+
+def test_edge_bandings_for_36mm_board_only_hard(client):
+    _seed_cashmere_catalog(client)
+    board = client.get("/api/v1/products/code/MDP-SL-CSH-36").json()["data"]
+
+    bands = client.get(f"/api/v1/products/{board['id']}/edge-bandings").json()["data"]
+    # 36mm -> ancho 40: solo existe el Duro 1.0x40
+    assert len(bands) == 1
+    assert bands[0]["code"] == "TAP-SL-CSH-100"
+    assert bands[0]["attributes"]["width"] == 40
+
+    # No hay canto suave para 36mm: hueco real del catálogo -> lista vacía
+    suave = client.get(
+        f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "Suave"}
+    ).json()["data"]
+    assert suave == []
+
+
+def test_edge_bandings_excludes_other_designs(client):
+    """No debe traer tapacantos de otro diseño aunque compartan tokens de nombre."""
+    _seed_cashmere_catalog(client)
+    # Otro diseño con nombre que comparte token pero distinto code (abreviatura)
+    _seed_board(client, "MDP-RO-BRD-15", "MDP 15mm Barroco Dorado", 15)
+    _seed_edge(
+        client,
+        "TAP-RO-BRR-045",
+        "Tapacanto Barroco Ristretto Suave",
+        "Suave",
+        0.45,
+        19,
+        "Roble Barroco Ristretto",
+    )
+    board = client.get("/api/v1/products/code/MDP-RO-BRD-15").json()["data"]
+
+    bands = client.get(f"/api/v1/products/{board['id']}/edge-bandings").json()["data"]
+    # BRD no tiene tapacanto coordinado sembrado; BRR no debe colarse
+    assert bands == []
+
+
+def test_edge_bandings_invalid_band_type_returns_422(client):
+    """El query param está cerrado al enum BandType: un valor fuera de él falla."""
+    _seed_cashmere_catalog(client)
+    board = client.get("/api/v1/products/code/MDP-SL-CSH-15").json()["data"]
+    resp = client.get(
+        f"/api/v1/products/{board['id']}/edge-bandings",
+        params={"band_type": "Medio"},
+    )
+    assert resp.status_code == 422
+
+
+def test_edge_banding_invalid_band_type_on_create_returns_422(client):
+    """El atributo band_type también queda cerrado al enum al crear el producto."""
+    resp = client.post(
+        "/api/v1/products/",
+        json={
+            "type": "edge_banding",
+            "code": "TAP-XX-YY-045",
+            "name": "Tapacanto inválido",
+            "price": 1.0,
+            "attributes": {"bandType": "Medio", "thickness": 0.45, "width": 19},
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_edge_bandings_board_not_found(client):
+    assert client.get("/api/v1/products/999999/edge-bandings").status_code == 404
+
+
+def test_edge_bandings_for_non_board_returns_business_rule_error(client):
+    _seed_cashmere_catalog(client)
+    edge = client.get("/api/v1/products/code/TAP-SL-CSH-045").json()["data"]
+
+    resp = client.get(f"/api/v1/products/{edge['id']}/edge-bandings")
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["code"] == "BUSINESS_RULE_ERROR"

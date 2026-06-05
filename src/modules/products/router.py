@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
 from src.modules.products.model import ProductType
 from src.modules.products.schemas import ProductCreate, ProductResponse, ProductUpdate
 from src.modules.products.service import ProductService, product_service
+from src.modules.products.types.edge_banding import BandType
 from src.shared.exceptions import EntityNotFoundError
 from src.shared.pagination import PageParams
 from src.shared.responses import (
@@ -36,6 +37,26 @@ def list_products(
     """Lista productos con filtro por tipo, búsqueda y paginación opcionales."""
     items, total = svc.search_paginated(search, type, paging.limit, paging.offset)
     return page(items, total, paging.limit, paging.offset)
+
+
+@router.get(
+    "/{board_id}/edge-bandings",
+    response_model=DataResponse[List[ProductResponse]],
+)
+def get_board_edge_bandings(
+    board_id: int,
+    band_type: Optional[BandType] = Query(
+        None, description="Filtra por tipo de canto: Suave o Duro"
+    ),
+    svc: ProductService = Depends(product_service),
+):
+    """Tapacantos coordinados con un tablero (mismo diseño y ancho según grosor).
+
+    Empareja por la clave de diseño del código (evita falsos positivos por nombre)
+    y aplica la regla grosor→ancho. ``data`` vacío significa que no hay tapacanto
+    coordinado para esa combinación.
+    """
+    return ok(svc.find_edge_bandings_for_board(board_id, band_type))
 
 
 @router.get("/{product_id}", response_model=DataResponse[ProductResponse])

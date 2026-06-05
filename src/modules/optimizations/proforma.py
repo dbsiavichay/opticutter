@@ -154,13 +154,6 @@ class ProformaService:
         story.append(ProformaService._build_materials_table(carrier, cell_style))
         story.append(Spacer(1, 0.2 * inch))
 
-        if carrier.edge_bandings_summary:
-            story.extend(_section("RESUMEN DE TAPACANTOS", heading_style))
-            story.append(
-                ProformaService._build_edge_bandings_table(carrier, cell_style)
-            )
-            story.append(Spacer(1, 0.2 * inch))
-
         story.append(ProformaService._build_totals_table(carrier))
 
         story.append(PageBreak())
@@ -425,9 +418,9 @@ class ProformaService:
                 0.8 * inch,
                 0.8 * inch,
                 0.55 * inch,
-                0.9 * inch,
+                1.25 * inch,
                 1.1 * inch,
-                CONTENT_WIDTH - 4.5 * inch,
+                CONTENT_WIDTH - 4.85 * inch,
             ],
             repeatRows=1,
         )
@@ -492,51 +485,49 @@ class ProformaService:
 
     @staticmethod
     def _build_materials_table(carrier: ProformaCarrier, cell_style) -> Table:
-        materials_summary = carrier.materials_summary
-        mat_data = [
-            [
-                "Código",
-                "Nombre",
-                "Dimensiones",
-                "Cant.",
-                "Área Total",
-                "Efic. Prom.",
-                "P. Unit.",
-                "Subtotal",
-            ]
-        ]
-        if isinstance(materials_summary, list) and materials_summary:
-            for entry in materials_summary:
-                mat_data.append(
-                    [
-                        entry.get("product_code", "N/A"),
-                        Paragraph(entry.get("product_name", "N/A"), cell_style),
-                        f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
-                        str(entry.get("count", 0)),
-                        f"{entry.get('total_area_m2', 0):.2f} m²",
-                        f"{entry.get('avg_efficiency', 0):.1f}%",
-                        f"${entry.get('cost_per_unit', 0):.2f}",
-                        f"${entry.get('total_cost', 0):.2f}",
-                    ]
-                )
-        else:
-            mat_data.append(["Sin datos de materiales", "", "", "", "", "", "", ""])
+        """Resumen único de materiales: tableros (cantidad en unidades) y tapacantos
+        (cantidad en metros) en una sola tabla con código, descripción, cantidad,
+        precio unitario y subtotal. Ocupa el ancho completo del contenido."""
+        mat_data = [["Código", "Descripción", "Cantidad", "P. Unit.", "Subtotal"]]
+
+        has_rows = False
+        for entry in carrier.materials_summary or []:
+            has_rows = True
+            mat_data.append(
+                [
+                    entry.get("product_code", "N/A"),
+                    Paragraph(entry.get("product_name", "N/A"), cell_style),
+                    f"{entry.get('count', 0)} u",
+                    f"${entry.get('cost_per_unit', 0):.2f}",
+                    f"${entry.get('total_cost', 0):.2f}",
+                ]
+            )
+        for entry in carrier.edge_bandings_summary or []:
+            has_rows = True
+            mat_data.append(
+                [
+                    entry.get("product_code", "N/A"),
+                    Paragraph(entry.get("product_name", "N/A"), cell_style),
+                    f"{entry.get('billed_linear_m', 0)} m",
+                    f"${entry.get('price_per_m', 0):.2f}",
+                    f"${entry.get('total_cost', 0):.2f}",
+                ]
+            )
+        if not has_rows:
+            mat_data.append(["Sin datos de materiales", "", "", "", ""])
 
         mat_table = Table(
             mat_data,
             colWidths=[
-                0.75 * inch,
-                CONTENT_WIDTH - 5.65 * inch,
-                1.1 * inch,
-                0.5 * inch,
+                1.3 * inch,
+                CONTENT_WIDTH - 3.9 * inch,
                 0.8 * inch,
-                0.7 * inch,
-                0.7 * inch,
                 0.8 * inch,
+                1.0 * inch,
             ],
             repeatRows=1,
         )
-        mat_table.setStyle(_data_table_style(header_size=9, body_size=8))
+        mat_table.setStyle(_data_table_style(header_size=10, body_size=9))
         return mat_table
 
     @staticmethod
