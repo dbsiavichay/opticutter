@@ -46,7 +46,7 @@ def list_products(
 def get_board_edge_bandings(
     board_id: int,
     band_type: Optional[BandType] = Query(
-        None, description="Filtra por tipo de canto: Suave o Duro"
+        None, description="Filtra por tipo de canto: Soft o Hard"
     ),
     svc: ProductService = Depends(product_service),
 ):

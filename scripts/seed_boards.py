@@ -126,13 +126,19 @@ def build_boards():
 # --- Tapacantos -----------------------------------------------------------
 #
 # Cada diseño de tablero tiene su tapacanto de PVC coordinado (mapeo 1:1 con
-# DESIGNS). Salvo el Blanco, todos vienen en las 3 medidas estándar:
+# DESIGNS). Salvo el Blanco, todos vienen en las 3 medidas estándar. El "tipo" es
+# la etiqueta en español que ve el cliente en el nombre/descripción; el valor que
+# se guarda en attributes.bandType es su equivalente canónico en inglés (ver
+# BAND_TYPE_VALUE), que es lo que filtra el endpoint.
 #   (tipo, espesor_mm, ancho_mm)
 EDGE_BAND_VARIANTS = [
     ("Suave", 0.45, 19),
     ("Duro", 1.00, 40),
     ("Duro", 1.50, 19),
 ]
+
+# Etiqueta español (visible al cliente) -> valor canónico inglés del enum BandType.
+BAND_TYPE_VALUE = {"Suave": "Soft", "Duro": "Hard"}
 
 # TODO: precios PLACEHOLDER (no provistos). Reemplazar con los reales.
 EDGE_PRICES = {
@@ -156,6 +162,7 @@ def edge_label(abbr, name, cat):
 def make_edge_banding(abbr, name, cat, band_type, thickness, width):
     label = edge_label(abbr, name, cat)
     thick_txt = f"{thickness:g}"  # 0.45, 1, 1.5 (sin ceros sobrantes)
+    band_value = BAND_TYPE_VALUE[band_type]  # valor canónico inglés (Soft/Hard)
     description = (
         f"Tapacanto PVC {label}, tipo {band_type}, {thick_txt}mm x {width}mm, "
         f"coordinado con tablero MDP {label}"
@@ -169,7 +176,7 @@ def make_edge_banding(abbr, name, cat, band_type, thickness, width):
         "is_active": True,
         # Atributos en la forma canónica camelCase del catálogo de productos.
         "attributes": {
-            "bandType": band_type,
+            "bandType": band_value,
             "thickness": thickness,
             "width": width,
             "color": label,
