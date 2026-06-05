@@ -1,6 +1,7 @@
+from enum import Enum
 from typing import List, Optional
 
-from pydantic import Field, NonNegativeInt, PositiveInt
+from pydantic import Field, NonNegativeInt, PositiveInt, field_validator
 
 from src.modules.clients.schemas import ClientResponse
 from src.shared.schemas import CamelModel
@@ -17,6 +18,54 @@ class MaterialSummary(CamelModel):
     total_area_m2: float
     avg_efficiency: float
     cost_per_unit: float
+    total_cost: float
+
+
+class EdgeSide(str, Enum):
+    """Lados nominales de una pieza (marco sin rotar).
+
+    ``top``/``bottom`` son los lados de longitud ``width`` (ancho); ``left``/
+    ``right`` los de longitud ``height`` (alto).
+    """
+
+    top = "top"
+    bottom = "bottom"
+    left = "left"
+    right = "right"
+
+
+class EdgeBandingSpec(CamelModel):
+    """Tapacanto a aplicar en una pieza: un producto y los lados a tapar."""
+
+    product_id: int = Field(
+        ..., description="Edge banding product ID (type=edge_banding)"
+    )
+    sides: List[EdgeSide] = Field(
+        ...,
+        min_length=1,
+        description="Nominal sides to band (top/bottom=ancho, left/right=alto)",
+    )
+
+    @field_validator("sides")
+    @classmethod
+    def _unique_sides(cls, sides: List[EdgeSide]) -> List[EdgeSide]:
+        if len(set(sides)) != len(sides):
+            raise ValueError("sides must not contain duplicates")
+        return sides
+
+
+class EdgeBandingSummary(CamelModel):
+    product_id: int
+    product_code: str
+    product_name: str
+    thickness: float
+    color: Optional[str] = None
+    net_linear_m: float = Field(
+        ..., description="Net linear meters (sum of banded sides)"
+    )
+    linear_m: float = Field(..., description="Linear meters including waste factor")
+    billed_linear_m: int = Field(..., description="Whole meters charged (rounded up)")
+    price_per_m: float = Field(..., description="Frozen price per linear meter")
     total_cost: float
 
 
@@ -37,8 +86,13 @@ class Requirement(CamelModel):
         default=True,
         description=(
             "If true, the optimizer may swap height↔width (rotate 90°) to improve "
-            "yield. Set false for pieces with a fixed orientation (grain/pattern)."
+            "yield. Set false for pieces with a fixed orientation (grain/pattern). "
+            "Edge banding is remapped to the rotated sides, so it does not block "
+            "rotation."
         ),
+    )
+    edge_banding: Optional[EdgeBandingSpec] = Field(
+        default=None, description="Optional edge banding for this piece"
     )
 
 
@@ -85,6 +139,10 @@ class PlacedPiece(CamelModel):
     )
     original_width: float = Field(
         ..., description="Piece width (ancho) before rotation"
+    )
+    edges: Optional[dict] = Field(
+        default=None,
+        description="Edge banding on the geometric sides of the placed piece",
     )
 
 
@@ -140,11 +198,17 @@ class OptimizeResponse(CamelModel):
     )
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")
+    total_edge_banding_cost: float = Field(
+        default=0.0, description="Total cost of edge banding used"
+    )
     layouts: List[Layout] = Field(
         ..., description="Per-sheet cutting layouts of the optimization"
     )
     materials_summary: Optional[List[MaterialSummary]] = Field(
         default=None, description="Aggregated materials grouped by board type"
+    )
+    edge_bandings_summary: Optional[List[EdgeBandingSummary]] = Field(
+        default=None, description="Aggregated edge banding grouped by type"
     )
     layout_groups: Optional[List[LayoutGroup]] = Field(
         default=None, description="Cutting layouts deduplicated by identical pattern"

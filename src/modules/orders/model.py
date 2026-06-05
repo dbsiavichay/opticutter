@@ -108,6 +108,9 @@ class OrderLineModel(Base):
     line_total: Mapped[float] = mapped_column(Float)
     avg_efficiency: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     total_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Tapacanto: metros lineales exactos (con merma) para mostrar; ``quantity``
+    # guarda los metros enteros cobrados. Nulo para tableros.
+    linear_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="lines")
 
@@ -129,6 +132,9 @@ class OrderPieceModel(Base):
     quantity: Mapped[int] = mapped_column(Integer)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     can_rotate: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Tapacanto de la pieza (lados nominales + producto), p. ej.
+    # ``{"product_id": 42, "sides": ["top", "left"]}``. Nulo si no lleva canto.
+    edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="pieces")
 

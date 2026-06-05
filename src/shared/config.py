@@ -68,6 +68,10 @@ class Config:
     LEFT_TRIM = env.float("LEFT_TRIM", 0.0)
     RIGHT_TRIM = env.float("RIGHT_TRIM", 0.0)
 
+    # Tapacantos: merma (sobrante de canteadora) aplicada al metraje neto antes de
+    # redondear al metro entero que se cobra. 0.10 = +10%.
+    EDGE_BANDING_WASTE_FACTOR = env.float("EDGE_BANDING_WASTE_FACTOR", 0.10)
+
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
     # Órdenes: vigencia de la cotización y tope de pendientes por cliente (antiabuso)

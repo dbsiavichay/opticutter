@@ -83,6 +83,10 @@ class OrderService:
 
         self._enforce_pending_cap(data.client_id)
 
+        total_boards_cost = payload["total_boards_cost"]
+        total_edge_banding_cost = payload.get("total_edge_banding_cost", 0.0)
+        grand_total = round(total_boards_cost + total_edge_banding_cost, 2)
+
         now = datetime.utcnow()
         order = OrderModel(
             client_id=data.client_id,
@@ -90,8 +94,8 @@ class OrderService:
             optimization_snapshot=payload,
             optimization_hash=optimization_hash,
             currency="USD",
-            subtotal=payload["total_boards_cost"],
-            total=payload["total_boards_cost"],
+            subtotal=grand_total,
+            total=grand_total,
             total_boards_used=payload["total_boards_used"],
             source=data.source,
             notes=data.notes,
@@ -99,7 +103,7 @@ class OrderService:
             confirmed_at=now,
             expires_at=now + timedelta(days=config.ORDER_VALIDITY_DAYS),
         )
-        # Líneas de cobro = tableros usados (desde materials_summary).
+        # Líneas de cobro = tableros usados + tapacantos (productos consumidos).
         order.lines = [
             OrderLineModel(
                 product_id=m["product_id"],
@@ -112,6 +116,17 @@ class OrderService:
                 total_area_m2=m.get("total_area_m2"),
             )
             for m in payload["materials_summary"]
+        ] + [
+            OrderLineModel(
+                product_id=e["product_id"],
+                product_code=e.get("product_code"),
+                product_name=e.get("product_name"),
+                quantity=e["billed_linear_m"],
+                unit_price_snapshot=e["price_per_m"],
+                line_total=e["total_cost"],
+                linear_m=e.get("linear_m"),
+            )
+            for e in payload.get("edge_bandings_summary", [])
         ]
         # Lista de corte = piezas (insumo de producción; no se cobra).
         order.pieces = [
@@ -123,6 +138,7 @@ class OrderService:
                 quantity=r["quantity"],
                 priority=r.get("priority", 0),
                 can_rotate=r.get("can_rotate", True),
+                edges=r.get("edge_banding"),
             )
             for r in payload["requirements"]
         ]
