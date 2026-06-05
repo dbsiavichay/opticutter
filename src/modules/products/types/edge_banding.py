@@ -1,8 +1,30 @@
+from enum import Enum
 from typing import Optional
 
 from pydantic import Field, PositiveFloat, PositiveInt
 
 from src.shared.schemas import CamelModel
+
+
+class BandType(str, Enum):
+    """Tipo de tapacanto (cerrado).
+
+    ``SUAVE`` (canto suave, ~0.45 mm) y ``DURO`` (canto duro, 1.0/1.5 mm). El
+    ``_missing_`` acepta la entrada sin distinguir mayúsculas (p. ej. ``"suave"``)
+    pero la normaliza al valor canónico, así que el campo queda cerrado a estos dos
+    valores tanto al crear/actualizar productos como al filtrar en el endpoint.
+    """
+
+    SUAVE = "Suave"
+    DURO = "Duro"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.strip().lower():
+                    return member
+        return None
 
 
 class EdgeBandingAttributes(CamelModel):
@@ -17,8 +39,8 @@ class EdgeBandingAttributes(CamelModel):
         ..., description="Grosor en mm (p. ej. 0.45, 1.0, 1.5)"
     )
     width: PositiveInt = Field(..., description="Ancho en mm (p. ej. 19, 40)")
-    band_type: Optional[str] = Field(
-        None, max_length=16, description="Tipo de tapacanto: Suave o Duro"
+    band_type: Optional[BandType] = Field(
+        None, description="Tipo de tapacanto: Suave o Duro"
     )
     color: Optional[str] = Field(
         None, max_length=64, description="Color/diseño coordinado"
