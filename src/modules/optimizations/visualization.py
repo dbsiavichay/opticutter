@@ -24,6 +24,24 @@ COLOR_EFFICIENCY = "#2E7D32"
 COLOR_WASTE_FILL = "#ECECEC"  # gris neutro: contrasta con el coral de las piezas
 COLOR_WASTE_OUTLINE = "#9E9E9E"
 
+# Paleta para distinguir tipos de tapacanto en el diagrama. El color del producto
+# suele ser un nombre (p. ej. "Nogal") no parseable por Pillow, así que se asigna
+# un color de esta paleta de forma determinista por código.
+EDGE_BANDING_PALETTE = [
+    "#1E88E5",
+    "#8E24AA",
+    "#00897B",
+    "#F4511E",
+    "#3949AB",
+    "#6D4C41",
+]
+
+
+def _edge_banding_color(code: str) -> str:
+    """Color estable (mismo en todas las páginas) para un código de tapacanto."""
+    idx = sum(ord(c) for c in (code or "")) % len(EDGE_BANDING_PALETTE)
+    return EDGE_BANDING_PALETTE[idx]
+
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     """Carga una fuente TrueType escalable; cae al bitmap por defecto si no hay."""
@@ -104,7 +122,17 @@ class VisualizationService:
         label_font = _load_font(30)
         legend_font = _load_font(32)
 
-        VisualizationService._draw_legend(draw, margin, 24, legend_font)
+        # Tapacantos presentes en este patrón (código -> color) para la leyenda.
+        edge_legend: dict = {}
+        for piece in layout.get("placed_pieces", []):
+            edges = piece.get("edges") or {}
+            if edges.get("sides"):
+                code = edges.get("code") or "Tapacanto"
+                edge_legend.setdefault(code, _edge_banding_color(code))
+
+        VisualizationService._draw_legend(
+            draw, margin, 24, legend_font, edge_legend, max_x=canvas_width - margin
+        )
 
         board_x = margin
         board_y = info_height
@@ -164,26 +192,38 @@ class VisualizationService:
         x: int,
         y: int,
         legend_font: ImageFont.ImageFont,
+        edge_legend: Optional[dict] = None,
+        max_x: Optional[int] = None,
     ) -> None:
-        """Dibuja la leyenda de colores (pieza vs retazo)."""
+        """Dibuja la leyenda de colores (pieza, retazo y tipos de tapacanto).
+
+        Envuelve en una nueva fila cuando una entrada se saldría de ``max_x`` para
+        que no se recorte al haber varios tipos de tapacanto.
+        """
         legend = [
             (COLOR_PIECE_FILL, COLOR_PIECE_OUTLINE, "Pieza"),
             (COLOR_WASTE_FILL, COLOR_WASTE_OUTLINE, "Retazo / Desperdicio"),
         ]
+        for code, color in (edge_legend or {}).items():
+            legend.append((color, color, f"Tapacanto {code}"))
         box = 32
+        start_x = x
         for fill, outline, text in legend:
+            tw, th = _text_size(text, legend_font)
+            item_w = box + 12 + tw + 50
+            if max_x is not None and x > start_x and x + box + 12 + tw > max_x:
+                x = start_x
+                y += box + 16
             draw.rectangle(
                 [x, y, x + box, y + box], fill=fill, outline=outline, width=2
             )
-            th = _text_size(text, legend_font)[1]
             draw.text(
                 (x + box + 12, y + (box - th) // 2),
                 text,
                 fill="black",
                 font=legend_font,
             )
-            tw, _ = _text_size(text, legend_font)
-            x += box + 12 + tw + 50
+            x += item_w
 
     @staticmethod
     def _draw_piece(
@@ -209,6 +249,22 @@ class VisualizationService:
             outline=COLOR_PIECE_OUTLINE,
             width=2,
         )
+
+        # Franjas de tapacanto sobre los lados geométricos canteados (se dibujan
+        # antes de las cotas para que los números queden legibles encima).
+        edges = piece.get("edges") or {}
+        sides = set(edges.get("sides") or [])
+        if sides:
+            color = _edge_banding_color(edges.get("code") or "Tapacanto")
+            t = max(6, int(min(pw, ph) * 0.06))
+            if "top" in sides:
+                draw.rectangle([px, py, px + pw, py + t], fill=color)
+            if "bottom" in sides:
+                draw.rectangle([px, py + ph - t, px + pw, py + ph], fill=color)
+            if "left" in sides:
+                draw.rectangle([px, py, px + t, py + ph], fill=color)
+            if "right" in sides:
+                draw.rectangle([px + pw - t, py, px + pw, py + ph], fill=color)
 
         pad = 4
 

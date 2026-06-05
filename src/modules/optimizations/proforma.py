@@ -153,6 +153,14 @@ class ProformaService:
         story.extend(_section("RESUMEN DE MATERIALES", heading_style))
         story.append(ProformaService._build_materials_table(carrier, cell_style))
         story.append(Spacer(1, 0.2 * inch))
+
+        if carrier.edge_bandings_summary:
+            story.extend(_section("RESUMEN DE TAPACANTOS", heading_style))
+            story.append(
+                ProformaService._build_edge_bandings_table(carrier, cell_style)
+            )
+            story.append(Spacer(1, 0.2 * inch))
+
         story.append(ProformaService._build_totals_table(carrier))
 
         story.append(PageBreak())
@@ -211,6 +219,15 @@ class ProformaService:
         story.append(ProformaService._build_materials_plain_table(carrier, cell_style))
         story.append(Spacer(1, 0.2 * inch))
         story.append(ProformaService._build_boards_total_table(carrier))
+
+        if carrier.edge_bandings_summary:
+            story.append(Spacer(1, 0.25 * inch))
+            story.extend(_section("TAPACANTOS A APLICAR", heading_style))
+            story.append(
+                ProformaService._build_edge_bandings_table(
+                    carrier, cell_style, with_prices=False
+                )
+            )
 
         story.append(PageBreak())
         story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
@@ -386,7 +403,7 @@ class ProformaService:
     @staticmethod
     def _build_requirements_table(carrier: ProformaCarrier, cell_style) -> Table:
         requirements = carrier.requirements
-        req_data = [["#", "Alto", "Ancho", "Cantidad", "Tablero", "Etiqueta"]]
+        req_data = [["#", "Alto", "Ancho", "Cant.", "Tablero", "Cantos", "Etiqueta"]]
         if isinstance(requirements, list):
             for idx, req in enumerate(requirements, 1):
                 req_data.append(
@@ -396,6 +413,7 @@ class ProformaService:
                         f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
                         req.get("product_code", "N/A"),
+                        Paragraph(_edge_sides_label(req), cell_style),
                         Paragraph(req.get("label") or "-", cell_style),
                     ]
                 )
@@ -403,17 +421,74 @@ class ProformaService:
         req_table = Table(
             req_data,
             colWidths=[
-                0.4 * inch,
+                0.35 * inch,
+                0.8 * inch,
+                0.8 * inch,
+                0.55 * inch,
                 0.9 * inch,
-                0.9 * inch,
-                0.95 * inch,
-                1.0 * inch,
-                CONTENT_WIDTH - 4.15 * inch,
+                1.1 * inch,
+                CONTENT_WIDTH - 4.5 * inch,
             ],
             repeatRows=1,
         )
         req_table.setStyle(_data_table_style(header_size=10, body_size=9))
         return req_table
+
+    @staticmethod
+    def _build_edge_bandings_table(
+        carrier: ProformaCarrier, cell_style, with_prices: bool = True
+    ) -> Table:
+        """Resumen de tapacantos por tipo. Con precios (proforma) o sin ellos
+        (hoja de producción)."""
+        summary = carrier.edge_bandings_summary
+        if with_prices:
+            header = [
+                "Código",
+                "Descripción",
+                "Espesor",
+                "Metros",
+                "P. Unit.",
+                "Subtotal",
+            ]
+        else:
+            header = ["Código", "Descripción", "Espesor", "Metros"]
+        eb_data = [header]
+        for entry in summary:
+            row = [
+                entry.get("product_code", "N/A"),
+                Paragraph(entry.get("product_name", "N/A"), cell_style),
+                f"{(entry.get('thickness') or 0):.2f} mm",
+                f"{entry.get('billed_linear_m', 0)} m",
+            ]
+            if with_prices:
+                row.append(f"${entry.get('price_per_m', 0):.2f}")
+                row.append(f"${entry.get('total_cost', 0):.2f}")
+            eb_data.append(row)
+
+        if with_prices:
+            col_widths = [
+                0.9 * inch,
+                CONTENT_WIDTH - 4.3 * inch,
+                0.9 * inch,
+                0.8 * inch,
+                0.8 * inch,
+                0.9 * inch,
+            ]
+        else:
+            col_widths = [
+                1.0 * inch,
+                CONTENT_WIDTH - 3.0 * inch,
+                1.0 * inch,
+                1.0 * inch,
+            ]
+        eb_table = Table(eb_data, colWidths=col_widths, repeatRows=1)
+        eb_table.setStyle(
+            _data_table_style(
+                header_size=9 if with_prices else 10,
+                body_size=8 if with_prices else 9,
+            )
+        )
+        return eb_table
 
     @staticmethod
     def _build_materials_table(carrier: ProformaCarrier, cell_style) -> Table:
@@ -503,10 +578,17 @@ class ProformaService:
 
     @staticmethod
     def _build_totals_table(carrier: ProformaCarrier) -> Table:
-        summary_data = [
-            ["Total de tableros utilizados:", str(carrier.total_boards_used)],
-            ["Costo total estimado:", f"${carrier.total_boards_cost:.2f}"],
-        ]
+        if carrier.edge_bandings_summary:
+            summary_data = [
+                ["Costo de tableros:", f"${carrier.total_boards_cost:.2f}"],
+                ["Costo de tapacantos:", f"${carrier.total_edge_banding_cost:.2f}"],
+                ["Costo total estimado:", f"${carrier.total_cost:.2f}"],
+            ]
+        else:
+            summary_data = [
+                ["Total de tableros utilizados:", str(carrier.total_boards_used)],
+                ["Costo total estimado:", f"${carrier.total_boards_cost:.2f}"],
+            ]
         return _totals_table(summary_data)
 
     @staticmethod
@@ -570,6 +652,19 @@ def pdf_response(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+_SIDE_LABELS = {"top": "Sup", "bottom": "Inf", "left": "Izq", "right": "Der"}
+
+
+def _edge_sides_label(req: dict) -> str:
+    """Notación compacta de los lados canteados de una pieza (Sup/Inf/Izq/Der)."""
+    spec = req.get("edge_banding")
+    if not spec:
+        return "-"
+    sides = set(spec.get("sides") or [])
+    labels = [_SIDE_LABELS[s] for s in ("top", "bottom", "left", "right") if s in sides]
+    return ", ".join(labels) if labels else "-"
 
 
 def _heading_style(styles) -> ParagraphStyle:

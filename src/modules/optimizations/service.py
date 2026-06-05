@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
@@ -17,8 +18,10 @@ from src.cutting import (
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
-from src.modules.optimizations.patterns import group_layouts
+from src.modules.optimizations.patterns import base_label, group_layouts
 from src.modules.optimizations.schemas import (
+    EdgeBandingSpec,
+    EdgeSide,
     OptimizeRequest,
     OptimizeResponse,
     Requirement,
@@ -33,6 +36,12 @@ from src.shared.exceptions import (
     EntityNotFoundError,
     ValidationError,
 )
+
+# Reubicación de cantos cuando la pieza sale rotada del optimizador. Convención:
+# giro de 90° en sentido horario (top→right→bottom→left→top). El optimizador solo
+# intercambia ancho↔alto, así que fijamos esta convención para dibujar el canto en
+# el lado físico correcto de la pieza ya rotada.
+_CW_ROTATION = {"top": "right", "right": "bottom", "bottom": "left", "left": "top"}
 
 
 class OptimizationService:
@@ -66,8 +75,10 @@ class OptimizationService:
             optimization_hash=optimization_hash,
             total_boards_used=payload["total_boards_used"],
             total_boards_cost=payload["total_boards_cost"],
+            total_edge_banding_cost=payload.get("total_edge_banding_cost", 0.0),
             layouts=payload["layouts"],
             materials_summary=payload["materials_summary"],
+            edge_bandings_summary=payload.get("edge_bandings_summary"),
             layout_groups=payload["layout_groups"],
         )
 
@@ -129,7 +140,11 @@ class OptimizationService:
                 )
             products[product_id] = product
 
-        optimization_hash = self._compute_hash(request, cutting_params, products)
+        eb_products = self._resolve_edge_banding_products(request.requirements)
+
+        optimization_hash = self._compute_hash(
+            request, cutting_params, products, eb_products
+        )
 
         cached = cache.get_json(optimization_hash)
         if cached is not None:
@@ -138,41 +153,75 @@ class OptimizationService:
         product_codes = {pid: product.code for pid, product in products.items()}
         product_names = {pid: product.name for pid, product in products.items()}
         results = [
-            self._optimize(
-                pieces=requirements_by_product[pid],
-                product=products[pid],
-                cutting_params=cutting_params,
+            (
+                reqs,
+                self._optimize(
+                    pieces=reqs,
+                    product=products[pid],
+                    cutting_params=cutting_params,
+                )[0],
             )
-            for pid in requirements_by_product
+            for pid, reqs in requirements_by_product.items()
         ]
 
         payload = self._build_result_payload(
-            request, results, product_codes, product_names
+            request, results, product_codes, product_names, eb_products
         )
         cache.set_json(optimization_hash, payload)
         return payload, optimization_hash
+
+    def _resolve_edge_banding_products(
+        self, requirements: List[Requirement]
+    ) -> Dict[int, ProductModel]:
+        """Resuelve y valida los productos de tapacanto referenciados por las piezas.
+
+        Mismo contrato que la validación de tableros: 404 si no existe, regla de
+        negocio si el producto no es de tipo ``edge_banding``.
+        """
+        eb_products: Dict[int, ProductModel] = {}
+        for req in requirements:
+            if req.edge_banding is None:
+                continue
+            pid = req.edge_banding.product_id
+            if pid in eb_products:
+                continue
+            product = self.product_service.get(pid)
+            if product is None:
+                raise EntityNotFoundError("Product", pid)
+            if product.type != ProductType.EDGE_BANDING.value:
+                raise BusinessRuleError(
+                    f"El producto {product.code} no es un tapacanto"
+                )
+            eb_products[pid] = product
+        return eb_products
 
     def _compute_hash(
         self,
         request: OptimizeRequest,
         cutting_params: CuttingParameters,
         products: Dict[int, ProductModel],
+        eb_products: Dict[int, ProductModel],
     ) -> str:
         """Hash sha256 determinista de las entradas que afectan el resultado.
 
         No incluye ``client_id`` (el cómputo no depende del cliente); la dedupe de
-        órdenes sí combina ``client_id`` con este hash.
+        órdenes sí combina ``client_id`` con este hash. Incluye los precios de
+        tableros y tapacantos y el factor de merma para invalidar la caché cuando
+        cambian.
         """
+        prices = {str(pid): product.price for pid, product in products.items()}
+        prices.update({str(pid): p.price for pid, p in eb_products.items()})
         digest_input = {
-            "requirements": [r.model_dump() for r in request.requirements],
+            "requirements": [r.model_dump(mode="json") for r in request.requirements],
             "params": {
                 "kerf": cutting_params.kerf,
                 "top_trim": cutting_params.top_trim,
                 "bottom_trim": cutting_params.bottom_trim,
                 "left_trim": cutting_params.left_trim,
                 "right_trim": cutting_params.right_trim,
+                "edge_banding_waste_factor": config.EDGE_BANDING_WASTE_FACTOR,
             },
-            "prices": {str(pid): product.price for pid, product in products.items()},
+            "prices": prices,
         }
         canonical = json.dumps(digest_input, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -232,36 +281,132 @@ class OptimizationService:
         )
         return optimizer.optimize(piece_objects)
 
+    def _edge_map_for(self, reqs: List[Requirement]) -> Dict[str, EdgeBandingSpec]:
+        """Mapa ``id asignado -> EdgeBandingSpec`` (mismo id que arma ``_optimize``)."""
+        edge_map: Dict[str, EdgeBandingSpec] = {}
+        for i, p in enumerate(reqs):
+            if p.edge_banding is not None:
+                edge_map[p.label or f"piece_{i+1}"] = p.edge_banding
+        return edge_map
+
+    def _geometric_edges(
+        self, spec: EdgeBandingSpec, eb_products: Dict[int, ProductModel], rotated: bool
+    ) -> dict:
+        """Traduce los lados nominales a los lados geométricos de la pieza dibujada.
+
+        Sin rotar: identidad. Rotada: el optimizador solo intercambia ancho↔alto
+        (un bounding box, sin sentido de giro), así que adoptamos por convención un
+        giro de 90° horario y reubicamos cada canto (``_CW_ROTATION``). Una
+        rotación pura siempre es físicamente realizable, por lo que el canteado
+        asimétrico no impide rotar: simplemente se intercambian los lados.
+        """
+        sides = {s.value for s in spec.sides}
+        if rotated:
+            sides = {_CW_ROTATION[s] for s in sides}
+        geo = [s for s in ("top", "bottom", "left", "right") if s in sides]
+        product = eb_products.get(spec.product_id)
+        attrs = (product.attributes if product else None) or {}
+        return {
+            "sides": geo,
+            "product_id": spec.product_id,
+            "code": product.code if product else None,
+            "color": attrs.get("color"),
+        }
+
+    def _enrich_layout_pieces(
+        self,
+        layout_dict: dict,
+        edge_map: Dict[str, EdgeBandingSpec],
+        eb_products: Dict[int, ProductModel],
+    ) -> None:
+        """Añade ``edges`` (lados geométricos canteados) a cada pieza colocada."""
+        for placed in layout_dict.get("placed_pieces", []):
+            spec = edge_map.get(base_label(str(placed.get("piece_id", ""))))
+            if spec is None:
+                continue
+            placed["edges"] = self._geometric_edges(
+                spec, eb_products, bool(placed.get("rotated"))
+            )
+
+    def _build_edge_bandings_summary(
+        self,
+        requirements: List[Requirement],
+        eb_products: Dict[int, ProductModel],
+    ) -> Tuple[List[dict], float]:
+        """Agrega el metraje de tapacanto por tipo y devuelve ``(summary, total)``.
+
+        El metraje neto es la suma de los lados tapados (``width`` para
+        ``top/bottom``, ``height`` para ``left/right``) por la cantidad; es
+        independiente de la rotación. Se aplica la merma configurada y se redondea
+        al metro entero que se cobra.
+        """
+        waste = config.EDGE_BANDING_WASTE_FACTOR
+        net_mm: Dict[int, float] = defaultdict(float)
+        for req in requirements:
+            spec = req.edge_banding
+            if spec is None:
+                continue
+            per_piece = sum(
+                req.width if side in (EdgeSide.top, EdgeSide.bottom) else req.height
+                for side in spec.sides
+            )
+            net_mm[spec.product_id] += per_piece * req.quantity
+
+        summary: List[dict] = []
+        total_cost = 0.0
+        for pid, mm in net_mm.items():
+            product = eb_products[pid]
+            attrs = product.attributes or {}
+            net_m = mm / 1000.0
+            with_waste = net_m * (1 + waste)
+            billed = math.ceil(with_waste)
+            cost = round(billed * product.price, 2)
+            total_cost += cost
+            summary.append(
+                {
+                    "product_id": pid,
+                    "product_code": product.code,
+                    "product_name": product.name,
+                    "thickness": attrs.get("thickness"),
+                    "color": attrs.get("color"),
+                    "net_linear_m": round(net_m, 2),
+                    "linear_m": round(with_waste, 2),
+                    "billed_linear_m": billed,
+                    "price_per_m": product.price,
+                    "total_cost": cost,
+                }
+            )
+        return summary, round(total_cost, 2)
+
     def _build_materials_summary(
         self,
-        results: List[Tuple[List[CuttingLayout], List[Piece]]],
+        layouts: List[CuttingLayout],
         product_codes: Dict[int, str],
         product_names: Dict[int, str],
     ) -> List[dict]:
         """Agrega los layouts por tipo de tablero con métricas y costos."""
         summary: Dict[int, dict] = {}
-        for layouts, _ in results:
-            for layout in layouts:
-                pid = layout.material.id
-                if pid not in summary:
-                    summary[pid] = {
-                        "product_id": pid,
-                        "product_code": product_codes.get(pid, "N/A"),
-                        "product_name": product_names.get(pid, "N/A"),
-                        "width": layout.material.width,
-                        "height": layout.material.height,
-                        "thickness": layout.material.thickness,
-                        "count": 0,
-                        "total_area_m2": 0.0,
-                        "_efficiencies": [],
-                        "cost_per_unit": layout.material.cost_per_unit,
-                        "total_cost": 0.0,
-                    }
-                entry = summary[pid]
-                entry["count"] += 1
-                entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
-                entry["_efficiencies"].append(layout.efficiency * 100)
-                entry["total_cost"] += layout.material.cost_per_unit
+        for layout in layouts:
+            pid = layout.material.id
+            if pid not in summary:
+                summary[pid] = {
+                    "product_id": pid,
+                    "product_code": product_codes.get(pid, "N/A"),
+                    "product_name": product_names.get(pid, "N/A"),
+                    "width": layout.material.width,
+                    "height": layout.material.height,
+                    "thickness": layout.material.thickness,
+                    "count": 0,
+                    "total_area_m2": 0.0,
+                    "_efficiencies": [],
+                    "cost_per_unit": layout.material.cost_per_unit,
+                    "total_cost": 0.0,
+                }
+            entry = summary[pid]
+            entry["count"] += 1
+            entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
+            entry["_efficiencies"].append(layout.efficiency * 100)
+            entry["total_cost"] += layout.material.cost_per_unit
 
         result = []
         for entry in summary.values():
@@ -275,37 +420,49 @@ class OptimizationService:
     def _build_result_payload(
         self,
         request: OptimizeRequest,
-        results: List[Tuple[List[CuttingLayout], List[Piece]]],
+        results: List[Tuple[List[Requirement], List[CuttingLayout]]],
         product_codes: Dict[int, str],
         product_names: Dict[int, str],
+        eb_products: Dict[int, ProductModel],
     ) -> dict:
         """Arma el payload cacheable/serializable del resultado de optimización.
 
         Mismas claves que consumen ``proforma`` y el snapshot de las órdenes.
+        ``results`` agrupa por tablero como ``(requerimientos, layouts)`` para
+        enriquecer cada pieza colocada con sus lados canteados sin colisión de ids.
         """
-        total_boards_used = sum(len(layouts) for layouts, _ in results)
-        total_boards_cost = sum(
-            layout.material.cost_per_unit
-            for layouts, _ in results
-            for layout in layouts
+        all_layouts = [layout for _, layouts in results for layout in layouts]
+        total_boards_used = len(all_layouts)
+        total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
+
+        layout_dicts: List[dict] = []
+        for reqs, layouts in results:
+            edge_map = self._edge_map_for(reqs)
+            for layout in layouts:
+                layout_dict = layout.to_dict()
+                if edge_map:
+                    self._enrich_layout_pieces(layout_dict, edge_map, eb_products)
+                layout_dicts.append(layout_dict)
+
+        edge_bandings_summary, total_edge_banding_cost = (
+            self._build_edge_bandings_summary(request.requirements, eb_products)
         )
-        layout_dicts = [
-            layout.to_dict() for layouts, _ in results for layout in layouts
-        ]
         return {
             "total_boards_used": total_boards_used,
             "total_boards_cost": total_boards_cost,
+            "total_edge_banding_cost": total_edge_banding_cost,
             "requirements": [
                 {
-                    **r.model_dump(),
+                    **r.model_dump(mode="json"),
                     "product_code": product_codes.get(r.product_id, "N/A"),
                 }
                 for r in request.requirements
             ],
             "layouts": layout_dicts,
             "materials_summary": self._build_materials_summary(
-                results, product_codes, product_names
+                all_layouts, product_codes, product_names
             ),
+            "edge_bandings_summary": edge_bandings_summary,
             "layout_groups": group_layouts(layout_dicts),
         }
 

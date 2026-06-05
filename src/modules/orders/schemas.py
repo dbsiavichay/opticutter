@@ -67,11 +67,17 @@ class OrderLineResponse(CamelModel):
     product_id: int
     product_code: Optional[str] = None
     product_name: Optional[str] = None
-    quantity: int = Field(..., description="Number of boards charged (cobro=tableros)")
+    quantity: int = Field(
+        ...,
+        description="Units charged: boards for tableros, whole linear meters for edge banding",
+    )
     unit_price_snapshot: float
     line_total: float
     avg_efficiency: Optional[float] = None
     total_area_m2: Optional[float] = None
+    linear_m: Optional[float] = Field(
+        default=None, description="Exact linear meters (incl. waste) for edge banding"
+    )
 
 
 class OrderPieceResponse(CamelModel):
@@ -83,6 +89,9 @@ class OrderPieceResponse(CamelModel):
     quantity: int
     priority: int
     can_rotate: bool
+    edges: Optional[dict] = Field(
+        default=None, description="Edge banding spec (nominal sides + product)"
+    )
 
 
 class OrderStatusHistoryResponse(CamelModel):
