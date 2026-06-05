@@ -181,7 +181,7 @@ def _seed_cashmere_catalog(client):
         client,
         "TAP-SL-CSH-045",
         "Tapacanto Cashmere Suave 0.45x19mm",
-        "Suave",
+        "Soft",
         0.45,
         19,
         "Cashmere",
@@ -190,7 +190,7 @@ def _seed_cashmere_catalog(client):
         client,
         "TAP-SL-CSH-100",
         "Tapacanto Cashmere Duro 1x40mm",
-        "Duro",
+        "Hard",
         1.0,
         40,
         "Cashmere",
@@ -199,7 +199,7 @@ def _seed_cashmere_catalog(client):
         client,
         "TAP-SL-CSH-150",
         "Tapacanto Cashmere Duro 1.5x19mm",
-        "Duro",
+        "Hard",
         1.5,
         19,
         "Cashmere",
@@ -213,16 +213,19 @@ def test_edge_bandings_for_15mm_board(client):
     resp = client.get(f"/api/v1/products/{board['id']}/edge-bandings")
     assert resp.status_code == 200
     bands = resp.json()["data"]
-    # 15mm -> ancho 19: Suave 0.45 y Duro 1.5 (ordenados por grosor)
+    # 15mm -> ancho 19: Soft 0.45 y Hard 1.5 (ordenados por grosor)
     assert [b["attributes"]["width"] for b in bands] == [19, 19]
-    assert [b["attributes"]["bandType"] for b in bands] == ["Suave", "Duro"]
+    assert [b["attributes"]["bandType"] for b in bands] == ["Soft", "Hard"]
 
-    # El enum BandType acepta la entrada sin distinguir mayúsculas ("suave").
-    suave = client.get(
-        f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "suave"}
-    ).json()["data"]
-    assert len(suave) == 1
-    assert suave[0]["code"] == "TAP-SL-CSH-045"
+    # El enum BandType acepta la entrada sin distinguir mayúsculas ("soft") y el
+    # alias en español ("suave"), ambos normalizados al valor canónico inglés.
+    for value in ("soft", "suave"):
+        soft = client.get(
+            f"/api/v1/products/{board['id']}/edge-bandings",
+            params={"band_type": value},
+        ).json()["data"]
+        assert len(soft) == 1
+        assert soft[0]["code"] == "TAP-SL-CSH-045"
 
 
 def test_edge_bandings_for_36mm_board_only_hard(client):
@@ -235,11 +238,11 @@ def test_edge_bandings_for_36mm_board_only_hard(client):
     assert bands[0]["code"] == "TAP-SL-CSH-100"
     assert bands[0]["attributes"]["width"] == 40
 
-    # No hay canto suave para 36mm: hueco real del catálogo -> lista vacía
-    suave = client.get(
-        f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "Suave"}
+    # No hay canto suave (Soft) para 36mm: hueco real del catálogo -> lista vacía
+    soft = client.get(
+        f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "Soft"}
     ).json()["data"]
-    assert suave == []
+    assert soft == []
 
 
 def test_edge_bandings_excludes_other_designs(client):
@@ -251,7 +254,7 @@ def test_edge_bandings_excludes_other_designs(client):
         client,
         "TAP-RO-BRR-045",
         "Tapacanto Barroco Ristretto Suave",
-        "Suave",
+        "Soft",
         0.45,
         19,
         "Roble Barroco Ristretto",
