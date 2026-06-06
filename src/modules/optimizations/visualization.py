@@ -279,18 +279,28 @@ class VisualizationService:
         if alto.height <= ph - 2 * pad and alto.width <= pw - 2 * pad:
             img.paste(alto, (px + pad, py + (ph - alto.height) // 2), alto)
 
-        # Etiqueta de la pieza al centro: usar la etiqueta base (sin sufijo de
-        # instancia) y omitir las auto-generadas piece_N.
+        # Texto centrado: la etiqueta de la pieza (etiqueta base, sin sufijo de
+        # instancia y omitiendo las auto-generadas piece_N) y, debajo, la notación de
+        # cantos (p. ej. "2L1C CS"). Se apilan y se centran como bloque; cada línea se
+        # omite si no cabe, cubriendo etiqueta+notación, solo etiqueta o solo notación.
+        stack = []
         piece_id = base_label(str(piece.get("piece_id", "")))
         if piece_id and not piece_id.startswith("piece_"):
             label = _fit_label(piece_id, label_font, pw - 2 * pad, ph - 2 * pad)
             if label:
-                label_img = _text_image(label, label_font, COLOR_LABEL)
-                img.paste(
-                    label_img,
-                    (
-                        px + (pw - label_img.width) // 2,
-                        py + (ph - label_img.height) // 2,
-                    ),
-                    label_img,
-                )
+                stack.append(_text_image(label, label_font, COLOR_LABEL))
+
+        notation = edges.get("notation")
+        if notation:
+            fitted = _fit_label(notation, dim_font, pw - 2 * pad, ph - 2 * pad)
+            if fitted:
+                stack.append(_text_image(fitted, dim_font, COLOR_LABEL))
+
+        if stack:
+            gap = 2
+            total_h = sum(im.height for im in stack) + gap * (len(stack) - 1)
+            if total_h <= ph - 2 * pad:
+                y = py + (ph - total_h) // 2
+                for im in stack:
+                    img.paste(im, (px + (pw - im.width) // 2, y), im)
+                    y += im.height + gap

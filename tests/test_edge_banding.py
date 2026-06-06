@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.schemas import EdgeBandingSpec, EdgeSide
 from src.modules.optimizations.service import OptimizationService
 from src.shared.config import config
@@ -34,7 +35,12 @@ def _create_board(client, code="MEL18", price=45.5):
     ).json()["data"]
 
 
-def _create_edge_banding(client, code="TAP22", price=2.0, color="Blanco"):
+def _create_edge_banding(
+    client, code="TAP22", price=2.0, color="Blanco", band_type=None
+):
+    attributes = {"thickness": 0.45, "width": 22, "color": color, "length": 50000}
+    if band_type is not None:
+        attributes["band_type"] = band_type
     return client.post(
         "/api/v1/products/",
         json={
@@ -42,12 +48,7 @@ def _create_edge_banding(client, code="TAP22", price=2.0, color="Blanco"):
             "code": code,
             "name": f"Tapacanto {code}",
             "price": price,
-            "attributes": {
-                "thickness": 0.45,
-                "width": 22,
-                "color": color,
-                "length": 50000,
-            },
+            "attributes": attributes,
         },
     ).json()["data"]
 
@@ -69,6 +70,24 @@ def _expected_meters(net_m: float):
     """Replica la fórmula del servicio: merma + redondeo al metro entero."""
     with_waste = net_m * (1 + config.EDGE_BANDING_WASTE_FACTOR)
     return round(with_waste, 2), math.ceil(with_waste)
+
+
+# --------------------------------------------------------------------------- #
+# Notación de taller de los cantos (2L1C CS)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "sides, band_type, expected",
+    [
+        (["left", "right", "top"], "Soft", "2L1C CS"),  # 2 largos (alto) + 1 corto
+        (["left"], "Soft", "1L CS"),  # solo largo: omite la parte en cero
+        (["top", "bottom"], "Hard", "2C CD"),  # solo cortos (ancho), canto duro
+        (["left", "right", "top", "bottom"], "Soft", "2L2C CS"),  # todos
+        ([], "Soft", ""),  # sin lados → vacío
+        (["left", "right"], None, "2L"),  # sin band_type → sin sufijo
+    ],
+)
+def test_edge_banding_notation(sides, band_type, expected):
+    assert edge_banding_notation(sides, band_type) == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -247,6 +266,18 @@ def test_geometric_edges_mapping(db_session):
     ]
 
 
+def test_geometric_edges_notation_is_rotation_invariant(db_session):
+    """La notación se calcula desde los lados NOMINALES, así que no cambia al rotar."""
+    svc = OptimizationService(db_session)
+    # top+left+right: 2 largos (left/right=alto) + 1 corto (top=ancho). Sin producto
+    # en el mapa → sin band_type → sin sufijo CS/CD.
+    spec = EdgeBandingSpec(
+        product_id=2, sides=[EdgeSide.top, EdgeSide.left, EdgeSide.right]
+    )
+    assert svc._geometric_edges(spec, {}, False)["notation"] == "2L1C"
+    assert svc._geometric_edges(spec, {}, True)["notation"] == "2L1C"
+
+
 def test_asymmetric_banding_rotates_and_swaps_edges(client):
     """Canteado asimétrico NO bloquea la rotación: si la pieza sale rotada, los
     cantos se intercambian al lado físico correspondiente."""
@@ -271,6 +302,24 @@ def test_asymmetric_banding_rotates_and_swaps_edges(client):
     # CW: top→right, left→top ⇒ lados geométricos {top, right}.
     assert placed["edges"]["sides"] == ["top", "right"]
     assert placed["edges"]["code"] == "TAP22"
+
+
+def test_placed_piece_notation_includes_band_type(client):
+    """La pieza colocada lleva la notación de cantos con sufijo CS/CD del band_type."""
+    c = _create_client(client)
+    b = _create_board(client)
+    eb = _create_edge_banding(client, band_type="Soft")
+
+    # alto=500, ancho=1000, sin rotar: left+right = 2 largos, top = 1 corto; Soft → CS.
+    req = _requirement(b["id"], eb["id"], ["left", "right", "top"])
+    req["canRotate"] = False
+    resp = client.post(
+        "/api/v1/optimize/",
+        json={"clientId": c["id"], "requirements": [req]},
+    )
+    placed = resp.json()["data"]["layouts"][0]["placedPieces"][0]
+    assert placed["rotated"] is False
+    assert placed["edges"]["notation"] == "2L1C CS"
 
 
 # --------------------------------------------------------------------------- #
