@@ -23,6 +23,7 @@ from reportlab.platypus import (
 )
 
 from src.modules.optimizations.carrier import ProformaCarrier
+from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
 from src.shared.config import config
@@ -406,7 +407,7 @@ class ProformaService:
                         f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
                         req.get("product_code", "N/A"),
-                        Paragraph(_edge_sides_label(req), cell_style),
+                        Paragraph(_edge_banding_notation(req), cell_style),
                         Paragraph(req.get("label") or "-", cell_style),
                     ]
                 )
@@ -469,10 +470,10 @@ class ProformaService:
             ]
         else:
             col_widths = [
-                1.0 * inch,
-                CONTENT_WIDTH - 3.0 * inch,
-                1.0 * inch,
-                1.0 * inch,
+                1.4 * inch,  # Código (más ancho: códigos largos tipo TAP-SL-CSH-22)
+                CONTENT_WIDTH - 3.0 * inch,  # Descripción (flexible)
+                0.8 * inch,  # Espesor
+                0.8 * inch,  # Metros
             ]
         eb_table = Table(eb_data, colWidths=col_widths, repeatRows=1)
         eb_table.setStyle(
@@ -532,11 +533,11 @@ class ProformaService:
 
     @staticmethod
     def _build_materials_plain_table(carrier: ProformaCarrier, cell_style) -> Table:
-        """Tableros a usar SIN precios (hoja de producción): código, dimensiones, cant."""
+        """Tableros a usar SIN precios (hoja de producción): código, dimensiones, cant.
+
+        Ocupa el ancho completo del contenido para alinear con la lista de corte."""
         materials_summary = carrier.materials_summary
-        mat_data = [
-            ["Código", "Nombre", "Dimensiones", "Espesor", "Cantidad", "Efic. Prom."]
-        ]
+        mat_data = [["Código", "Nombre", "Dimensiones", "Espesor", "Cantidad"]]
         if isinstance(materials_summary, list) and materials_summary:
             for entry in materials_summary:
                 mat_data.append(
@@ -546,21 +547,19 @@ class ProformaService:
                         f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         f"{entry.get('thickness', 0):.0f} mm",
                         str(entry.get("count", 0)),
-                        f"{entry.get('avg_efficiency', 0):.1f}%",
                     ]
                 )
         else:
-            mat_data.append(["Sin datos de materiales", "", "", "", "", ""])
+            mat_data.append(["Sin datos de materiales", "", "", "", ""])
 
         mat_table = Table(
             mat_data,
             colWidths=[
-                0.9 * inch,
-                CONTENT_WIDTH - 4.5 * inch,
-                1.3 * inch,
-                0.9 * inch,
-                0.9 * inch,
-                0.9 * inch,
+                1.3 * inch,  # Código (más ancho: códigos largos tipo MDP-SL-CSH-15)
+                CONTENT_WIDTH - 4.0 * inch,  # Nombre (flexible)
+                1.1 * inch,  # Dimensiones
+                0.7 * inch,  # Espesor
+                0.9 * inch,  # Cantidad
             ],
             repeatRows=1,
         )
@@ -645,17 +644,13 @@ def pdf_response(
     )
 
 
-_SIDE_LABELS = {"top": "Sup", "bottom": "Inf", "left": "Izq", "right": "Der"}
-
-
-def _edge_sides_label(req: dict) -> str:
-    """Notación compacta de los lados canteados de una pieza (Sup/Inf/Izq/Der)."""
+def _edge_banding_notation(req: dict) -> str:
+    """Notación de taller de los cantos de una pieza (``2L1C CS``) o ``-`` si no lleva."""
     spec = req.get("edge_banding")
     if not spec:
         return "-"
-    sides = set(spec.get("sides") or [])
-    labels = [_SIDE_LABELS[s] for s in ("top", "bottom", "left", "right") if s in sides]
-    return ", ".join(labels) if labels else "-"
+    text = edge_banding_notation(spec.get("sides") or [], spec.get("band_type"))
+    return text or "-"
 
 
 def _heading_style(styles) -> ParagraphStyle:

@@ -18,6 +18,7 @@ from src.cutting import (
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
+from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.patterns import base_label, group_layouts
 from src.modules.optimizations.schemas import (
     EdgeBandingSpec,
@@ -300,9 +301,8 @@ class OptimizationService:
         rotación pura siempre es físicamente realizable, por lo que el canteado
         asimétrico no impide rotar: simplemente se intercambian los lados.
         """
-        sides = {s.value for s in spec.sides}
-        if rotated:
-            sides = {_CW_ROTATION[s] for s in sides}
+        nominal = {s.value for s in spec.sides}
+        sides = {_CW_ROTATION[s] for s in nominal} if rotated else nominal
         geo = [s for s in ("top", "bottom", "left", "right") if s in sides]
         product = eb_products.get(spec.product_id)
         attrs = (product.attributes if product else None) or {}
@@ -311,6 +311,10 @@ class OptimizationService:
             "product_id": spec.product_id,
             "code": product.code if product else None,
             "color": attrs.get("color"),
+            # Notación de taller calculada desde los lados NOMINALES (estable bajo
+            # rotación); ``geo`` solo sirve para pintar las bandas en el lado correcto.
+            # ``attributes`` se persiste en camelCase → ``bandType``.
+            "notation": edge_banding_notation(nominal, attrs.get("bandType")),
         }
 
     def _enrich_layout_pieces(
@@ -417,6 +421,29 @@ class OptimizationService:
             result.append(entry)
         return result
 
+    @staticmethod
+    def _dump_requirement(
+        req: Requirement,
+        product_codes: Dict[int, str],
+        eb_products: Dict[int, ProductModel],
+    ) -> dict:
+        """Vuelca un requirement al payload y le anexa ``band_type`` del tapacanto.
+
+        El ``band_type`` vive en los atributos del producto, no en el
+        ``EdgeBandingSpec``; se inyecta aquí para que la proforma arme la notación de
+        cantos (``2L1C CS``) sin volver a resolver el producto al renderizar.
+        """
+        data = {
+            **req.model_dump(mode="json"),
+            "product_code": product_codes.get(req.product_id, "N/A"),
+        }
+        if req.edge_banding is not None and data.get("edge_banding"):
+            product = eb_products.get(req.edge_banding.product_id)
+            attrs = (product.attributes if product else None) or {}
+            # ``attributes`` se persiste en camelCase → ``bandType``.
+            data["edge_banding"]["band_type"] = attrs.get("bandType")
+        return data
+
     def _build_result_payload(
         self,
         request: OptimizeRequest,
@@ -452,10 +479,7 @@ class OptimizationService:
             "total_boards_cost": total_boards_cost,
             "total_edge_banding_cost": total_edge_banding_cost,
             "requirements": [
-                {
-                    **r.model_dump(mode="json"),
-                    "product_code": product_codes.get(r.product_id, "N/A"),
-                }
+                self._dump_requirement(r, product_codes, eb_products)
                 for r in request.requirements
             ],
             "layouts": layout_dicts,
