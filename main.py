@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
+from src.modules.analytics.router import router as analytics_router
 from src.modules.clients.router import router as clients_router
 from src.modules.optimizations.router import router as optimizations_router
 from src.modules.orders.router import router as orders_router
@@ -61,6 +62,7 @@ app.include_router(products_router, prefix="/api/v1")
 app.include_router(clients_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1")
 
 
 @app.get("/")
