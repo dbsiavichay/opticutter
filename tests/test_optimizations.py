@@ -70,6 +70,46 @@ def test_optimize_returns_layouts(client):
     assert layout["placedPieces"][0]["originalWidth"] == 600
 
 
+def test_optimize_reports_cut_linear_meters(client):
+    """La respuesta expone metros de corte por plancha y el total general (= suma)."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_optimize_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    assert data["totalCutLinearM"] > 0
+    assert "totalEdgeBandingLinearM" in data
+
+    stats = data["layouts"][0]["statistics"]
+    assert stats["cutLinearM"] > 0
+    assert "edgeBandingLinearM" in stats
+
+    total_sheets = sum(lay["statistics"]["cutLinearM"] for lay in data["layouts"])
+    assert data["totalCutLinearM"] == pytest.approx(total_sheets, abs=0.02)
+
+
+def test_carrier_exposes_linear_meter_totals():
+    """``from_payload`` expone los totales nuevos; un payload viejo cae a 0.0."""
+    from src.modules.optimizations.carrier import ProformaCarrier
+
+    carrier = ProformaCarrier.from_payload(
+        {"total_cut_linear_m": 12.5, "total_edge_banding_linear_m": 3.2},
+        client=None,
+        reference="OPT-x",
+    )
+    assert carrier.total_cut_linear_m == 12.5
+    assert carrier.total_edge_banding_linear_m == 3.2
+
+    legacy = ProformaCarrier.from_payload({}, client=None, reference="OPT-y")
+    assert legacy.total_cut_linear_m == 0.0
+    assert legacy.total_edge_banding_linear_m == 0.0
+
+
 def test_optimize_returns_optimization_hash(client):
     """La respuesta expone el hash determinista de las entradas."""
     created_client = _create_client(client)

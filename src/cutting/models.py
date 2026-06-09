@@ -32,6 +32,21 @@ class Rectangle:
 
 
 @dataclass
+class Cut:
+    """Representa un corte de guillotina (segmento de recorrido de la sierra).
+
+    ``length`` es el largo del recorrido (eje del corte); el ``kerf`` es el ancho
+    de hoja (perpendicular) y no afecta esta longitud. Se guardan las coordenadas
+    de inicio para un eventual dibujo, aunque el uso inmediato es sumar ``length``.
+    """
+
+    x: float
+    y: float
+    length: float
+    is_horizontal: bool
+
+
+@dataclass
 class Piece:
     """Representa una pieza a cortar"""
 
@@ -125,11 +140,17 @@ class CuttingLayout:
     placed_pieces: List[PlacedPiece] = field(default_factory=list)
     remainders: List[Rectangle] = field(default_factory=list)
     sheet_number: int = 1
+    cuts: List[Cut] = field(default_factory=list)
 
     @property
     def used_area(self) -> float:
         """Calcula el área utilizada (sin considerar kerf)"""
         return sum(p.width * p.height for p in self.placed_pieces)
+
+    @property
+    def cut_length(self) -> float:
+        """Largo total de corte (mm): suma del recorrido de la sierra en la plancha."""
+        return sum(c.length for c in self.cuts)
 
     @property
     def efficiency(self) -> float:

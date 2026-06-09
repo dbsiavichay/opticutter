@@ -22,6 +22,8 @@ class ProformaCarrier:
     total_boards_used: int = 0
     total_boards_cost: float = 0.0
     total_edge_banding_cost: float = 0.0
+    total_cut_linear_m: float = 0.0
+    total_edge_banding_linear_m: float = 0.0
 
     @property
     def total_cost(self) -> float:
@@ -42,6 +44,8 @@ class ProformaCarrier:
             total_boards_used=payload.get("total_boards_used", 0),
             total_boards_cost=payload.get("total_boards_cost", 0.0),
             total_edge_banding_cost=payload.get("total_edge_banding_cost", 0.0),
+            total_cut_linear_m=payload.get("total_cut_linear_m", 0.0),
+            total_edge_banding_linear_m=payload.get("total_edge_banding_linear_m", 0.0),
         )
 
     @classmethod

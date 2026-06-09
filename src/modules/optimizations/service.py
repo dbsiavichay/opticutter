@@ -77,6 +77,8 @@ class OptimizationService:
             total_boards_used=payload["total_boards_used"],
             total_boards_cost=payload["total_boards_cost"],
             total_edge_banding_cost=payload.get("total_edge_banding_cost", 0.0),
+            total_cut_linear_m=payload.get("total_cut_linear_m", 0.0),
+            total_edge_banding_linear_m=payload.get("total_edge_banding_linear_m", 0.0),
             layouts=payload["layouts"],
             materials_summary=payload["materials_summary"],
             edge_bandings_summary=payload.get("edge_bandings_summary"),
@@ -290,6 +292,25 @@ class OptimizationService:
                 edge_map[p.label or f"piece_{i+1}"] = p.edge_banding
         return edge_map
 
+    def _net_mm_per_label(self, reqs: List[Requirement]) -> Dict[str, float]:
+        """Metraje neto de canto (mm) por etiqueta de pieza (una instancia).
+
+        Misma fórmula que ``_build_edge_bandings_summary`` (``width`` para
+        ``top/bottom``, ``height`` para ``left/right``), independiente de la rotación.
+        La clave es ``label`` o ``piece_{i+1}`` (== ``base_label`` del id colocado),
+        para agregar el canto por plancha desde las piezas realmente colocadas.
+        """
+        net: Dict[str, float] = {}
+        for i, p in enumerate(reqs):
+            spec = p.edge_banding
+            if spec is None:
+                continue
+            net[p.label or f"piece_{i+1}"] = sum(
+                p.width if side in (EdgeSide.top, EdgeSide.bottom) else p.height
+                for side in spec.sides
+            )
+        return net
+
     def _geometric_edges(
         self, spec: EdgeBandingSpec, eb_products: Dict[int, ProductModel], rotated: bool
     ) -> dict:
@@ -462,13 +483,31 @@ class OptimizationService:
         total_boards_used = len(all_layouts)
         total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
 
+        # Métricas por plancha (corte = recorrido de sierra; canto = metraje neto de
+        # las piezas colocadas) acumuladas a totales generales. Se inyectan en las
+        # estadísticas del layout antes de ``group_layouts`` para que los patrones
+        # deduplicados hereden las cifras.
         layout_dicts: List[dict] = []
+        total_cut_linear_m = 0.0
+        total_edge_banding_linear_m = 0.0
         for reqs, layouts in results:
             edge_map = self._edge_map_for(reqs)
+            net_mm_per_label = self._net_mm_per_label(reqs)
             for layout in layouts:
                 layout_dict = layout.to_dict()
                 if edge_map:
                     self._enrich_layout_pieces(layout_dict, edge_map, eb_products)
+                cut_linear_m = round(layout.cut_length / 1000.0, 2)
+                eb_mm = sum(
+                    net_mm_per_label.get(base_label(str(p.get("piece_id", ""))), 0.0)
+                    for p in layout_dict.get("placed_pieces", [])
+                )
+                eb_linear_m = round(eb_mm / 1000.0, 2)
+                stats = layout_dict["statistics"]
+                stats["cut_linear_m"] = cut_linear_m
+                stats["edge_banding_linear_m"] = eb_linear_m
+                total_cut_linear_m += cut_linear_m
+                total_edge_banding_linear_m += eb_linear_m
                 layout_dicts.append(layout_dict)
 
         edge_bandings_summary, total_edge_banding_cost = (
@@ -478,6 +517,8 @@ class OptimizationService:
             "total_boards_used": total_boards_used,
             "total_boards_cost": total_boards_cost,
             "total_edge_banding_cost": total_edge_banding_cost,
+            "total_cut_linear_m": round(total_cut_linear_m, 2),
+            "total_edge_banding_linear_m": round(total_edge_banding_linear_m, 2),
             "requirements": [
                 self._dump_requirement(r, product_codes, eb_products)
                 for r in request.requirements

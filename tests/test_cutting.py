@@ -91,6 +91,73 @@ def test_guillotine_empty_pieces_returns_empty():
     assert unplaced == []
 
 
+# --- Metros lineales de corte (reconstrucción exacta) --------------------
+
+
+def test_cut_length_single_piece_vertical_first():
+    """SHORTER_LEFTOVER_AXIS con sobrante menor en ancho → ``vertical_first``.
+
+    Pieza 400(ancho)×300(alto) en tablero 1000×1000 (kerf 0): corte horizontal a
+    ancho completo (1000) + corte vertical al alto de la pieza (300) = 1300 mm.
+    """
+    material = Material(id="m1", width=1000, height=1000, thickness=18)
+    optimizer = GuillotineOptimizer(
+        material=material, cutting_params=CuttingParameters(kerf=0)
+    )
+    placed, unplaced = optimizer.optimize(
+        [Piece(id="p", width=400, height=300, can_rotate=False)]
+    )
+    assert len(placed) == 1 and unplaced == []
+
+    horizontals = [c for c in optimizer.cuts if c.is_horizontal]
+    verticals = [c for c in optimizer.cuts if not c.is_horizontal]
+    assert len(horizontals) == 1 and horizontals[0].length == pytest.approx(1000)
+    assert len(verticals) == 1 and verticals[0].length == pytest.approx(300)
+
+    layout = CuttingLayout(
+        material=material,
+        placed_pieces=placed,
+        remainders=optimizer.remainders,
+        sheet_number=1,
+        cuts=optimizer.cuts,
+    )
+    assert layout.cut_length == pytest.approx(1300)
+
+
+def test_cut_length_single_piece_horizontal_first():
+    """Sobrante mayor en ancho → ``horizontal_first``.
+
+    Pieza 300(ancho)×600(alto) en tablero 1000×1000 (kerf 0): corte vertical a alto
+    completo (1000) + corte horizontal al ancho de la pieza (300) = 1300 mm.
+    """
+    material = Material(id="m1", width=1000, height=1000, thickness=18)
+    optimizer = GuillotineOptimizer(
+        material=material, cutting_params=CuttingParameters(kerf=0)
+    )
+    placed, unplaced = optimizer.optimize(
+        [Piece(id="p", width=300, height=600, can_rotate=False)]
+    )
+    assert len(placed) == 1 and unplaced == []
+
+    horizontals = [c for c in optimizer.cuts if c.is_horizontal]
+    verticals = [c for c in optimizer.cuts if not c.is_horizontal]
+    assert len(verticals) == 1 and verticals[0].length == pytest.approx(1000)
+    assert len(horizontals) == 1 and horizontals[0].length == pytest.approx(300)
+
+
+def test_cut_length_full_fill_has_no_cuts():
+    """Una pieza que llena el tablero exacto no genera cortes (no hay sobrante)."""
+    material = Material(id="m1", width=500, height=500, thickness=18)
+    optimizer = GuillotineOptimizer(
+        material=material, cutting_params=CuttingParameters(kerf=0)
+    )
+    placed, unplaced = optimizer.optimize(
+        [Piece(id="p", width=500, height=500, can_rotate=False)]
+    )
+    assert len(placed) == 1 and unplaced == []
+    assert optimizer.cuts == []
+
+
 def test_guillotine_trims_exceeding_material_raise():
     material = Material(id="m1", width=100, height=100, thickness=18)
     with pytest.raises(ValueError):
@@ -133,3 +200,19 @@ def test_multisheet_empty_returns_empty():
     ).optimize([])
     assert layouts == []
     assert remaining == []
+
+
+def test_multisheet_layouts_track_cut_length():
+    """Cada layout reporta su largo de corte (suma de sus segmentos) y es positivo."""
+    material = Material(id="board", width=1000, height=1000, thickness=18)
+    optimizer = MultiSheetGuillotineOptimizer(
+        material_template=material,
+        cutting_params=CuttingParameters(kerf=5),
+    )
+    layouts, remaining = optimizer.optimize(
+        [Piece(id="p", width=400, height=300, quantity=3, can_rotate=False)]
+    )
+    assert layouts and remaining == []
+    for layout in layouts:
+        assert layout.cut_length == pytest.approx(sum(c.length for c in layout.cuts))
+        assert layout.cut_length > 0
