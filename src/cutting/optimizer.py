@@ -1,7 +1,14 @@
 from typing import List, Tuple
 
 from src.cutting.enums import SplitRule
-from src.cutting.models import CuttingLayout, Material, Piece, PlacedPiece, Rectangle
+from src.cutting.models import (
+    Cut,
+    CuttingLayout,
+    Material,
+    Piece,
+    PlacedPiece,
+    Rectangle,
+)
 from src.cutting.parameters import CuttingParameters
 
 
@@ -46,6 +53,7 @@ class GuillotineOptimizer:
             Rectangle(self.left_trim, self.bottom_trim, usable_width, usable_height)
         ]
         self.placed_pieces: List[PlacedPiece] = []
+        self.cuts: List[Cut] = []
 
     def optimize(self, pieces: List[Piece]) -> Tuple[List[PlacedPiece], List[Piece]]:
         if not pieces:
@@ -132,13 +140,17 @@ class GuillotineOptimizer:
         effective_width = placed.width + (self.kerf if width_leftover > 0 else 0)
         effective_height = placed.height + (self.kerf if height_leftover > 0 else 0)
 
-        new_rects = self._create_split_rectangles(
+        new_rects, orientation = self._create_split_rectangles(
             rect,
             placed,
             effective_width,
             effective_height,
             width_leftover,
             height_leftover,
+        )
+
+        self.cuts.extend(
+            self._cuts_for(rect, placed, width_leftover, height_leftover, orientation)
         )
 
         new_rects = [
@@ -151,6 +163,60 @@ class GuillotineOptimizer:
 
         self.remainders.sort(key=lambda r: r.area)
 
+    def _cuts_for(
+        self,
+        rect: Rectangle,
+        placed: PlacedPiece,
+        width_leftover: float,
+        height_leftover: float,
+        orientation: str,
+    ) -> List[Cut]:
+        """Segmentos de corte que separan la pieza del rectángulo, por orientación.
+
+        ``vertical_first`` deja el sobrante superior a ancho completo (corte
+        horizontal de ``rect.width``) y el lateral derecho a la altura de la pieza
+        (corte vertical de ``placed.height``). ``horizontal_first`` deja el sobrante
+        derecho a alto completo (corte vertical de ``rect.height``) y el superior al
+        ancho de la pieza (corte horizontal de ``placed.width``). El ``kerf`` es ancho
+        de hoja (perpendicular) y no altera la longitud. Sin sobrante en un eje no hay
+        corte en ese eje (ya lo separó un corte previo o el borde del tablero).
+        """
+        cuts: List[Cut] = []
+        if orientation == "vertical_first":
+            if height_leftover > 0:
+                cuts.append(
+                    Cut(rect.x, rect.y + placed.height, rect.width, is_horizontal=True)
+                )
+            if width_leftover > 0:
+                cuts.append(
+                    Cut(
+                        rect.x + placed.width,
+                        rect.y,
+                        placed.height,
+                        is_horizontal=False,
+                    )
+                )
+        else:  # horizontal_first
+            if width_leftover > 0:
+                cuts.append(
+                    Cut(
+                        rect.x + placed.width,
+                        rect.y,
+                        rect.height,
+                        is_horizontal=False,
+                    )
+                )
+            if height_leftover > 0:
+                cuts.append(
+                    Cut(
+                        rect.x,
+                        rect.y + placed.height,
+                        placed.width,
+                        is_horizontal=True,
+                    )
+                )
+        return cuts
+
     def _create_split_rectangles(
         self,
         rect: Rectangle,
@@ -159,145 +225,86 @@ class GuillotineOptimizer:
         effective_height: float,
         width_leftover: float,
         height_leftover: float,
-    ) -> List[Rectangle]:
+    ) -> Tuple[List[Rectangle], str]:
+        """Crea los rectángulos sobrantes y devuelve la orientación de split elegida.
+
+        La orientación (``"vertical_first"`` | ``"horizontal_first"``) la usa
+        ``_cuts_for`` para derivar la longitud de los cortes con la topología real.
+        """
         new_rects = []
+        orientation = "vertical_first"
 
         if self.split_rule == SplitRule.SHORTER_LEFTOVER_AXIS:
-            if width_leftover <= height_leftover:
-                new_rects = self._vertical_split_first(
-                    rect,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
-            else:
-                new_rects = self._horizontal_split_first(
-                    rect,
-                    placed,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+            orientation = (
+                "vertical_first"
+                if width_leftover <= height_leftover
+                else "horizontal_first"
+            )
 
         elif self.split_rule == SplitRule.LONGER_LEFTOVER_AXIS:
-            if width_leftover >= height_leftover:
-                new_rects = self._vertical_split_first(
-                    rect,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
-            else:
-                new_rects = self._horizontal_split_first(
-                    rect,
-                    placed,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+            orientation = (
+                "vertical_first"
+                if width_leftover >= height_leftover
+                else "horizontal_first"
+            )
 
         elif self.split_rule == SplitRule.SHORTER_AXIS:
-            if rect.width <= rect.height:
-                new_rects = self._vertical_split_first(
-                    rect,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
-            else:
-                new_rects = self._horizontal_split_first(
-                    rect,
-                    placed,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+            orientation = (
+                "vertical_first" if rect.width <= rect.height else "horizontal_first"
+            )
 
         elif self.split_rule == SplitRule.LONGER_AXIS:
-            if rect.width >= rect.height:
-                new_rects = self._vertical_split_first(
-                    rect,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+            orientation = (
+                "vertical_first" if rect.width >= rect.height else "horizontal_first"
+            )
+
+        elif self.split_rule in (SplitRule.MINIMIZE_AREA, SplitRule.MAXIMIZE_AREA):
+            vertical_rects = self._vertical_split_first(
+                rect, effective_width, effective_height, width_leftover, height_leftover
+            )
+            horizontal_rects = self._horizontal_split_first(
+                rect,
+                placed,
+                effective_width,
+                effective_height,
+                width_leftover,
+                height_leftover,
+            )
+
+            max_vertical = max((r.area for r in vertical_rects), default=0)
+            max_horizontal = max((r.area for r in horizontal_rects), default=0)
+
+            if self.split_rule == SplitRule.MINIMIZE_AREA:
+                use_vertical = max_vertical <= max_horizontal
             else:
-                new_rects = self._horizontal_split_first(
-                    rect,
-                    placed,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+                use_vertical = max_vertical >= max_horizontal
 
-        elif self.split_rule == SplitRule.MINIMIZE_AREA:
-            vertical_rects = self._vertical_split_first(
-                rect, effective_width, effective_height, width_leftover, height_leftover
-            )
-            horizontal_rects = self._horizontal_split_first(
-                rect,
-                placed,
-                effective_width,
-                effective_height,
-                width_leftover,
-                height_leftover,
-            )
-
-            max_vertical = max((r.area for r in vertical_rects), default=0)
-            max_horizontal = max((r.area for r in horizontal_rects), default=0)
-
-            new_rects = (
-                vertical_rects if max_vertical <= max_horizontal else horizontal_rects
-            )
-
-        elif self.split_rule == SplitRule.MAXIMIZE_AREA:
-            vertical_rects = self._vertical_split_first(
-                rect, effective_width, effective_height, width_leftover, height_leftover
-            )
-            horizontal_rects = self._horizontal_split_first(
-                rect,
-                placed,
-                effective_width,
-                effective_height,
-                width_leftover,
-                height_leftover,
-            )
-
-            max_vertical = max((r.area for r in vertical_rects), default=0)
-            max_horizontal = max((r.area for r in horizontal_rects), default=0)
-
-            new_rects = (
-                vertical_rects if max_vertical >= max_horizontal else horizontal_rects
-            )
+            if use_vertical:
+                return vertical_rects, "vertical_first"
+            return horizontal_rects, "horizontal_first"
 
         else:
-            if width_leftover <= height_leftover:
-                new_rects = self._vertical_split_first(
-                    rect,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
-            else:
-                new_rects = self._horizontal_split_first(
-                    rect,
-                    placed,
-                    effective_width,
-                    effective_height,
-                    width_leftover,
-                    height_leftover,
-                )
+            orientation = (
+                "vertical_first"
+                if width_leftover <= height_leftover
+                else "horizontal_first"
+            )
 
-        return new_rects
+        if orientation == "vertical_first":
+            new_rects = self._vertical_split_first(
+                rect, effective_width, effective_height, width_leftover, height_leftover
+            )
+        else:
+            new_rects = self._horizontal_split_first(
+                rect,
+                placed,
+                effective_width,
+                effective_height,
+                width_leftover,
+                height_leftover,
+            )
+
+        return new_rects, orientation
 
     def _vertical_split_first(
         self,
@@ -447,6 +454,7 @@ class MultiSheetGuillotineOptimizer:
                     placed_pieces=placed,
                     remainders=optimizer.remainders,
                     sheet_number=sheet_count,
+                    cuts=optimizer.cuts,
                 )
                 self.layouts.append(layout)
                 remaining_pieces = unplaced

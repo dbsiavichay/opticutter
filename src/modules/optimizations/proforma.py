@@ -223,6 +223,10 @@ class ProformaService:
                 )
             )
 
+        story.append(Spacer(1, 0.25 * inch))
+        story.extend(_section("RESUMEN DE CORTE Y CANTO", heading_style))
+        story.append(ProformaService._build_cut_summary_table(carrier))
+
         story.append(PageBreak())
         story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
         story.append(Spacer(1, 0.08 * inch))
@@ -587,6 +591,55 @@ class ProformaService:
         return _totals_table(
             [["Total de tableros a cortar:", str(carrier.total_boards_used)]]
         )
+
+    @staticmethod
+    def _build_cut_summary_table(carrier: ProformaCarrier) -> Table:
+        """Metros lineales de corte y canto por plancha + total general (taller).
+
+        Una fila por patrón de corte (deduplicado) con los valores por plancha; la
+        fila TOTAL es la suma sobre todas las planchas físicas.
+        """
+        groups = carrier.layout_groups
+        if not (isinstance(groups, list) and groups):
+            groups = group_layouts(carrier.layouts or [])
+
+        data = [["Patrón", "Planchas", "Corte (m)", "Canto (m)"]]
+        for group in groups:
+            stats = (group.get("layout") or {}).get("statistics") or {}
+            data.append(
+                [
+                    f"#{group.get('pattern_id', '?')}",
+                    str(group.get("count", 0)),
+                    f"{stats.get('cut_linear_m', 0):.2f}",
+                    f"{stats.get('edge_banding_linear_m', 0):.2f}",
+                ]
+            )
+        data.append(
+            [
+                "TOTAL",
+                str(carrier.total_boards_used),
+                f"{carrier.total_cut_linear_m:.2f}",
+                f"{carrier.total_edge_banding_linear_m:.2f}",
+            ]
+        )
+
+        table = Table(
+            data,
+            colWidths=[
+                CONTENT_WIDTH - 3.6 * inch,
+                1.2 * inch,
+                1.2 * inch,
+                1.2 * inch,
+            ],
+            repeatRows=1,
+        )
+        style = _data_table_style(header_size=10, body_size=9)
+        # Resalta la fila TOTAL (última) como caja de totales.
+        style.add("BACKGROUND", (0, -1), (-1, -1), LIGHT_CORAL)
+        style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
+        style.add("TEXTCOLOR", (0, -1), (-1, -1), BRAND_BLACK)
+        table.setStyle(style)
+        return table
 
     @staticmethod
     def _build_layout_pages(carrier: ProformaCarrier) -> List:

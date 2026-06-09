@@ -158,6 +158,13 @@ class LayoutStatistics(CamelModel):
     waste_area: float = Field(..., description="Unused area of the sheet")
     efficiency: float = Field(..., description="Material usage efficiency (percentage)")
     pieces_count: int = Field(..., description="Number of pieces placed on the sheet")
+    cut_linear_m: float = Field(
+        default=0.0, description="Linear meters of cut (saw travel) for this sheet"
+    )
+    edge_banding_linear_m: float = Field(
+        default=0.0,
+        description="Net linear meters of edge banding on this sheet (informational)",
+    )
 
 
 class Layout(CamelModel):
@@ -200,6 +207,13 @@ class OptimizeResponse(CamelModel):
     total_boards_cost: float = Field(..., description="Total cost of boards used")
     total_edge_banding_cost: float = Field(
         default=0.0, description="Total cost of edge banding used"
+    )
+    total_cut_linear_m: float = Field(
+        default=0.0, description="Total linear meters of cut across all sheets"
+    )
+    total_edge_banding_linear_m: float = Field(
+        default=0.0,
+        description="Total net linear meters of edge banding across all sheets",
     )
     layouts: List[Layout] = Field(
         ..., description="Per-sheet cutting layouts of the optimization"

@@ -124,6 +124,26 @@ def test_optimize_aggregates_edge_banding_meters_and_cost(client):
     assert data["totalEdgeBandingCost"] == pytest.approx(round(billed * 2.0, 2))
 
 
+def test_optimize_reports_edge_banding_linear_m_per_sheet(client):
+    """El metraje neto de canto se expone por plancha y como total general."""
+    c = _create_client(client)
+    b = _create_board(client)
+    eb = _create_edge_banding(client, price=2.0)
+
+    # top+bottom con width=1000 → 2×1000 = 2000 mm = 2.0 m neto (1 pieza, 1 plancha).
+    resp = client.post(
+        "/api/v1/optimize/",
+        json={
+            "clientId": c["id"],
+            "requirements": [_requirement(b["id"], eb["id"], ["top", "bottom"])],
+        },
+    )
+    data = resp.json()["data"]
+    assert data["totalEdgeBandingLinearM"] == pytest.approx(2.0)
+    stats = data["layouts"][0]["statistics"]
+    assert stats["edgeBandingLinearM"] == pytest.approx(2.0)
+
+
 def test_optimize_uses_height_for_left_right_sides(client):
     """left/right miden el alto; top/bottom el ancho."""
     c = _create_client(client)
