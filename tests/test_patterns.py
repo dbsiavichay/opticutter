@@ -7,10 +7,10 @@ from src.modules.optimizations.patterns import (
 )
 
 
-def _layout(sheet_number, pieces, material_id=18):
+def _layout(sheet_number, pieces, material_key="b1"):
     """Construye un layout mínimo con la forma de ``CuttingLayout.to_dict``."""
     return {
-        "material": {"material_id": material_id, "sheet_number": sheet_number},
+        "material": {"material_key": material_key, "sheet_number": sheet_number},
         "placed_pieces": [
             {
                 "piece_id": pid,
@@ -57,7 +57,7 @@ def test_group_collapses_identical_patterns():
     assert group["pattern_id"] == 1
     assert group["count"] == 3
     assert group["sheet_numbers"] == [1, 2, 3]
-    assert group["material_id"] == 18
+    assert group["material_key"] == "b1"
     assert group["layout"] is layouts[0]
 
 

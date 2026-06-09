@@ -168,7 +168,7 @@ class CuttingLayout:
         """Convierte a diccionario para serialización"""
         return {
             "material": {
-                "material_id": self.material.id,
+                "material_key": self.material.id,
                 "sheet_number": self.sheet_number,
                 "width": self.material.width,
                 "height": self.material.height,

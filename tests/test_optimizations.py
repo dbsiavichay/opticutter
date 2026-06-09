@@ -35,13 +35,14 @@ def _create_board(client, code="MEL18"):
 def _optimize_payload(client_id, product_id):
     return {
         "clientId": client_id,
+        "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {
                 "priority": 0,
                 "height": 400,
                 "width": 600,
                 "quantity": 2,
-                "productId": product_id,
+                "materialKey": "b1",
                 "label": "Puerta",
                 "canRotate": True,
             }
@@ -64,7 +65,7 @@ def test_optimize_returns_layouts(client):
     assert len(data["layouts"]) >= 1
     layout = data["layouts"][0]
     assert "placedPieces" in layout
-    assert layout["material"]["materialId"] == created_board["id"]
+    assert layout["material"]["materialKey"] == "b1"
     assert layout["material"]["sheetNumber"] == 1
     assert "efficiency" in layout["statistics"]
     assert layout["placedPieces"][0]["originalWidth"] == 600
@@ -300,13 +301,16 @@ def test_optimize_deduplicates_identical_patterns(client):
     # Una pieza grande (1700×670) entra una sola vez por tablero → 5 hojas idénticas.
     payload = {
         "clientId": created_client["id"],
+        "materials": [
+            {"key": "b1", "source": "catalog", "productId": created_board["id"]}
+        ],
         "requirements": [
             {
                 "priority": 0,
                 "height": 1700,
                 "width": 670,
                 "quantity": 5,
-                "productId": created_board["id"],
+                "materialKey": "b1",
                 "label": "",
                 "canRotate": True,
             }
@@ -328,8 +332,8 @@ def test_optimize_deduplicates_identical_patterns(client):
     assert group["patternId"] == 1
     assert group["count"] == 5
     assert len(group["sheetNumbers"]) == 5
-    assert group["materialId"] == created_board["id"]
-    assert group["layout"]["material"]["materialId"] == created_board["id"]
+    assert group["materialKey"] == "b1"
+    assert group["layout"]["material"]["materialKey"] == "b1"
 
 
 def test_optimize_includes_materials_summary(client):
@@ -348,7 +352,223 @@ def test_optimize_includes_materials_summary(client):
     assert summary is not None and len(summary) == 1
 
     entry = summary[0]
+    assert entry["materialKey"] == "b1"
+    assert entry["source"] == "catalog"
     assert entry["productCode"] == "MEL18"
     assert entry["productName"] == "Melamina MEL18"
     assert entry["count"] == data["totalBoardsUsed"]
     assert entry["totalCost"] == pytest.approx(data["totalBoardsCost"])
+
+
+# --------------------------------------------------------------------------- #
+# Material agnóstico al origen (catálogo / manual / retazo / mixto)
+# --------------------------------------------------------------------------- #
+def _manual_material(key="m1", height=2000, width=1000, thickness=18, cost=30.0):
+    return {
+        "key": key,
+        "source": "manual",
+        "height": height,
+        "width": width,
+        "thickness": thickness,
+        "costPerUnit": cost,
+        "label": "Sobrante taller",
+    }
+
+
+def test_optimize_with_manual_material(client):
+    """Una medida manual (sin catálogo) se optimiza por dimensiones y costo."""
+    c = _create_client(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [_manual_material(cost=30.0)],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 2,
+                "materialKey": "m1",
+                "label": "Puerta",
+                "canRotate": True,
+            }
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    assert data["totalBoardsUsed"] >= 1
+    assert data["layouts"][0]["material"]["materialKey"] == "m1"
+
+    entry = data["materialsSummary"][0]
+    assert entry["materialKey"] == "m1"
+    assert entry["source"] == "manual"
+    assert entry["productId"] is None
+    assert entry["costPerUnit"] == 30.0
+    assert entry["totalCost"] == pytest.approx(data["totalBoardsUsed"] * 30.0)
+
+
+def test_optimize_with_company_offcut_material(client):
+    """Un retazo de empresa se trata igual: dimensiones inline, sin producto."""
+    c = _create_client(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [
+            {
+                "key": "r1",
+                "source": "companyOffcut",
+                "height": 1200,
+                "width": 600,
+                "thickness": 15,
+                "costPerUnit": 0,
+            }
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 300,
+                "quantity": 1,
+                "materialKey": "r1",
+                "canRotate": True,
+            }
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 200
+    entry = resp.json()["data"]["materialsSummary"][0]
+    assert entry["source"] == "companyOffcut"
+    assert entry["productId"] is None
+    # Sin label ni código de catálogo cae a la key / dimensiones legibles.
+    assert entry["productCode"] == "r1"
+    assert entry["productName"] == "600×1200"
+
+
+def test_optimize_mixed_catalog_and_manual(client):
+    """Catálogo y manual conviven en una misma optimización (stock heterogéneo)."""
+    c = _create_client(client)
+    board = _create_board(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [
+            {"key": "b1", "source": "catalog", "productId": board["id"]},
+            _manual_material(key="m1", cost=20.0),
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 1,
+                "materialKey": "b1",
+            },
+            {
+                "priority": 0,
+                "height": 300,
+                "width": 300,
+                "quantity": 1,
+                "materialKey": "m1",
+            },
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    by_key = {e["materialKey"]: e for e in data["materialsSummary"]}
+    assert set(by_key) == {"b1", "m1"}
+    assert by_key["b1"]["source"] == "catalog"
+    assert by_key["b1"]["productId"] == board["id"]
+    assert by_key["m1"]["source"] == "manual"
+    assert by_key["m1"]["productId"] is None
+
+
+def test_optimize_unknown_material_key_returns_422(client):
+    """Un requerimiento que referencia una key inexistente es 422 (validación)."""
+    c = _create_client(client)
+    board = _create_board(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [{"key": "b1", "source": "catalog", "productId": board["id"]}],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 1,
+                "materialKey": "zzz",
+            }
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 422
+
+
+def test_optimize_manual_material_hash_is_deterministic(client):
+    """Dos peticiones idénticas con material manual comparten hash (cache-first)."""
+    c = _create_client(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [_manual_material()],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 1,
+                "materialKey": "m1",
+            }
+        ],
+    }
+    first = client.post("/api/v1/optimize/", json=payload).json()["data"]
+    second = client.post("/api/v1/optimize/", json=payload).json()["data"]
+    assert first["optimizationHash"] == second["optimizationHash"]
+
+
+def test_material_resolver_resolves_each_source(db_session):
+    """El resolver traduce catálogo y fuentes inline a un ResolvedMaterial uniforme."""
+    from src.modules.optimizations.materials import MaterialResolver
+    from src.modules.optimizations.schemas import (
+        CatalogMaterialInput,
+        InlineMaterialInput,
+        MaterialSource,
+    )
+    from src.modules.products.model import ProductModel, ProductType
+
+    board = ProductModel(
+        type=ProductType.BOARD.value,
+        code="MELX",
+        name="Melamina X",
+        price=50.0,
+        attributes={"height": 2440, "width": 1220, "thickness": 18},
+    )
+    db_session.add(board)
+    db_session.commit()
+
+    resolver = MaterialResolver(db_session)
+
+    catalog = resolver.resolve(
+        CatalogMaterialInput(
+            key="b1", source=MaterialSource.catalog, product_id=board.id
+        )
+    )
+    assert catalog.is_catalog
+    assert (catalog.width, catalog.height, catalog.thickness) == (1220, 2440, 18)
+    assert catalog.cost_per_unit == 50.0
+    assert catalog.product_id == board.id and catalog.code == "MELX"
+
+    manual = resolver.resolve(
+        InlineMaterialInput(
+            key="m1",
+            source=MaterialSource.manual,
+            height=2000,
+            width=1000,
+            thickness=15,
+            cost_per_unit=12.5,
+            label="Sobrante",
+        )
+    )
+    assert not manual.is_catalog
+    assert manual.product_id is None and manual.code is None
+    assert manual.name == "Sobrante" and manual.cost_per_unit == 12.5
+    assert manual.to_dict()["source"] == "manual"

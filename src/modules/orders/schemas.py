@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import Field
 
 from src.modules.clients.schemas import ClientResponse
-from src.modules.optimizations.schemas import Requirement
+from src.modules.optimizations.schemas import MaterialInput, Requirement
 from src.modules.orders.model import OrderStatus
 from src.shared.schemas import CamelModel
 
@@ -12,6 +12,11 @@ from src.shared.schemas import CamelModel
 class OrderCreate(CamelModel):
     """Crear una orden: misma forma que ``OptimizeRequest`` + metadatos."""
 
+    materials: List[MaterialInput] = Field(
+        ...,
+        min_length=1,
+        description="Available materials (stock): catalog boards, offcuts or manual",
+    )
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="Cut list to optimize and freeze into the order"
     )

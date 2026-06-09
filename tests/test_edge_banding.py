@@ -53,13 +53,18 @@ def _create_edge_banding(
     ).json()["data"]
 
 
-def _requirement(board_id, eb_id, sides, height=500, width=1000, quantity=1):
+def _materials(board_id, key="b1"):
+    """Stock de catálogo: un tablero referenciado por ``materialKey``."""
+    return [{"key": key, "source": "catalog", "productId": board_id}]
+
+
+def _requirement(eb_id, sides, height=500, width=1000, quantity=1, material_key="b1"):
     return {
         "priority": 0,
         "height": height,
         "width": width,
         "quantity": quantity,
-        "productId": board_id,
+        "materialKey": material_key,
         "label": "Costado",
         "canRotate": True,
         "edgeBanding": {"productId": eb_id, "sides": sides},
@@ -103,7 +108,8 @@ def test_optimize_aggregates_edge_banding_meters_and_cost(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["top", "bottom"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
     )
     assert resp.status_code == 200
@@ -135,7 +141,8 @@ def test_optimize_reports_edge_banding_linear_m_per_sheet(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["top", "bottom"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
     )
     data = resp.json()["data"]
@@ -155,7 +162,8 @@ def test_optimize_uses_height_for_left_right_sides(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["left", "right"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["left", "right"])],
         },
     )
     data = resp.json()["data"]
@@ -172,9 +180,10 @@ def test_optimize_aggregates_multiple_edge_banding_types(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
+            "materials": _materials(b["id"]),
             "requirements": [
-                _requirement(b["id"], eb1["id"], ["top", "bottom"]),
-                _requirement(b["id"], eb2["id"], ["left", "right"], height=1000),
+                _requirement(eb1["id"], ["top", "bottom"]),
+                _requirement(eb2["id"], ["left", "right"], height=1000),
             ],
         },
     )
@@ -192,13 +201,14 @@ def test_optimize_without_edge_banding_has_empty_summary(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
+            "materials": _materials(b["id"]),
             "requirements": [
                 {
                     "priority": 0,
                     "height": 400,
                     "width": 600,
                     "quantity": 1,
-                    "productId": b["id"],
+                    "materialKey": "b1",
                     "label": "P",
                     "canRotate": True,
                 }
@@ -220,7 +230,8 @@ def test_edge_banding_unknown_product_returns_404(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], 99999, ["top"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(99999, ["top"])],
         },
     )
     assert resp.status_code == 404
@@ -236,7 +247,8 @@ def test_edge_banding_non_edge_banding_product_rejected(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], other_board["id"], ["top"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(other_board["id"], ["top"])],
         },
     )
     assert resp.status_code == 422
@@ -251,7 +263,8 @@ def test_edge_banding_rejects_duplicate_sides(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["top", "top"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["top", "top"])],
         },
     )
     assert resp.status_code == 422
@@ -310,10 +323,9 @@ def test_asymmetric_banding_rotates_and_swaps_edges(client):
         "/api/v1/optimize/",
         json={
             "clientId": c["id"],
+            "materials": _materials(b["id"]),
             "requirements": [
-                _requirement(
-                    b["id"], eb["id"], ["top", "left"], height=1000, width=2000
-                )
+                _requirement(eb["id"], ["top", "left"], height=1000, width=2000)
             ],
         },
     )
@@ -331,11 +343,15 @@ def test_placed_piece_notation_includes_band_type(client):
     eb = _create_edge_banding(client, band_type="Soft")
 
     # alto=500, ancho=1000, sin rotar: left+right = 2 largos, top = 1 corto; Soft → CS.
-    req = _requirement(b["id"], eb["id"], ["left", "right", "top"])
+    req = _requirement(eb["id"], ["left", "right", "top"])
     req["canRotate"] = False
     resp = client.post(
         "/api/v1/optimize/",
-        json={"clientId": c["id"], "requirements": [req]},
+        json={
+            "clientId": c["id"],
+            "materials": _materials(b["id"]),
+            "requirements": [req],
+        },
     )
     placed = resp.json()["data"]["layouts"][0]["placedPieces"][0]
     assert placed["rotated"] is False
@@ -354,7 +370,8 @@ def test_order_charges_edge_banding(client):
         "/api/v1/orders/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["top", "bottom"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
     )
     assert resp.status_code == 201
@@ -392,7 +409,8 @@ def test_order_proforma_with_edge_banding_renders(client):
         "/api/v1/orders/",
         json={
             "clientId": c["id"],
-            "requirements": [_requirement(b["id"], eb["id"], ["top", "bottom"])],
+            "materials": _materials(b["id"]),
+            "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
     ).json()["data"]
 
