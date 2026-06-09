@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
-from src.modules.optimizations.schemas import OptimizeRequest
+from src.modules.optimizations.schemas import MaterialSource, OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
     PENDING_STATUSES,
@@ -73,9 +73,26 @@ class OrderService:
         require_phone(client)
 
         opt_request = OptimizeRequest(
-            requirements=data.requirements, client_id=data.client_id
+            materials=data.materials,
+            requirements=data.requirements,
+            client_id=data.client_id,
         )
         payload, optimization_hash = self.optimization_service.compute(opt_request)
+
+        # Fase 1: el cobro de órdenes solo soporta materiales de catálogo (los
+        # ``order_lines``/``order_pieces`` exigen ``product_id``). Optimizar y
+        # proformar materiales fuera del catálogo sí se permite; convertirlos en
+        # orden se aborda en una iteración posterior.
+        non_catalog = [
+            m
+            for m in payload.get("materials", [])
+            if m.get("source") != MaterialSource.catalog.value
+        ]
+        if non_catalog:
+            raise BusinessRuleError(
+                "Aún no se pueden crear órdenes con materiales fuera del catálogo "
+                "(retazos o medidas manuales); usa tableros del catálogo."
+            )
 
         existing = self._find_active_duplicate(data.client_id, optimization_hash)
         if existing is not None:
@@ -128,10 +145,14 @@ class OrderService:
             )
             for e in payload.get("edge_bandings_summary", [])
         ]
-        # Lista de corte = piezas (insumo de producción; no se cobra).
+        # Lista de corte = piezas (insumo de producción; no se cobra). El producto
+        # se resuelve por la key del material (garantizado de catálogo por el guard).
+        product_id_by_key = {
+            m["material_key"]: m["product_id"] for m in payload.get("materials", [])
+        }
         order.pieces = [
             OrderPieceModel(
-                product_id=r["product_id"],
+                product_id=product_id_by_key[r["material_key"]],
                 label=r.get("label"),
                 height=r["height"],
                 width=r["width"],

@@ -19,6 +19,7 @@ from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.labels import edge_banding_notation
+from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import base_label, group_layouts
 from src.modules.optimizations.schemas import (
     EdgeBandingSpec,
@@ -50,13 +51,15 @@ class OptimizationService:
 
     El cómputo es determinista y efímero: se cachea por un hash de las entradas y
     **no** se persiste en BD (la orden es la fuente de verdad durable). El hash es
-    el identificador con el que se recupera la proforma. Solo los productos de tipo
-    ``board`` se optimizan; el insumo se resuelve del catálogo de productos.
+    el identificador con el que se recupera la proforma. El material es agnóstico al
+    origen: un ``MaterialResolver`` traduce catálogo/retazo/manual a dimensiones y
+    costo antes de optimizar, de modo que ``cutting`` solo ve geometría.
     """
 
     def __init__(self, db: Session):
         self.db = db
         self.product_service = ProductService(db)
+        self.material_resolver = MaterialResolver(db)
 
     def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
         """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``.
@@ -112,15 +115,15 @@ class OptimizationService:
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
         """Calcula (o recupera de caché) el resultado de la optimización.
 
-        Cache-first por un hash determinista de entradas (requerimientos +
-        parámetros de corte + precios de los productos). No escribe en BD: lo
-        reutiliza el módulo de órdenes para congelar el snapshot sin depender de la
-        caché. Devuelve ``(payload, optimization_hash)``.
+        Cache-first por un hash determinista de entradas (materiales resueltos +
+        requerimientos + parámetros de corte + precios de tapacanto). No escribe en
+        BD: lo reutiliza el módulo de órdenes para congelar el snapshot sin depender
+        de la caché. Devuelve ``(payload, optimization_hash)``.
         """
         if not request.requirements:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
-        requirements_by_product = self._group_requirements_by_product(
+        requirements_by_key = self._group_requirements_by_material_key(
             request.requirements
         )
 
@@ -132,44 +135,38 @@ class OptimizationService:
             right_trim=config.RIGHT_TRIM,
         )
 
-        products: Dict[int, ProductModel] = {}
-        for product_id in requirements_by_product:
-            product = self.product_service.get(product_id)
-            if product is None:
-                raise EntityNotFoundError("Product", product_id)
-            if product.type != ProductType.BOARD.value:
-                raise BusinessRuleError(
-                    f"El producto {product.code} no es un tablero optimizable"
-                )
-            products[product_id] = product
+        # Resuelve a dimensiones+costo solo los materiales realmente referenciados,
+        # agnóstico al origen (catálogo/retazo/manual). Aquí vive el único punto que
+        # conoce el catálogo; ``cutting`` solo ve geometría.
+        materials_by_key = {m.key: m for m in request.materials}
+        resolved: Dict[str, ResolvedMaterial] = {
+            key: self.material_resolver.resolve(materials_by_key[key])
+            for key in requirements_by_key
+        }
 
         eb_products = self._resolve_edge_banding_products(request.requirements)
 
         optimization_hash = self._compute_hash(
-            request, cutting_params, products, eb_products
+            request, cutting_params, resolved, eb_products
         )
 
         cached = cache.get_json(optimization_hash)
         if cached is not None:
             return cached, optimization_hash
 
-        product_codes = {pid: product.code for pid, product in products.items()}
-        product_names = {pid: product.name for pid, product in products.items()}
         results = [
             (
                 reqs,
                 self._optimize(
                     pieces=reqs,
-                    product=products[pid],
+                    material=resolved[key],
                     cutting_params=cutting_params,
                 )[0],
             )
-            for pid, reqs in requirements_by_product.items()
+            for key, reqs in requirements_by_key.items()
         ]
 
-        payload = self._build_result_payload(
-            request, results, product_codes, product_names, eb_products
-        )
+        payload = self._build_result_payload(request, results, resolved, eb_products)
         cache.set_json(optimization_hash, payload)
         return payload, optimization_hash
 
@@ -202,19 +199,31 @@ class OptimizationService:
         self,
         request: OptimizeRequest,
         cutting_params: CuttingParameters,
-        products: Dict[int, ProductModel],
+        resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
     ) -> str:
         """Hash sha256 determinista de las entradas que afectan el resultado.
 
         No incluye ``client_id`` (el cómputo no depende del cliente); la dedupe de
-        órdenes sí combina ``client_id`` con este hash. Incluye los precios de
-        tableros y tapacantos y el factor de merma para invalidar la caché cuando
-        cambian.
+        órdenes sí combina ``client_id`` con este hash. Se calcula sobre los
+        materiales resueltos (origen, dimensiones y costo), los requerimientos, los
+        parámetros de corte y los precios de tapacanto, para invalidar la caché
+        cuando cualquiera cambia.
         """
-        prices = {str(pid): product.price for pid, product in products.items()}
-        prices.update({str(pid): p.price for pid, p in eb_products.items()})
+        materials = {
+            key: {
+                "source": rm.source,
+                "width": rm.width,
+                "height": rm.height,
+                "thickness": rm.thickness,
+                "cost_per_unit": rm.cost_per_unit,
+                "product_id": rm.product_id,
+            }
+            for key, rm in resolved.items()
+        }
+        edge_prices = {str(pid): p.price for pid, p in eb_products.items()}
         digest_input = {
+            "materials": materials,
             "requirements": [r.model_dump(mode="json") for r in request.requirements],
             "params": {
                 "kerf": cutting_params.kerf,
@@ -224,39 +233,38 @@ class OptimizationService:
                 "right_trim": cutting_params.right_trim,
                 "edge_banding_waste_factor": config.EDGE_BANDING_WASTE_FACTOR,
             },
-            "prices": prices,
+            "edge_prices": edge_prices,
         }
         canonical = json.dumps(digest_input, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def _group_requirements_by_product(
+    def _group_requirements_by_material_key(
         self, requirements: List[Requirement]
-    ) -> Dict[int, List[Requirement]]:
-        """Agrupa los requerimientos por ID de producto (tablero)."""
-        requirements_by_product = defaultdict(list)
+    ) -> Dict[str, List[Requirement]]:
+        """Agrupa los requerimientos por la key del material a optimizar."""
+        requirements_by_key = defaultdict(list)
         for req in requirements:
-            requirements_by_product[req.product_id].append(req)
-        return requirements_by_product
+            requirements_by_key[req.material_key].append(req)
+        return requirements_by_key
 
     def _optimize(
         self,
         pieces: List[Requirement],
-        product: ProductModel,
+        material: ResolvedMaterial,
         cutting_params: CuttingParameters,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
     ) -> Tuple[List[CuttingLayout], List[Piece]]:
-        """Optimiza el layout de corte para un tablero específico."""
+        """Optimiza el layout de corte para un material resuelto (cualquier origen)."""
         if not pieces:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
-        attrs = product.attributes
-        material = Material(
-            id=product.id,
-            width=attrs["width"],
-            height=attrs["height"],
-            thickness=attrs["thickness"],
-            cost_per_unit=product.price,
+        domain_material = Material(
+            id=material.key,
+            width=material.width,
+            height=material.height,
+            thickness=material.thickness,
+            cost_per_unit=material.cost_per_unit,
         )
 
         piece_objects = []
@@ -276,7 +284,7 @@ class OptimizationService:
                 raise ValidationError(f"Pieza {i} tiene valores inválidos: {e}")
 
         optimizer = MultiSheetGuillotineOptimizer(
-            material_template=material,
+            material_template=domain_material,
             cutting_params=cutting_params,
             split_rule=SplitRule.SHORTER_LEFTOVER_AXIS,
             max_sheets=max_sheets,
@@ -406,18 +414,27 @@ class OptimizationService:
     def _build_materials_summary(
         self,
         layouts: List[CuttingLayout],
-        product_codes: Dict[int, str],
-        product_names: Dict[int, str],
+        resolved: Dict[str, ResolvedMaterial],
     ) -> List[dict]:
-        """Agrega los layouts por tipo de tablero con métricas y costos."""
-        summary: Dict[int, dict] = {}
+        """Agrega los layouts por material con métricas y costos (cualquier origen).
+
+        Lleva la metadata de origen (``material_key``/``source`` y, solo para
+        catálogo, ``product_id``/``product_code``/``product_name``). Para materiales
+        inline cae a la key como código y a las dimensiones como nombre legible, de
+        modo que la proforma renderiza sin tratamiento especial.
+        """
+        summary: Dict[str, dict] = {}
         for layout in layouts:
-            pid = layout.material.id
-            if pid not in summary:
-                summary[pid] = {
-                    "product_id": pid,
-                    "product_code": product_codes.get(pid, "N/A"),
-                    "product_name": product_names.get(pid, "N/A"),
+            key = layout.material.id
+            if key not in summary:
+                rm = resolved.get(key)
+                dims_label = f"{layout.material.width:g}×{layout.material.height:g}"
+                summary[key] = {
+                    "material_key": key,
+                    "source": rm.source if rm else None,
+                    "product_id": rm.product_id if rm else None,
+                    "product_code": (rm.code if rm and rm.code else key),
+                    "product_name": (rm.name if rm and rm.name else dims_label),
                     "width": layout.material.width,
                     "height": layout.material.height,
                     "thickness": layout.material.thickness,
@@ -427,7 +444,7 @@ class OptimizationService:
                     "cost_per_unit": layout.material.cost_per_unit,
                     "total_cost": 0.0,
                 }
-            entry = summary[pid]
+            entry = summary[key]
             entry["count"] += 1
             entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
             entry["_efficiencies"].append(layout.efficiency * 100)
@@ -445,18 +462,22 @@ class OptimizationService:
     @staticmethod
     def _dump_requirement(
         req: Requirement,
-        product_codes: Dict[int, str],
+        resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
     ) -> dict:
         """Vuelca un requirement al payload y le anexa ``band_type`` del tapacanto.
 
-        El ``band_type`` vive en los atributos del producto, no en el
+        ``product_code`` lleva la etiqueta del material (código de catálogo, o el
+        nombre/key para orígenes inline) que la proforma muestra en la columna
+        "Tablero". El ``band_type`` vive en los atributos del producto, no en el
         ``EdgeBandingSpec``; se inyecta aquí para que la proforma arme la notación de
         cantos (``2L1C CS``) sin volver a resolver el producto al renderizar.
         """
+        rm = resolved.get(req.material_key)
+        material_label = (rm.code or rm.name) if rm else None
         data = {
             **req.model_dump(mode="json"),
-            "product_code": product_codes.get(req.product_id, "N/A"),
+            "product_code": material_label or req.material_key,
         }
         if req.edge_banding is not None and data.get("edge_banding"):
             product = eb_products.get(req.edge_banding.product_id)
@@ -469,8 +490,7 @@ class OptimizationService:
         self,
         request: OptimizeRequest,
         results: List[Tuple[List[Requirement], List[CuttingLayout]]],
-        product_codes: Dict[int, str],
-        product_names: Dict[int, str],
+        resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
     ) -> dict:
         """Arma el payload cacheable/serializable del resultado de optimización.
@@ -519,14 +539,13 @@ class OptimizationService:
             "total_edge_banding_cost": total_edge_banding_cost,
             "total_cut_linear_m": round(total_cut_linear_m, 2),
             "total_edge_banding_linear_m": round(total_edge_banding_linear_m, 2),
+            "materials": [rm.to_dict() for rm in resolved.values()],
             "requirements": [
-                self._dump_requirement(r, product_codes, eb_products)
+                self._dump_requirement(r, resolved, eb_products)
                 for r in request.requirements
             ],
             "layouts": layout_dicts,
-            "materials_summary": self._build_materials_summary(
-                all_layouts, product_codes, product_names
-            ),
+            "materials_summary": self._build_materials_summary(all_layouts, resolved),
             "edge_bandings_summary": edge_bandings_summary,
             "layout_groups": group_layouts(layout_dicts),
         }

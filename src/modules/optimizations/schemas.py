@@ -1,16 +1,39 @@
 from enum import Enum
-from typing import List, Optional
+from typing import Annotated, List, Literal, Optional, Union
 
-from pydantic import Field, NonNegativeInt, PositiveInt, field_validator
+from pydantic import (
+    Field,
+    NonNegativeInt,
+    PositiveInt,
+    confloat,
+    field_validator,
+    model_validator,
+)
 
 from src.modules.clients.schemas import ClientResponse
 from src.shared.schemas import CamelModel
 
 
+class MaterialSource(str, Enum):
+    """Origen del material a optimizar.
+
+    El motor de corte es agnóstico al origen: solo necesita dimensiones y costo.
+    ``catalog`` resuelve un tablero del catálogo de productos; el resto aporta sus
+    dimensiones inline. Una fuente nueva = un valor más + su rama en la unión.
+    """
+
+    catalog = "catalog"
+    company_offcut = "companyOffcut"
+    client_offcut = "clientOffcut"
+    manual = "manual"
+
+
 class MaterialSummary(CamelModel):
-    product_id: int
-    product_code: str
-    product_name: str
+    material_key: str
+    source: MaterialSource
+    product_id: Optional[int] = None
+    product_code: Optional[str] = None
+    product_name: Optional[str] = None
     height: float
     width: float
     thickness: float
@@ -69,6 +92,60 @@ class EdgeBandingSummary(CamelModel):
     total_cost: float
 
 
+class CatalogMaterialInput(CamelModel):
+    """Material del catálogo de productos (tablero)."""
+
+    key: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Stable key referenced by requirements via materialKey",
+    )
+    source: Literal[MaterialSource.catalog]
+    product_id: int = Field(..., description="Board product ID (type=board)")
+
+
+class InlineMaterialInput(CamelModel):
+    """Material con dimensiones inline: retazo de empresa/cliente o medida manual.
+
+    Comparten forma; solo difieren en ``source``. ``quantity`` se acepta pero no se
+    enforca todavía (suministro infinito en Fase 1).
+    """
+
+    key: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Stable key referenced by requirements via materialKey",
+    )
+    source: Literal[
+        MaterialSource.company_offcut,
+        MaterialSource.client_offcut,
+        MaterialSource.manual,
+    ]
+    height: PositiveInt = Field(..., description="Material height (alto) in mm")
+    width: PositiveInt = Field(..., description="Material width (ancho) in mm")
+    thickness: PositiveInt = Field(..., description="Material thickness in mm")
+    cost_per_unit: confloat(ge=0) = Field(
+        default=0.0, description="Unit cost of the material (0 if unknown)"
+    )
+    label: Optional[str] = Field(
+        default=None, max_length=128, description="Human-friendly material label"
+    )
+    quantity: Optional[PositiveInt] = Field(
+        default=None, description="Available units (not enforced in phase 1)"
+    )
+
+
+# Unión discriminada por ``source`` (mismo patrón que ``products/schemas.py``):
+# Pydantic v2 elige y valida la rama según el ``source`` enviado. Una fuente nueva
+# = un valor en ``MaterialSource`` + su rama aquí (o reusar la rama inline).
+MaterialInput = Annotated[
+    Union[CatalogMaterialInput, InlineMaterialInput],
+    Field(discriminator="source"),
+]
+
+
 class Requirement(CamelModel):
     priority: NonNegativeInt = Field(
         ..., description="Cutting priority; higher values are placed first"
@@ -80,7 +157,12 @@ class Requirement(CamelModel):
         ..., description="Piece width (ancho, segunda medida) in mm"
     )
     quantity: PositiveInt = Field(default=1, le=10000)
-    product_id: int = Field(..., description="Target product ID (board) for this piece")
+    material_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description="Key of the material (from `materials`) to cut this piece from",
+    )
     label: Optional[str] = Field(default=None, description="Human-friendly piece label")
     can_rotate: bool = Field(
         default=True,
@@ -97,6 +179,11 @@ class Requirement(CamelModel):
 
 
 class OptimizeRequest(CamelModel):
+    materials: List[MaterialInput] = Field(
+        ...,
+        min_length=1,
+        description="Available materials (stock): catalog boards, offcuts or manual",
+    )
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="List of cuts to optimize"
     )
@@ -109,10 +196,24 @@ class OptimizeRequest(CamelModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _validate_material_refs(self) -> "OptimizeRequest":
+        """Las keys de materiales son únicas y cada requerimiento referencia una."""
+        keys = [m.key for m in self.materials]
+        if len(set(keys)) != len(keys):
+            raise ValueError("material keys must be unique")
+        keyset = set(keys)
+        for req in self.requirements:
+            if req.material_key not in keyset:
+                raise ValueError(
+                    f"requirement references unknown materialKey '{req.material_key}'"
+                )
+        return self
+
 
 class Material(CamelModel):
-    material_id: int = Field(
-        ..., description="Product ID (board) this sheet was cut from"
+    material_key: str = Field(
+        ..., description="Key of the material (from `materials`) this sheet came from"
     )
     sheet_number: int = Field(
         ..., description="Sheet number within the board (1-based)"
@@ -186,8 +287,8 @@ class LayoutGroup(CamelModel):
     sheet_numbers: List[int] = Field(
         ..., description="Sheet numbers that use this pattern"
     )
-    material_id: int = Field(
-        ..., description="Product ID (board) the pattern is cut from"
+    material_key: str = Field(
+        ..., description="Key of the material the pattern is cut from"
     )
     layout: Layout = Field(..., description="Representative layout for this pattern")
 

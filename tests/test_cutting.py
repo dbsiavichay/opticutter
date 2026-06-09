@@ -80,7 +80,7 @@ def test_guillotine_places_pieces_and_reports_efficiency():
 
     as_dict = layout.to_dict()
     assert as_dict["statistics"]["pieces_count"] == 1
-    assert as_dict["material"]["material_id"] == "m1"
+    assert as_dict["material"]["material_key"] == "m1"
     assert as_dict["material"]["sheet_number"] == 1
 
 

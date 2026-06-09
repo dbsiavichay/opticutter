@@ -33,13 +33,14 @@ def _create_board(client, code="MEL18"):
 def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
     return {
         "clientId": client_id,
+        "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {
                 "priority": 0,
                 "height": height,
                 "width": width,
                 "quantity": quantity,
-                "productId": product_id,
+                "materialKey": "b1",
                 "label": "Puerta",
                 "canRotate": True,
             }
@@ -361,3 +362,35 @@ def test_expired_order_frees_pending_cap(client, monkeypatch):
         "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
     )
     assert second.status_code == 201
+
+
+def test_create_order_rejects_non_catalog_material(client):
+    """Fase 1: optimizar/proformar materiales no-catálogo sí; crear orden no (422)."""
+    c = _create_client(client)
+    payload = {
+        "clientId": c["id"],
+        "materials": [
+            {
+                "key": "m1",
+                "source": "manual",
+                "height": 2000,
+                "width": 1000,
+                "thickness": 18,
+                "costPerUnit": 30.0,
+            }
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 1,
+                "materialKey": "m1",
+            }
+        ],
+    }
+    resp = client.post("/api/v1/orders/", json=payload)
+    assert resp.status_code == 422
+    assert "catálogo" in resp.json()["errors"][0]["message"].lower()
+    # No se persistió ninguna orden.
+    assert client.get("/api/v1/orders/").json()["data"] == []
