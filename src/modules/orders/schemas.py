@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import Field
 
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import MaterialInput, Requirement
-from src.modules.orders.model import OrderStatus
+from src.modules.orders.model import OrderStatus, ReviewLinkStatus
 from src.shared.schemas import CamelModel
 
 
@@ -23,6 +23,13 @@ class OrderCreate(CamelModel):
     client_id: int = Field(..., description="Client ID placing the order")
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
+    status: Literal[OrderStatus.quoted, OrderStatus.confirmed] = Field(
+        default=OrderStatus.confirmed,
+        description=(
+            "Born status: 'quoted' (cotización para revisión del cliente) o "
+            "'confirmed' (orden directa, default retrocompatible)"
+        ),
+    )
 
 
 class OrderStatusUpdate(CamelModel):
@@ -127,3 +134,71 @@ class OrderResponse(CamelModel):
     lines: List[OrderLineResponse] = Field(default_factory=list)
     pieces: List[OrderPieceResponse] = Field(default_factory=list)
     history: List[OrderStatusHistoryResponse] = Field(default_factory=list)
+
+
+class ReviewLinkResponse(CamelModel):
+    """Enlace de revisión recién generado: única respuesta que expone el token."""
+
+    token: str = Field(..., description="Raw token, returned only at generation time")
+    url: str = Field(..., description="Full review URL for the Maderable frontend")
+    status: ReviewLinkStatus
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class ReviewLinkInfoResponse(CamelModel):
+    """Metadatos del enlace vigente, sin el token (irrecuperable por diseño)."""
+
+    status: ReviewLinkStatus
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    used_at: Optional[datetime] = None
+
+
+class ReviewActionRequest(CamelModel):
+    """Acción del cliente sobre la cotización (confirmar/rechazar)."""
+
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class ReviewLineResponse(CamelModel):
+    """Línea de cobro proyectada para la revisión pública del cliente."""
+
+    product_code: Optional[str] = None
+    product_name: Optional[str] = None
+    quantity: int
+    unit_price: float
+    line_total: float
+    linear_m: Optional[float] = None
+
+
+class ReviewPieceResponse(CamelModel):
+    """Pieza de la lista de corte proyectada para la revisión pública."""
+
+    label: Optional[str] = None
+    height: int
+    width: int
+    quantity: int
+    edges: Optional[dict] = None
+
+
+class ReviewOrderResponse(CamelModel):
+    """Vista pública sanitizada de la orden: lo que ve el cliente en el enlace.
+
+    Excluye a propósito identificadores internos (id numérico, client_id),
+    datos de contacto (identifier/phone/email), el snapshot/hash de optimización
+    y metadatos comerciales internos (notes, source, factura externa).
+    """
+
+    order_code: Optional[str] = None
+    status: OrderStatus
+    client_name: Optional[str] = None
+    currency: str
+    subtotal: float
+    total: float
+    total_boards_used: int
+    created_at: datetime
+    confirmed_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    lines: List[ReviewLineResponse] = Field(default_factory=list)
+    pieces: List[ReviewPieceResponse] = Field(default_factory=list)

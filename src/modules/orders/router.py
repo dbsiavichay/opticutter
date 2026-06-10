@@ -5,12 +5,15 @@ from fastapi import APIRouter, Depends, Query
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
+from src.modules.orders.review_service import ReviewLinkService, review_link_service
 from src.modules.orders.schemas import (
     OrderCreate,
     OrderExportResponse,
     OrderInvoiceUpdate,
     OrderResponse,
     OrderStatusUpdate,
+    ReviewLinkInfoResponse,
+    ReviewLinkResponse,
 )
 from src.modules.orders.service import OrderService, order_service
 from src.shared.pagination import PageParams
@@ -66,6 +69,40 @@ def update_order_status(
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
     return ok(svc.transition(order_id, data.status, actor="sales", note=data.note))
+
+
+@router.post(
+    "/{order_id}/review-link",
+    response_model=DataResponse[ReviewLinkResponse],
+    status_code=201,
+)
+def create_review_link(
+    order_id: int, svc: ReviewLinkService = Depends(review_link_service)
+):
+    """Genera el enlace de revisión del cliente (revoca el anterior si existía).
+
+    El token solo se expone en esta respuesta; si se pierde, se regenera.
+    """
+    link, raw_token = svc.generate(order_id)
+    return ok(
+        ReviewLinkResponse(
+            token=raw_token,
+            url=svc.build_url(raw_token),
+            status=link.status,
+            expires_at=link.expires_at,
+            created_at=link.created_at,
+        )
+    )
+
+
+@router.get(
+    "/{order_id}/review-link", response_model=DataResponse[ReviewLinkInfoResponse]
+)
+def get_review_link_info(
+    order_id: int, svc: ReviewLinkService = Depends(review_link_service)
+):
+    """Metadatos del último enlace de revisión (sin el token, irrecuperable)."""
+    return ok(svc.get_latest_info(order_id))
 
 
 @router.post("/{order_id}/invoice", response_model=DataResponse[OrderResponse])
