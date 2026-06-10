@@ -78,6 +78,11 @@ class Config:
     ORDER_VALIDITY_DAYS = env.int("ORDER_VALIDITY_DAYS", 15)
     MAX_PENDING_ORDERS_PER_CLIENT = env.int("MAX_PENDING_ORDERS_PER_CLIENT", 3)
 
+    # Base del frontend de Maderable: compone la URL del enlace de revisión que
+    # abre el cliente (el origen debe estar también en CORS_ORIGINS). El dashboard
+    # usa HashRouter, por eso la base termina en "/#" (ruta = {base}/review/{token}).
+    FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3001/#")
+
     # Datos de la empresa (membrete de la proforma). Valores dummy por defecto;
     # los reales se definen en el .env.
     COMPANY_NAME = env("COMPANY_NAME", "Mi Empresa")

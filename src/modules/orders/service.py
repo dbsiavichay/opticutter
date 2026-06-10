@@ -104,10 +104,15 @@ class OrderService:
         total_edge_banding_cost = payload.get("total_edge_banding_cost", 0.0)
         grand_total = round(total_boards_cost + total_edge_banding_cost, 2)
 
+        # Estado de nacimiento: 'confirmed' (flujo directo, default) congela la
+        # confirmación ya; 'quoted' deja la cotización abierta a revisión del
+        # cliente (expires_at = vigencia de la cotización).
+        born_quoted = data.status == OrderStatus.quoted
+
         now = datetime.utcnow()
         order = OrderModel(
             client_id=data.client_id,
-            status=OrderStatus.confirmed.value,
+            status=data.status.value,
             optimization_snapshot=payload,
             optimization_hash=optimization_hash,
             currency="USD",
@@ -117,7 +122,7 @@ class OrderService:
             source=data.source,
             notes=data.notes,
             created_at=now,
-            confirmed_at=now,
+            confirmed_at=None if born_quoted else now,
             expires_at=now + timedelta(days=config.ORDER_VALIDITY_DAYS),
         )
         # Líneas de cobro = tableros usados + tapacantos (productos consumidos).
@@ -166,9 +171,9 @@ class OrderService:
         order.history = [
             OrderStatusHistoryModel(
                 from_status=None,
-                to_status=OrderStatus.confirmed.value,
-                actor="system",
-                note="Orden creada",
+                to_status=data.status.value,
+                actor="sales" if born_quoted else "system",
+                note="Cotización creada" if born_quoted else "Orden creada",
             )
         ]
 
@@ -188,6 +193,23 @@ class OrderService:
     ) -> OrderModel:
         """Valida y aplica una transición de estado, registrando el historial."""
         order = self.get_or_404(order_id)
+        self._apply_transition(order, to_status, actor=actor, note=note)
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def _apply_transition(
+        self,
+        order: OrderModel,
+        to_status: OrderStatus,
+        actor: str = "system",
+        note: Optional[str] = None,
+    ) -> None:
+        """Valida y aplica la transición sin commit (el llamador persiste).
+
+        Permite componer la transición con otros cambios (p. ej. marcar el
+        enlace de revisión como usado) en una sola transacción atómica.
+        """
         current = OrderStatus(order.status)
         if to_status not in TRANSITIONS.get(current, set()):
             raise BusinessRuleError(
@@ -202,9 +224,6 @@ class OrderService:
             )
         )
         order.status = to_status.value
-        self.db.commit()
-        self.db.refresh(order)
-        return order
 
     def set_external_invoice_id(
         self, order_id: int, external_invoice_id: str
