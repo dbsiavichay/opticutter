@@ -364,11 +364,10 @@ def test_expired_order_frees_pending_cap(client, monkeypatch):
     assert second.status_code == 201
 
 
-def test_create_order_rejects_non_catalog_material(client):
-    """Fase 1: optimizar/proformar materiales no-catálogo sí; crear orden no (422)."""
-    c = _create_client(client)
-    payload = {
-        "clientId": c["id"],
+def _manual_material_payload(client_id):
+    """Orden con un único material 'manual' (fuera del catálogo)."""
+    return {
+        "clientId": client_id,
         "materials": [
             {
                 "key": "m1",
@@ -377,6 +376,7 @@ def test_create_order_rejects_non_catalog_material(client):
                 "width": 1000,
                 "thickness": 18,
                 "costPerUnit": 30.0,
+                "label": "Sobrante taller",
             }
         ],
         "requirements": [
@@ -389,8 +389,101 @@ def test_create_order_rejects_non_catalog_material(client):
             }
         ],
     }
+
+
+def test_create_order_with_non_catalog_material(client):
+    """Un material 'manual' se congela tal cual el snapshot: línea sin productId."""
+    c = _create_client(client)
+
+    resp = client.post("/api/v1/orders/", json=_manual_material_payload(c["id"]))
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+
+    # Cobro = el material manual, identificado por code/name (sin productId).
+    assert len(data["lines"]) == 1
+    line = data["lines"][0]
+    assert line["productId"] is None
+    assert line["productCode"] == "m1"
+    assert line["productName"] == "Sobrante taller"
+    assert line["unitPriceSnapshot"] == 30.0
+    assert line["lineTotal"] == 30.0 * line["quantity"]
+    assert data["total"] == data["subtotal"] == 30.0 * data["totalBoardsUsed"]
+
+    # La pieza cortada del material manual también queda sin productId.
+    assert len(data["pieces"]) == 1
+    assert data["pieces"][0]["productId"] is None
+
+    # Se persistió la orden.
+    assert len(client.get("/api/v1/orders/").json()["data"]) == 1
+
+
+def test_create_mixed_catalog_and_offcut_order(client):
+    """Orden mixta: tablero de catálogo + retazo de empresa (costo 0)."""
+    c = _create_client(client)
+    b = _create_board(client)
+
+    payload = {
+        "clientId": c["id"],
+        "materials": [
+            {"key": "b1", "source": "catalog", "productId": b["id"]},
+            {
+                "key": "r1",
+                "source": "companyOffcut",
+                "height": 1200,
+                "width": 600,
+                "thickness": 15,
+                "costPerUnit": 0,
+            },
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 1,
+                "materialKey": "b1",
+            },
+            {
+                "priority": 0,
+                "height": 300,
+                "width": 400,
+                "quantity": 1,
+                "materialKey": "r1",
+            },
+        ],
+    }
     resp = client.post("/api/v1/orders/", json=payload)
-    assert resp.status_code == 422
-    assert "catálogo" in resp.json()["errors"][0]["message"].lower()
-    # No se persistió ninguna orden.
-    assert client.get("/api/v1/orders/").json()["data"] == []
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+
+    assert len(data["lines"]) == 2
+    catalog_line = next(line for line in data["lines"] if line["productId"] is not None)
+    offcut_line = next(line for line in data["lines"] if line["productId"] is None)
+    assert catalog_line["productId"] == b["id"]
+    assert catalog_line["productCode"] == "MEL18"
+    assert offcut_line["productCode"] == "r1"
+    # El retazo a costo 0 no suma al total; este = solo el tablero de catálogo.
+    assert offcut_line["lineTotal"] == 0
+    assert data["total"] == catalog_line["lineTotal"]
+
+    # Cada pieza referencia su material: catálogo → productId, retazo → None.
+    piece_product_ids = {p["productId"] for p in data["pieces"]}
+    assert piece_product_ids == {b["id"], None}
+
+
+def test_non_catalog_order_renders_proforma_and_production_sheet(client):
+    """Proforma y hoja de producción se renderizan del snapshot, sin catálogo."""
+    c = _create_client(client)
+    order = client.post(
+        "/api/v1/orders/", json=_manual_material_payload(c["id"])
+    ).json()["data"]
+
+    proforma = client.get(f"/api/v1/orders/{order['id']}/proforma")
+    assert proforma.status_code == 200
+    assert proforma.headers["content-type"] == "application/pdf"
+    assert len(proforma.content) > 1000
+
+    sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
+    assert sheet.status_code == 200
+    assert sheet.headers["content-type"] == "application/pdf"
+    assert len(sheet.content) > 1000

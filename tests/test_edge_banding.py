@@ -151,6 +151,43 @@ def test_optimize_reports_edge_banding_linear_m_per_sheet(client):
     assert stats["edgeBandingLinearM"] == pytest.approx(2.0)
 
 
+def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
+    """Regresión: una pieza SIN etiqueta y ``quantity=1`` usa el auto-label
+    ``piece_1``; el metraje por plancha y los ``edges`` de la pieza no deben
+    perderse (antes ``base_label`` mutilaba el ``_1`` y daba 0)."""
+    c = _create_client(client)
+    b = _create_board(client)
+    eb = _create_edge_banding(client, price=2.0)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json={
+            "clientId": c["id"],
+            "materials": _materials(b["id"]),
+            "requirements": [
+                {
+                    "priority": 0,
+                    "height": 500,
+                    "width": 1000,
+                    "quantity": 1,
+                    "materialKey": "b1",
+                    "canRotate": True,
+                    "edgeBanding": {"productId": eb["id"], "sides": ["top", "bottom"]},
+                }
+            ],
+        },
+    )
+    data = resp.json()["data"]
+    # top+bottom con width=1000 → 2×1000 = 2000 mm = 2.0 m neto.
+    assert data["totalEdgeBandingLinearM"] == pytest.approx(2.0)
+    layout = data["layouts"][0]
+    assert layout["statistics"]["edgeBandingLinearM"] == pytest.approx(2.0)
+    # El canto se propaga a la pieza colocada (para el diagrama / hoja de taller).
+    placed = layout["placedPieces"][0]
+    assert placed["edges"] is not None
+    assert placed["edges"]["sides"] == ["top", "bottom"]
+
+
 def test_optimize_uses_height_for_left_right_sides(client):
     """left/right miden el alto; top/bottom el ancho."""
     c = _create_client(client)
