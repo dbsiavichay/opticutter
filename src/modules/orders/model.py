@@ -109,13 +109,18 @@ class OrderLineModel(Base):
 
     Hoy el cobro es por tableros usados; el modelo admite cualquier producto
     (tablero, tapacanto, herraje) para órdenes mixtas futuras.
+
+    ``product_id`` es nulo para materiales fuera del catálogo (retazos o medidas
+    manuales): esos se identifican por ``product_code``/``product_name``.
     """
 
     __tablename__ = "order_lines"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    product_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("products.id"), nullable=True
+    )
     product_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     product_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer)
@@ -133,14 +138,17 @@ class OrderLineModel(Base):
 class OrderPieceModel(Base):
     """Pieza de la LISTA DE CORTE (insumo de producción; no se cobra).
 
-    ``product_id`` referencia el tablero (producto tipo ``board``) del que se corta.
+    ``product_id`` referencia el tablero (producto tipo ``board``) del que se corta;
+    es nulo cuando el material está fuera del catálogo (retazo o medida manual).
     """
 
     __tablename__ = "order_pieces"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    product_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("products.id"), nullable=True
+    )
     label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     height: Mapped[int] = mapped_column(Integer)
     width: Mapped[int] = mapped_column(Integer)

@@ -27,15 +27,23 @@ def _layout(sheet_number, pieces, material_key="b1"):
 
 
 def test_base_label_strips_single_instance_suffix():
-    assert base_label("piece_1_5") == "piece_1"
-    assert base_label("Puerta_2") == "Puerta"
+    assert base_label("piece_1#5") == "piece_1"
+    assert base_label("Puerta#2") == "Puerta"
     assert base_label("Puerta") == "Puerta"
     assert base_label("") == ""
 
 
+def test_base_label_preserves_labels_ending_in_underscore_number():
+    """``#`` separa la instancia: las etiquetas que terminan en ``_<n>`` (auto-label
+    ``piece_1`` o de usuario ``estante_2``) no se mutilan."""
+    assert base_label("piece_1") == "piece_1"
+    assert base_label("estante_2") == "estante_2"
+    assert base_label("estante_2#3") == "estante_2"
+
+
 def test_signature_ignores_instance_suffix_and_sheet_number():
-    a = _layout(1, [("Puerta_1", 0, 0, 670, 1700, False)])
-    b = _layout(7, [("Puerta_9", 0, 0, 670, 1700, False)])
+    a = _layout(1, [("Puerta#1", 0, 0, 670, 1700, False)])
+    b = _layout(7, [("Puerta#9", 0, 0, 670, 1700, False)])
     assert layout_signature(a) == layout_signature(b)
 
 
@@ -47,9 +55,9 @@ def test_signature_ignores_piece_order():
 
 def test_group_collapses_identical_patterns():
     layouts = [
-        _layout(1, [("piece_1_1", 0, 0, 670, 1700, False)]),
-        _layout(2, [("piece_1_2", 0, 0, 670, 1700, False)]),
-        _layout(3, [("piece_1_3", 0, 0, 670, 1700, False)]),
+        _layout(1, [("piece_1#1", 0, 0, 670, 1700, False)]),
+        _layout(2, [("piece_1#2", 0, 0, 670, 1700, False)]),
+        _layout(3, [("piece_1#3", 0, 0, 670, 1700, False)]),
     ]
     groups = group_layouts(layouts)
     assert len(groups) == 1

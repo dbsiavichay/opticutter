@@ -63,7 +63,9 @@ class GuillotineOptimizer:
         for piece in pieces:
             for i in range(piece.quantity):
                 piece_copy = Piece(
-                    id=f"{piece.id}_{i+1}" if piece.quantity > 1 else piece.id,
+                    # ``#`` es un separador reservado para la instancia: no colisiona
+                    # con etiquetas que terminan en ``_<n>`` (ver ``base_label``).
+                    id=f"{piece.id}#{i+1}" if piece.quantity > 1 else piece.id,
                     width=piece.width,
                     height=piece.height,
                     quantity=1,
@@ -411,7 +413,9 @@ class MultiSheetGuillotineOptimizer:
         for piece in pieces:
             for i in range(piece.quantity):
                 piece_copy = Piece(
-                    id=f"{piece.id}_{i+1}" if piece.quantity > 1 else piece.id,
+                    # ``#`` es un separador reservado para la instancia: no colisiona
+                    # con etiquetas que terminan en ``_<n>`` (ver ``base_label``).
+                    id=f"{piece.id}#{i+1}" if piece.quantity > 1 else piece.id,
                     width=piece.width,
                     height=piece.height,
                     quantity=1,

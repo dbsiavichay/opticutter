@@ -9,14 +9,16 @@ conteo físico de tableros.
 import re
 from typing import List, Tuple
 
-# El optimizador expande las piezas con sufijo de instancia ``_{i+1}`` cuando
+# El optimizador expande las piezas con sufijo de instancia ``#{i+1}`` cuando
 # ``quantity > 1`` (ver ``src/cutting/optimizer.py``). Para comparar patrones nos
-# interesa la etiqueta base, no la instancia concreta.
-_INSTANCE_SUFFIX = re.compile(r"_\d+$")
+# interesa la etiqueta base, no la instancia concreta. Se usa ``#`` (no ``_``) para
+# no mutilar etiquetas que ya terminan en ``_<n>`` (p. ej. el auto-label ``piece_1``
+# o una etiqueta de usuario ``estante_2``).
+_INSTANCE_SUFFIX = re.compile(r"#\d+$")
 
 
 def base_label(piece_id: str) -> str:
-    """Devuelve la etiqueta base quitando un único sufijo de instancia ``_N``."""
+    """Devuelve la etiqueta base quitando un único sufijo de instancia ``#N``."""
     return _INSTANCE_SUFFIX.sub("", piece_id or "")
 
 

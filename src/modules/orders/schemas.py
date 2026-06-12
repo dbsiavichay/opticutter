@@ -76,7 +76,7 @@ class OrderExportResponse(CamelModel):
 
 class OrderLineResponse(CamelModel):
     id: int
-    product_id: int
+    product_id: Optional[int] = None  # nulo si el material no es de catálogo
     product_code: Optional[str] = None
     product_name: Optional[str] = None
     quantity: int = Field(
@@ -94,7 +94,7 @@ class OrderLineResponse(CamelModel):
 
 class OrderPieceResponse(CamelModel):
     id: int
-    product_id: int
+    product_id: Optional[int] = None  # nulo si el material no es de catálogo
     label: Optional[str] = None
     height: int
     width: int
