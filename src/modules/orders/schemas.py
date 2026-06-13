@@ -4,7 +4,12 @@ from typing import List, Literal, Optional
 from pydantic import Field
 
 from src.modules.clients.schemas import ClientResponse
-from src.modules.optimizations.schemas import MaterialInput, Requirement
+from src.modules.optimizations.schemas import (
+    CutSegment,
+    MaterialInput,
+    Remainder,
+    Requirement,
+)
 from src.modules.orders.model import OrderStatus, ReviewLinkStatus
 from src.shared.schemas import CamelModel
 
@@ -134,6 +139,79 @@ class OrderResponse(CamelModel):
     lines: List[OrderLineResponse] = Field(default_factory=list)
     pieces: List[OrderPieceResponse] = Field(default_factory=list)
     history: List[OrderStatusHistoryResponse] = Field(default_factory=list)
+
+
+class PlacedPieceResponse(CamelModel):
+    """Pieza colocada en un tablero físico, con su estado de corte."""
+
+    id: int
+    piece_id: str = Field(..., description="Instance identity from snapshot (label#N)")
+    label: str
+    x: float
+    y: float
+    width: float
+    height: float
+    original_width: float
+    original_height: float
+    rotated: bool
+    edges: Optional[dict] = Field(
+        default=None, description="Geometric edge-banded sides (as drawn)"
+    )
+    cut: bool = Field(..., description="Whether the piece was already cut")
+    cut_at: Optional[datetime] = None
+
+
+class CuttingProgress(CamelModel):
+    """Avance de corte: piezas cortadas sobre el total."""
+
+    cut_pieces: int
+    total_pieces: int
+
+
+class OrderBoardResponse(CamelModel):
+    """Tablero físico del plan de corte con sus piezas y avance."""
+
+    id: int
+    sheet_number: int = Field(..., description="Global sheet sequence within the order")
+    material_key: str
+    product_code: Optional[str] = None
+    product_name: Optional[str] = None
+    width: float
+    height: float
+    thickness: float
+    progress: CuttingProgress
+    pieces: List[PlacedPieceResponse] = Field(default_factory=list)
+    remainders: List[Remainder] = Field(
+        default_factory=list, description="Leftover rectangles (waste/offcuts)"
+    )
+    cuts: List[CutSegment] = Field(
+        default_factory=list,
+        description="Guillotine saw cuts; empty for orders frozen before this field",
+    )
+
+
+class CuttingPlanResponse(CamelModel):
+    """Plan de corte de la orden: tableros físicos para la vista de taller."""
+
+    order_id: int
+    order_code: Optional[str] = None
+    status: OrderStatus
+    progress: CuttingProgress
+    boards: List[OrderBoardResponse] = Field(default_factory=list)
+
+
+class PieceCutUpdate(CamelModel):
+    """Marca (o desmarca, con ``cut=false``) una pieza colocada como cortada."""
+
+    cut: bool = Field(default=True, description="True = cut, False = undo")
+
+
+class PieceCutResponse(CamelModel):
+    """Resultado de marcar una pieza: estado de la pieza + avance actualizado."""
+
+    piece: PlacedPieceResponse
+    progress: CuttingProgress = Field(..., description="Order-level progress")
+    board_progress: CuttingProgress = Field(..., description="Affected board progress")
 
 
 class ReviewLinkResponse(CamelModel):

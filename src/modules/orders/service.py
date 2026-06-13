@@ -6,19 +6,31 @@ from sqlalchemy.orm import Session
 
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
+from src.modules.optimizations.patterns import base_label
 from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
     PENDING_STATUSES,
     TERMINAL_STATUSES,
     TRANSITIONS,
+    OrderBoardModel,
     OrderLineModel,
     OrderModel,
     OrderPieceModel,
+    OrderPlacedPieceModel,
     OrderStatus,
     OrderStatusHistoryModel,
 )
-from src.modules.orders.schemas import OrderCreate, OrderExportLine, OrderExportResponse
+from src.modules.orders.schemas import (
+    CuttingPlanResponse,
+    CuttingProgress,
+    OrderBoardResponse,
+    OrderCreate,
+    OrderExportLine,
+    OrderExportResponse,
+    PieceCutResponse,
+    PlacedPieceResponse,
+)
 from src.shared.config import config
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, ConflictError, EntityNotFoundError
@@ -157,6 +169,9 @@ class OrderService:
             )
             for r in payload["requirements"]
         ]
+        # Plan de corte = tableros físicos con cada pieza colocada (la unidad que
+        # el operario marca en el taller; estado mutable fuera del snapshot).
+        _attach_cutting_plan(order, payload)
         order.history = [
             OrderStatusHistoryModel(
                 from_status=None,
@@ -180,12 +195,104 @@ class OrderService:
         actor: str = "system",
         note: Optional[str] = None,
     ) -> OrderModel:
-        """Valida y aplica una transición de estado, registrando el historial."""
+        """Valida y aplica una transición de estado, registrando el historial.
+
+        Gate de producción: pasar a ``cut`` exige que todas las piezas del plan
+        de corte estén marcadas como cortadas.
+        """
         order = self.get_or_404(order_id)
+        if (
+            to_status == OrderStatus.cut
+            and order.status == OrderStatus.in_production.value
+        ):
+            self._ensure_cutting_plan(order)
+            pending = (
+                self.db.query(OrderPlacedPieceModel)
+                .filter(
+                    OrderPlacedPieceModel.order_id == order.id,
+                    OrderPlacedPieceModel.cut_at.is_(None),
+                )
+                .count()
+            )
+            if pending:
+                raise BusinessRuleError(f"Faltan {pending} pieza(s) por cortar")
         self._apply_transition(order, to_status, actor=actor, note=note)
         self.db.commit()
         self.db.refresh(order)
         return order
+
+    def get_cutting_plan(self, order_id: int) -> CuttingPlanResponse:
+        """Plan de corte para la vista de taller: tableros físicos + avance."""
+        order = self.get_or_404(order_id)
+        self._ensure_cutting_plan(order)
+        boards = [
+            OrderBoardResponse(
+                id=board.id,
+                sheet_number=board.sheet_number,
+                material_key=board.material_key,
+                product_code=board.product_code,
+                product_name=board.product_name,
+                width=board.width,
+                height=board.height,
+                thickness=board.thickness,
+                progress=_progress(board.pieces),
+                pieces=[_piece_response(p) for p in board.pieces],
+                remainders=board.remainders or [],
+                cuts=board.cuts or [],
+            )
+            for board in order.boards
+        ]
+        all_pieces = [p for board in order.boards for p in board.pieces]
+        return CuttingPlanResponse(
+            order_id=order.id,
+            order_code=order.code,
+            status=OrderStatus(order.status),
+            progress=_progress(all_pieces),
+            boards=boards,
+        )
+
+    def mark_piece_cut(
+        self, order_id: int, placed_piece_id: int, cut: bool
+    ) -> PieceCutResponse:
+        """Marca (o desmarca) una pieza colocada como cortada, idempotente.
+
+        Solo con la orden ``in_production``: antes no hay nada que cortar y
+        después el corte ya quedó cerrado por la transición.
+        """
+        order = self.get_or_404(order_id)
+        self._ensure_cutting_plan(order)
+        if order.status != OrderStatus.in_production.value:
+            raise BusinessRuleError(
+                "Solo se pueden marcar piezas con la orden en producción"
+            )
+        piece = self.db.get(OrderPlacedPieceModel, placed_piece_id)
+        if piece is None or piece.order_id != order.id:
+            raise EntityNotFoundError("OrderPlacedPiece", placed_piece_id)
+        if cut and piece.cut_at is None:
+            piece.cut_at = datetime.utcnow()
+        elif not cut:
+            piece.cut_at = None
+        self.db.commit()
+        self.db.refresh(piece)
+        all_pieces = [p for board in order.boards for p in board.pieces]
+        return PieceCutResponse(
+            piece=_piece_response(piece),
+            progress=_progress(all_pieces),
+            board_progress=_progress(piece.board.pieces),
+        )
+
+    def _ensure_cutting_plan(self, order: OrderModel) -> None:
+        """Materializa el plan de corte desde el snapshot si aún no existe.
+
+        Cubre las órdenes creadas antes de esta funcionalidad sin backfill: la
+        primera lectura/marcado reconstruye las filas desde ``layouts``.
+        """
+        if order.boards:
+            return
+        _attach_cutting_plan(order, order.optimization_snapshot or {})
+        if order.boards:
+            self.db.commit()
+            self.db.refresh(order)
 
     def _apply_transition(
         self,
@@ -344,6 +451,77 @@ class OrderService:
                 f"El cliente ya tiene {active} pedido(s) pendiente(s); "
                 "resuélvalos o espere a que expiren antes de crear otro."
             )
+
+
+def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
+    """Expande ``payload["layouts"]`` en tableros físicos + piezas colocadas.
+
+    Cada layout del snapshot es una hoja real; ``sheet_number`` se reasigna como
+    secuencia global (el del snapshot se reinicia por material). Las piezas
+    quedan ligadas también a la orden para contar avance sin joins.
+    """
+    materials_by_key = {m["material_key"]: m for m in payload.get("materials", [])}
+    for seq, layout in enumerate(payload.get("layouts", []), start=1):
+        material = layout.get("material", {})
+        resolved = materials_by_key.get(material.get("material_key"), {})
+        board = OrderBoardModel(
+            sheet_number=seq,
+            material_key=material.get("material_key", ""),
+            product_id=resolved.get("product_id"),
+            product_code=resolved.get("product_code"),
+            product_name=resolved.get("product_name"),
+            width=material.get("width", 0.0),
+            height=material.get("height", 0.0),
+            thickness=material.get("thickness", 0.0),
+            remainders=layout.get("remainders") or None,
+            # Snapshots previos a la serialización de ``cuts`` no traen la clave.
+            cuts=layout.get("cuts") or None,
+        )
+        for placed in layout.get("placed_pieces", []):
+            piece_id = str(placed.get("piece_id", ""))
+            board.pieces.append(
+                OrderPlacedPieceModel(
+                    order=order,
+                    piece_id=piece_id,
+                    label=base_label(piece_id),
+                    x=placed["x"],
+                    y=placed["y"],
+                    width=placed["width"],
+                    height=placed["height"],
+                    original_width=placed.get("original_width", placed["width"]),
+                    original_height=placed.get("original_height", placed["height"]),
+                    rotated=bool(placed.get("rotated", False)),
+                    edges=placed.get("edges"),
+                )
+            )
+        order.boards.append(board)
+
+
+def _progress(pieces: List[OrderPlacedPieceModel]) -> CuttingProgress:
+    """Avance de corte sobre un conjunto de piezas colocadas."""
+    return CuttingProgress(
+        cut_pieces=sum(1 for p in pieces if p.cut_at is not None),
+        total_pieces=len(pieces),
+    )
+
+
+def _piece_response(piece: OrderPlacedPieceModel) -> PlacedPieceResponse:
+    """Proyección API de una pieza colocada (``cut`` derivado de ``cut_at``)."""
+    return PlacedPieceResponse(
+        id=piece.id,
+        piece_id=piece.piece_id,
+        label=piece.label,
+        x=piece.x,
+        y=piece.y,
+        width=piece.width,
+        height=piece.height,
+        original_width=piece.original_width,
+        original_height=piece.original_height,
+        rotated=piece.rotated,
+        edges=piece.edges,
+        cut=piece.cut_at is not None,
+        cut_at=piece.cut_at,
+    )
 
 
 def _line_description(line: OrderLineModel) -> str:
