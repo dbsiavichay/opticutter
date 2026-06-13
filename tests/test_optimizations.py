@@ -69,6 +69,9 @@ def test_optimize_returns_layouts(client):
     assert layout["material"]["sheetNumber"] == 1
     assert "efficiency" in layout["statistics"]
     assert layout["placedPieces"][0]["originalWidth"] == 600
+    # Cortes de guillotina expuestos para dibujar las líneas de sierra.
+    assert layout["cuts"], "colocar piezas genera recorridos de sierra"
+    assert set(layout["cuts"][0]) == {"x", "y", "length", "isHorizontal"}
 
 
 def test_optimize_reports_cut_linear_meters(client):

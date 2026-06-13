@@ -7,11 +7,14 @@ from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.review_service import ReviewLinkService, review_link_service
 from src.modules.orders.schemas import (
+    CuttingPlanResponse,
     OrderCreate,
     OrderExportResponse,
     OrderInvoiceUpdate,
     OrderResponse,
     OrderStatusUpdate,
+    PieceCutResponse,
+    PieceCutUpdate,
     ReviewLinkInfoResponse,
     ReviewLinkResponse,
 )
@@ -69,6 +72,31 @@ def update_order_status(
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
     return ok(svc.transition(order_id, data.status, actor="sales", note=data.note))
+
+
+@router.get(
+    "/{order_id}/cutting-plan", response_model=DataResponse[CuttingPlanResponse]
+)
+def get_cutting_plan(order_id: int, svc: OrderService = Depends(order_service)):
+    """Plan de corte para la vista de taller: tableros físicos, piezas y avance."""
+    return ok(svc.get_cutting_plan(order_id))
+
+
+@router.patch(
+    "/{order_id}/cutting-plan/pieces/{piece_id}",
+    response_model=DataResponse[PieceCutResponse],
+)
+def mark_piece_cut(
+    order_id: int,
+    piece_id: int,
+    data: PieceCutUpdate,
+    svc: OrderService = Depends(order_service),
+):
+    """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.
+
+    Solo con la orden ``in_production``. Idempotente: re-marcar no cambia nada.
+    """
+    return ok(svc.mark_piece_cut(order_id, piece_id, data.cut))
 
 
 @router.post(

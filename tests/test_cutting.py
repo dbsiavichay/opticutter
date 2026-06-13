@@ -82,6 +82,11 @@ def test_guillotine_places_pieces_and_reports_efficiency():
     assert as_dict["statistics"]["pieces_count"] == 1
     assert as_dict["material"]["material_key"] == "m1"
     assert as_dict["material"]["sheet_number"] == 1
+    # Los cortes de sierra se serializan (los consume la vista de taller).
+    assert as_dict["cuts"] == [
+        {"x": c.x, "y": c.y, "length": c.length, "is_horizontal": c.is_horizontal}
+        for c in layout.cuts
+    ]
 
 
 def test_guillotine_empty_pieces_returns_empty():

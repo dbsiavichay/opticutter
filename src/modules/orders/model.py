@@ -102,6 +102,12 @@ class OrderModel(Base):
         cascade="all, delete-orphan",
         order_by="OrderReviewLinkModel.id",
     )
+    boards: Mapped[list["OrderBoardModel"]] = relationship(
+        "OrderBoardModel",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderBoardModel.id",
+    )
 
 
 class OrderLineModel(Base):
@@ -160,6 +166,77 @@ class OrderPieceModel(Base):
     edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="pieces")
+
+
+class OrderBoardModel(Base):
+    """Tablero FÍSICO del plan de corte, materializado desde el snapshot.
+
+    Cada fila es una hoja real a cortar (los ``layout_groups`` del snapshot solo
+    deduplican la vista). ``sheet_number`` es la secuencia global 1..N dentro de
+    la orden (el ``sheet_number`` del snapshot se reinicia por material).
+    ``product_id`` es nulo para materiales fuera del catálogo (retazo/manual).
+    """
+
+    __tablename__ = "order_boards"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    sheet_number: Mapped[int] = mapped_column(Integer)
+    material_key: Mapped[str] = mapped_column(String(64))
+    product_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("products.id"), nullable=True
+    )
+    product_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    product_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    width: Mapped[float] = mapped_column(Float)
+    height: Mapped[float] = mapped_column(Float)
+    thickness: Mapped[float] = mapped_column(Float)
+    # Rectángulos sobrantes del snapshot (display + futuro inventario de retazos).
+    remainders: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    # Cortes de guillotina (recorridos de sierra) para dibujar las líneas de corte.
+    # Nulo en órdenes cuyo snapshot es previo a la serialización de ``cuts``.
+    cuts: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+    order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="boards")
+    pieces: Mapped[list["OrderPlacedPieceModel"]] = relationship(
+        "OrderPlacedPieceModel",
+        back_populates="board",
+        cascade="all, delete-orphan",
+        order_by="OrderPlacedPieceModel.id",
+    )
+
+
+class OrderPlacedPieceModel(Base):
+    """Pieza COLOCADA en un tablero físico: la unidad que el operario marca.
+
+    Geometría ya rotada (x, y, width, height) lista para dibujar; las dims
+    nominales (``original_*``) sirven para agrupar piezas iguales en el front.
+    ``piece_id`` conserva la identidad de instancia del snapshot (``label#N``).
+    ``cut_at`` nulo = pendiente de corte; con fecha = cortada.
+    """
+
+    __tablename__ = "order_placed_pieces"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("order_boards.id"), index=True)
+    piece_id: Mapped[str] = mapped_column(String(160))
+    label: Mapped[str] = mapped_column(String(128))
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    width: Mapped[float] = mapped_column(Float)
+    height: Mapped[float] = mapped_column(Float)
+    original_width: Mapped[float] = mapped_column(Float)
+    original_height: Mapped[float] = mapped_column(Float)
+    rotated: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Lados canteados geométricos, tal cual el snapshot (nulo si no lleva canto).
+    edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    cut_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    order: Mapped["OrderModel"] = relationship("OrderModel")
+    board: Mapped["OrderBoardModel"] = relationship(
+        "OrderBoardModel", back_populates="pieces"
+    )
 
 
 class OrderReviewLinkModel(Base):

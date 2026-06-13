@@ -254,6 +254,17 @@ class Remainder(CamelModel):
     width: float = Field(..., description="Width of the remainder (ancho)")
 
 
+class CutSegment(CamelModel):
+    """Segmento de corte de guillotina (recorrido de la sierra) sobre la plancha."""
+
+    x: float = Field(..., description="X where the saw cut starts")
+    y: float = Field(..., description="Y where the saw cut starts")
+    length: float = Field(..., description="Length of the saw travel along its axis")
+    is_horizontal: bool = Field(
+        ..., description="True if the cut runs horizontally (along X)"
+    )
+
+
 class LayoutStatistics(CamelModel):
     used_area: float = Field(..., description="Total area occupied by placed pieces")
     waste_area: float = Field(..., description="Unused area of the sheet")
@@ -278,6 +289,11 @@ class Layout(CamelModel):
     )
     remainders: List[Remainder] = Field(
         ..., description="Leftover rectangles on this sheet"
+    )
+    # Default vacío: payloads cacheados/snapshots previos a esta clave validan igual.
+    cuts: List[CutSegment] = Field(
+        default_factory=list,
+        description="Guillotine saw cuts on this sheet (for drawing cut lines)",
     )
 
 

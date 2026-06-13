@@ -187,4 +187,13 @@ class CuttingLayout:
                 {"x": r.x, "y": r.y, "width": r.width, "height": r.height}
                 for r in self.remainders
             ],
+            "cuts": [
+                {
+                    "x": c.x,
+                    "y": c.y,
+                    "length": c.length,
+                    "is_horizontal": c.is_horizontal,
+                }
+                for c in self.cuts
+            ],
         }
