@@ -16,6 +16,7 @@ from src.modules.orders.schemas import (
     PieceCutUpdate,
 )
 from src.modules.orders.service import OrderService, order_service
+from src.modules.settings.service import SettingsService, settings_service
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -119,10 +120,11 @@ def get_order_proforma(
     order_id: int,
     format: str = _FORMAT_QUERY,
     svc: OrderService = Depends(order_service),
+    settings_svc: SettingsService = Depends(settings_service),
 ):
     """Proforma comercial (con precios congelados) renderizada desde el snapshot."""
     order = svc.get_or_404(order_id)
-    carrier = ProformaCarrier.from_order(order)
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
     return pdf_response(pdf_buffer, f"proforma_{order.code or order.id}.pdf", format)
 
@@ -132,9 +134,10 @@ def get_order_production_sheet(
     order_id: int,
     format: str = _FORMAT_QUERY,
     svc: OrderService = Depends(order_service),
+    settings_svc: SettingsService = Depends(settings_service),
 ):
     """Hoja de producción (lista de corte y disposición, SIN precios) para el taller."""
     order = svc.get_or_404(order_id)
-    carrier = ProformaCarrier.from_order(order)
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     pdf_buffer = ProformaService.generate_production_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"produccion_{order.code or order.id}.pdf", format)
