@@ -76,11 +76,10 @@ class Config:
 
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
-    # Órdenes: vigencia de la cotización y tope de pendientes por cliente (antiabuso)
-    ORDER_VALIDITY_DAYS = env.int("ORDER_VALIDITY_DAYS", 15)
-    MAX_PENDING_ORDERS_PER_CLIENT = env.int("MAX_PENDING_ORDERS_PER_CLIENT", 3)
-
-    # Pre-órdenes (cotización mutable): vigencia y tope de abiertas por cliente.
+    # Pre-órdenes (cotización mutable): vigencia y tope de abiertas por cliente. Solo
+    # siembran la sección "preorders" de la fila singleton de `settings` en su primera
+    # lectura; la fuente de verdad en runtime es la tabla `settings` (editable vía
+    # PATCH /settings/preorders), igual que los parámetros de corte.
     PREORDER_VALIDITY_DAYS = env.int("PREORDER_VALIDITY_DAYS", 15)
     MAX_OPEN_PREORDERS_PER_CLIENT = env.int("MAX_OPEN_PREORDERS_PER_CLIENT", 5)
 

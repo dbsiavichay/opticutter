@@ -31,6 +31,10 @@ class SettingsModel(Base):
     right_trim: Mapped[float] = mapped_column(Float)
     edge_banding_waste_factor: Mapped[float] = mapped_column(Float)
 
+    # Pre-órdenes (cotización mutable): vigencia y tope de abiertas por cliente
+    preorder_validity_days: Mapped[int] = mapped_column(Integer)
+    max_open_preorders_per_client: Mapped[int] = mapped_column(Integer)
+
     # Datos de la empresa (membrete de la proforma)
     company_name: Mapped[str] = mapped_column(String(128))
     company_tagline: Mapped[str] = mapped_column(String(256))

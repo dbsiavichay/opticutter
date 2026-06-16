@@ -114,6 +114,9 @@ class OptimizationService:
             client,
             reference=f"OPT-{optimization_hash[:8]}",
             company=self.settings_service.get_company(),
+            validity_days=self.settings_service.get_preorder_config()[
+                "preorder_validity_days"
+            ],
         )
 
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:

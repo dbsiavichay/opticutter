@@ -7,6 +7,8 @@ import pytest
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.schemas import EdgeBandingSpec, EdgeSide
 from src.modules.optimizations.service import OptimizationService
+from src.modules.orders.schemas import OrderCreate
+from src.modules.orders.service import OrderService
 from src.shared.config import config
 
 
@@ -398,21 +400,26 @@ def test_placed_piece_notation_includes_band_type(client):
 # --------------------------------------------------------------------------- #
 # Cobro durable en órdenes
 # --------------------------------------------------------------------------- #
-def test_order_charges_edge_banding(client):
+def _mint_order(client, db_session, payload):
+    """Mintea una orden por el servicio (la creación HTTP se retiró) y la lee vía GET."""
+    order = OrderService(db_session).create(OrderCreate.model_validate(payload))
+    return client.get(f"/api/v1/orders/{order.id}").json()["data"]
+
+
+def test_order_charges_edge_banding(client, db_session):
     c = _create_client(client)
     b = _create_board(client, price=45.5)
     eb = _create_edge_banding(client, price=2.0)
 
-    resp = client.post(
-        "/api/v1/orders/",
-        json={
+    data = _mint_order(
+        client,
+        db_session,
+        {
             "clientId": c["id"],
             "materials": _materials(b["id"]),
             "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
     )
-    assert resp.status_code == 201
-    data = resp.json()["data"]
 
     # Dos líneas de cobro: tablero + tapacanto.
     lines = {line["productCode"]: line for line in data["lines"]}
@@ -438,18 +445,19 @@ def test_order_charges_edge_banding(client):
     assert {"MEL18", "TAP22"} <= codes
 
 
-def test_order_proforma_with_edge_banding_renders(client):
+def test_order_proforma_with_edge_banding_renders(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client)
-    order = client.post(
-        "/api/v1/orders/",
-        json={
+    order = _mint_order(
+        client,
+        db_session,
+        {
             "clientId": c["id"],
             "materials": _materials(b["id"]),
             "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
-    ).json()["data"]
+    )
 
     proforma = client.get(f"/api/v1/orders/{order['id']}/proforma")
     assert proforma.status_code == 200

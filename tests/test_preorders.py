@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta
 
 from src.modules.preorders.model import PreOrderModel
-from src.shared.config import config
 
 from .test_orders import _create_board, _create_client, _order_payload
 
@@ -85,8 +84,12 @@ def test_update_blocked_when_not_open(client, db_session):
     assert "ya no puede editarse" in resp.json()["errors"][0]["message"]
 
 
-def test_open_cap_enforced(client, monkeypatch):
-    monkeypatch.setattr(config, "MAX_OPEN_PREORDERS_PER_CLIENT", 2)
+def test_open_cap_enforced(client):
+    # El tope se lee de settings (no de env): bajarlo a 2 vía la API de configuración.
+    patched = client.patch(
+        "/api/v1/settings/preorders", json={"maxOpenPreordersPerClient": 2}
+    )
+    assert patched.status_code == 200
     c, b = _setup(client)
     assert _create_preorder(client, c, b, width=600).status_code == 201
     assert _create_preorder(client, c, b, width=500).status_code == 201

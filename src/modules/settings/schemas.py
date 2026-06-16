@@ -30,6 +30,25 @@ class CuttingSettingsUpdate(CamelModel):
     edge_banding_waste_factor: Optional[float] = Field(None, ge=0)
 
 
+# --- Pre-órdenes (cotización mutable) -----------------------------------------
+class PreOrderSettingsResponse(CamelModel):
+    """Config de pre-órdenes vigente: vigencia y tope de abiertas por cliente."""
+
+    preorder_validity_days: int = Field(
+        ..., ge=1, description="Días de vigencia de una pre-orden (cotización)"
+    )
+    max_open_preorders_per_client: int = Field(
+        ..., ge=1, description="Tope de pre-órdenes abiertas por cliente (antiabuso)"
+    )
+
+
+class PreOrderSettingsUpdate(CamelModel):
+    """Actualización parcial de la config de pre-órdenes."""
+
+    preorder_validity_days: Optional[int] = Field(None, ge=1)
+    max_open_preorders_per_client: Optional[int] = Field(None, ge=1)
+
+
 # --- Datos de la empresa ------------------------------------------------------
 class Branch(CamelModel):
     """Sucursal mostrada en el membrete de la proforma."""

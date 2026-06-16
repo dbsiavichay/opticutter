@@ -13,6 +13,7 @@ from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from src.modules.analytics.constants import (
+    PENDING_STATUSES,
     REALIZED_STATUSES,
     STATUS_LABELS,
     Granularity,
@@ -30,12 +31,7 @@ from src.modules.analytics.schemas import (
     TimeSeries,
     TimeSeriesData,
 )
-from src.modules.orders.model import (
-    PENDING_STATUSES,
-    OrderLineModel,
-    OrderModel,
-    OrderStatus,
-)
+from src.modules.orders.model import OrderLineModel, OrderModel, OrderStatus
 from src.shared.database import get_db
 
 
@@ -50,7 +46,6 @@ class AnalyticsService:
         order_count = self._count(dr)
         completed_count = self._count(dr, REALIZED_STATUSES)
         cancelled = self._count(dr, {OrderStatus.cancelled})
-        expired = self._count(dr, {OrderStatus.expired})
 
         realized_revenue = self._revenue(dr, REALIZED_STATUSES)
         boards = self._boards_consumed(dr)
@@ -71,7 +66,6 @@ class AnalyticsService:
             waste_estimate_m2=waste,
             pending_orders_count=self._count(dr, PENDING_STATUSES),
             cancellation_rate=round(safe_div(cancelled, order_count), 4),
-            expiry_rate=round(safe_div(expired, order_count), 4),
             order_count=order_count,
             realized_revenue=realized_revenue,
             average_ticket=round(safe_div(realized_revenue, completed_count), 2),
@@ -167,7 +161,6 @@ class AnalyticsService:
             average_efficiency=avg_eff,
             total_area_cut_m2=area,
             waste_estimate_m2=waste,
-            expiry_before_approval_rate=self._expiry_before_approval(orders),
             lifecycle=self._lifecycle(orders),
         )
 
@@ -222,32 +215,11 @@ class AnalyticsService:
         weighted = sum(eff * area for eff, area in rows) / total_area
         return round(weighted, 2), round(total_area, 4)
 
-    def _expiry_before_approval(self, orders: list[OrderModel]) -> float:
-        """Fracción de órdenes confirmadas que expiraron sin llegar a ``approved``.
-
-        No usa timestamps (el ``created_at`` de ``expired`` es perezoso); solo el
-        conjunto de estados visitados por cada orden en su historial.
-        """
-        confirmed = OrderStatus.confirmed.value
-        approved = OrderStatus.approved.value
-        expired = OrderStatus.expired.value
-        ever_confirmed = 0
-        numerator = 0
-        for o in orders:
-            visited = {h.to_status for h in o.history}
-            if confirmed not in visited:
-                continue
-            ever_confirmed += 1
-            if expired in visited and approved not in visited:
-                numerator += 1
-        return round(safe_div(numerator, ever_confirmed), 4)
-
     def _lifecycle(self, orders: list[OrderModel]) -> list[DwellTime]:
         """Horas medias en cada estado, por par ``(from_status, to_status)``.
 
         El tiempo en un estado = intervalo entre el evento que entró a él y el que lo
-        dejó. El ``created_at`` de ``expired`` es perezoso (se escribe al leer la orden),
-        así que esos tramos son aproximados; ``sample_count`` transparenta la muestra.
+        dejó; ``sample_count`` transparenta el tamaño de la muestra.
         """
         acc: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0, 0])
         for o in orders:

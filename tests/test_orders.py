@@ -1,8 +1,18 @@
-"""Tests del módulo orders: creación (snapshot), idempotencia, tope, estados."""
+"""Tests del módulo orders: creación (snapshot), idempotencia, estados.
+
+Las órdenes ya no se crean por HTTP (``POST /orders`` se retiró): nacen al confirmar
+una pre-orden. Aquí se mintan directamente por ``OrderService.create`` (la vía interna
+que conserva el flujo) reusando la sesión del fixture ``client``, y se leen vía GET para
+verificar la proyección API en camelCase.
+"""
 
 from datetime import datetime
 
-from src.shared.config import config
+import pytest
+
+from src.modules.orders.schemas import OrderCreate
+from src.modules.orders.service import OrderService
+from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
 
 
 def _create_client(client, identifier="0991112233", phone="0991112233"):
@@ -48,13 +58,22 @@ def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
     }
 
 
-def test_create_order_freezes_snapshot_and_charges_boards(client):
+def _mint_order(db_session, payload):
+    """Crea la orden por el servicio y devuelve el ``OrderModel``."""
+    return OrderService(db_session).create(OrderCreate.model_validate(payload))
+
+
+def _create_order(client, db_session, payload):
+    """Mintea la orden y devuelve su proyección API (GET) en camelCase."""
+    order = _mint_order(db_session, payload)
+    return client.get(f"/api/v1/orders/{order.id}").json()["data"]
+
+
+def test_create_order_freezes_snapshot_and_charges_boards(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
 
-    resp = client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"]))
-    assert resp.status_code == 201
-    data = resp.json()["data"]
+    data = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
 
     assert data["status"] == "confirmed"
     assert data["code"] == f"ORD-{datetime.utcnow().year}-{data['id']:04d}"
@@ -71,6 +90,9 @@ def test_create_order_freezes_snapshot_and_charges_boards(client):
     # Totales inmutables = suma por tableros.
     assert data["total"] == data["subtotal"] == line["lineTotal"]
 
+    # La orden ya no lleva vigencia (la cotización mutable vive en la pre-orden).
+    assert "expiresAt" not in data
+
     # Lista de corte = piezas (insumo de producción, no se cobra).
     assert len(data["pieces"]) == 1
     piece = data["pieces"][0]
@@ -82,7 +104,7 @@ def test_create_order_freezes_snapshot_and_charges_boards(client):
     assert data["history"][0]["fromStatus"] is None
 
 
-def test_create_order_blocked_without_client_phone(client):
+def test_create_order_blocked_without_client_phone(client, db_session):
     """Regla de negocio: sin celular registrado no se crea el pedido (422)."""
     b = _create_board(client)
     no_phone = client.post(
@@ -90,68 +112,39 @@ def test_create_order_blocked_without_client_phone(client):
         json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
     ).json()["data"]
 
-    resp = client.post("/api/v1/orders/", json=_order_payload(no_phone["id"], b["id"]))
-    assert resp.status_code == 422
-    assert "celular" in resp.json()["errors"][0]["message"].lower()
+    with pytest.raises(BusinessRuleError) as exc:
+        _mint_order(db_session, _order_payload(no_phone["id"], b["id"]))
+    assert "celular" in str(exc.value).lower()
     # No se persistió ninguna orden.
     assert client.get("/api/v1/orders/").json()["data"] == []
 
 
-def test_create_order_unknown_client_returns_404(client):
+def test_create_order_unknown_client_returns_404(client, db_session):
     """Un ``clientId`` inexistente da 404 limpio antes de congelar nada."""
     b = _create_board(client)
-    resp = client.post("/api/v1/orders/", json=_order_payload(99999, b["id"]))
-    assert resp.status_code == 404
-    assert "Client 99999" in resp.json()["errors"][0]["message"]
+    with pytest.raises(EntityNotFoundError) as exc:
+        _mint_order(db_session, _order_payload(99999, b["id"]))
+    assert "Client 99999" in str(exc.value)
 
 
-def test_create_order_is_idempotent(client):
+def test_create_order_is_idempotent(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
     payload = _order_payload(c["id"], b["id"])
 
-    first = client.post("/api/v1/orders/", json=payload).json()["data"]
-    second = client.post("/api/v1/orders/", json=payload).json()["data"]
+    first = _mint_order(db_session, payload)
+    second = _mint_order(db_session, payload)
 
-    assert first["id"] == second["id"]
-    assert first["code"] == second["code"]
+    assert first.id == second.id
+    assert first.code == second.code
     # No se crean dos órdenes para el mismo (cliente, hash).
     assert len(client.get("/api/v1/orders/").json()["data"]) == 1
 
 
-def test_pending_cap_blocks_excess_orders(client, monkeypatch):
-    monkeypatch.setattr(config, "MAX_PENDING_ORDERS_PER_CLIENT", 2)
+def test_status_transitions_valid_and_invalid(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-
-    # Dos órdenes distintas (distinto hash) → ambas quedan pendientes.
-    assert (
-        client.post(
-            "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
-        ).status_code
-        == 201
-    )
-    assert (
-        client.post(
-            "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
-        ).status_code
-        == 201
-    )
-
-    # La tercera excede el tope de pendientes.
-    third = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=450)
-    )
-    assert third.status_code == 422
-    assert "pendiente" in third.json()["errors"][0]["message"]
-
-
-def test_status_transitions_valid_and_invalid(client):
-    c = _create_client(client)
-    b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
     ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "approved"})
@@ -170,12 +163,10 @@ def test_status_transitions_valid_and_invalid(client):
     assert "inválida" in bad.json()["errors"][0]["message"]
 
 
-def test_invalid_transition_from_confirmed(client):
+def test_invalid_transition_from_confirmed(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     # confirmed → completed (salta estados) no es válido.
     bad = client.patch(
         f"/api/v1/orders/{order['id']}/status", json={"status": "completed"}
@@ -183,13 +174,11 @@ def test_invalid_transition_from_confirmed(client):
     assert bad.status_code == 422
 
 
-def test_list_orders_filter_by_status(client):
+def test_list_orders_filter_by_status(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    o1 = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
-    ).json()["data"]
-    client.post("/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500))
+    o1 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=600))
+    _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
 
     # Aprobar solo la primera.
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "approved"})
@@ -207,12 +196,10 @@ def test_get_order_404(client):
     assert client.get("/api/v1/orders/999999").status_code == 404
 
 
-def test_order_proforma_pdf_and_base64(client):
+def test_order_proforma_pdf_and_base64(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
     pdf = client.get(f"/api/v1/orders/{oid}/proforma")
@@ -229,12 +216,10 @@ def test_order_proforma_pdf_and_base64(client):
     assert order["code"] in body["filename"]
 
 
-def test_order_production_sheet_pdf(client):
+def test_order_production_sheet_pdf(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
 
     sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
     assert sheet.status_code == 200
@@ -247,12 +232,10 @@ def test_order_documents_404(client):
     assert client.get("/api/v1/orders/999999/production-sheet").status_code == 404
 
 
-def test_order_export_document(client):
+def test_order_export_document(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
 
     resp = client.get(f"/api/v1/orders/{order['id']}/export")
     assert resp.status_code == 200
@@ -276,12 +259,10 @@ def test_order_export_document(client):
     assert data["subtotal"] == data["total"] == line["lineTotal"]
 
 
-def test_set_external_invoice_id_and_reflect_in_export(client):
+def test_set_external_invoice_id_and_reflect_in_export(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
     resp = client.post(
@@ -301,12 +282,10 @@ def test_set_external_invoice_id_and_reflect_in_export(client):
     assert exported["externalInvoiceId"] == "FAC-001-42"
 
 
-def test_set_external_invoice_id_conflict_on_different_id(client):
+def test_set_external_invoice_id_conflict_on_different_id(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
     client.post(
@@ -327,41 +306,6 @@ def test_billing_seam_404(client):
         ).status_code
         == 404
     )
-
-
-def test_order_expires_lazily_on_read(client, monkeypatch):
-    """Una orden vencida se transiciona a ``expired`` al leerla (barrido perezoso)."""
-    monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)
-    c = _create_client(client)
-    b = _create_board(client)
-    order = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"])
-    ).json()["data"]
-    # Nace confirmed, pero su vigencia ya está vencida (expiresAt en el pasado).
-    assert order["status"] == "confirmed"
-
-    fetched = client.get(f"/api/v1/orders/{order['id']}").json()["data"]
-    assert fetched["status"] == "expired"
-    assert fetched["history"][-1]["toStatus"] == "expired"
-    assert fetched["history"][-1]["fromStatus"] == "confirmed"
-
-
-def test_expired_order_frees_pending_cap(client, monkeypatch):
-    """Las pendientes vencidas no cuentan para el tope: se expiran al evaluarlo."""
-    monkeypatch.setattr(config, "MAX_PENDING_ORDERS_PER_CLIENT", 1)
-    monkeypatch.setattr(config, "ORDER_VALIDITY_DAYS", -1)
-    c = _create_client(client)
-    b = _create_board(client)
-
-    first = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
-    )
-    assert first.status_code == 201
-    # La primera está vencida; la segunda (distinto hash) no choca con el tope.
-    second = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
-    )
-    assert second.status_code == 201
 
 
 def _manual_material_payload(client_id):
@@ -391,13 +335,11 @@ def _manual_material_payload(client_id):
     }
 
 
-def test_create_order_with_non_catalog_material(client):
+def test_create_order_with_non_catalog_material(client, db_session):
     """Un material 'manual' se congela tal cual el snapshot: línea sin productId."""
     c = _create_client(client)
 
-    resp = client.post("/api/v1/orders/", json=_manual_material_payload(c["id"]))
-    assert resp.status_code == 201
-    data = resp.json()["data"]
+    data = _create_order(client, db_session, _manual_material_payload(c["id"]))
 
     # Cobro = el material manual, identificado por code/name (sin productId).
     assert len(data["lines"]) == 1
@@ -417,7 +359,7 @@ def test_create_order_with_non_catalog_material(client):
     assert len(client.get("/api/v1/orders/").json()["data"]) == 1
 
 
-def test_create_mixed_catalog_and_offcut_order(client):
+def test_create_mixed_catalog_and_offcut_order(client, db_session):
     """Orden mixta: tablero de catálogo + retazo de empresa (costo 0)."""
     c = _create_client(client)
     b = _create_board(client)
@@ -452,9 +394,7 @@ def test_create_mixed_catalog_and_offcut_order(client):
             },
         ],
     }
-    resp = client.post("/api/v1/orders/", json=payload)
-    assert resp.status_code == 201
-    data = resp.json()["data"]
+    data = _create_order(client, db_session, payload)
 
     assert len(data["lines"]) == 2
     catalog_line = next(line for line in data["lines"] if line["productId"] is not None)
@@ -471,12 +411,10 @@ def test_create_mixed_catalog_and_offcut_order(client):
     assert piece_product_ids == {b["id"], None}
 
 
-def test_non_catalog_order_renders_proforma_and_production_sheet(client):
+def test_non_catalog_order_renders_proforma_and_production_sheet(client, db_session):
     """Proforma y hoja de producción se renderizan del snapshot, sin catálogo."""
     c = _create_client(client)
-    order = client.post(
-        "/api/v1/orders/", json=_manual_material_payload(c["id"])
-    ).json()["data"]
+    order = _create_order(client, db_session, _manual_material_payload(c["id"]))
 
     proforma = client.get(f"/api/v1/orders/{order['id']}/proforma")
     assert proforma.status_code == 200

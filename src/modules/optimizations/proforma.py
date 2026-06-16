@@ -26,7 +26,6 @@ from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
-from src.shared.config import config
 
 # Paleta de marca MADERABLE (muestreada del membrete oficial).
 BRAND_CORAL = colors.HexColor("#E8564B")  # acento principal / cabeceras de tabla
@@ -163,10 +162,16 @@ class ProformaService:
         story.extend(ProformaService._build_layout_pages(carrier))
 
         story.append(Spacer(1, 0.3 * inch))
+        # La vigencia solo aplica a cotizaciones (pre-orden / optimización en vivo); una
+        # orden ya confirmada no la lleva (``carrier.validity_days`` es ``None``).
+        validity_note = (
+            f"Esta proforma es válida por {carrier.validity_days} días. "
+            if carrier.validity_days
+            else ""
+        )
         story.append(
             Paragraph(
-                f"Esta proforma es válida por {config.ORDER_VALIDITY_DAYS} días. "
-                "Los precios no incluyen IVA.",
+                f"{validity_note}Los precios no incluyen IVA.",
                 ParagraphStyle(
                     "Note",
                     parent=styles["Normal"],

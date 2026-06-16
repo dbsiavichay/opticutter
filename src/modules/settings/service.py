@@ -3,7 +3,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.modules.settings.model import SETTINGS_ID, SettingsModel
-from src.modules.settings.schemas import CompanySettingsUpdate, CuttingSettingsUpdate
+from src.modules.settings.schemas import (
+    CompanySettingsUpdate,
+    CuttingSettingsUpdate,
+    PreOrderSettingsUpdate,
+)
 from src.shared.config import config
 from src.shared.database import get_db
 
@@ -49,6 +53,8 @@ class SettingsService:
             left_trim=config.LEFT_TRIM,
             right_trim=config.RIGHT_TRIM,
             edge_banding_waste_factor=config.EDGE_BANDING_WASTE_FACTOR,
+            preorder_validity_days=config.PREORDER_VALIDITY_DAYS,
+            max_open_preorders_per_client=config.MAX_OPEN_PREORDERS_PER_CLIENT,
             company_name=config.COMPANY_NAME,
             company_tagline=config.COMPANY_TAGLINE,
             company_email=config.COMPANY_EMAIL,
@@ -72,6 +78,28 @@ class SettingsService:
         self.db.commit()
         self.db.refresh(settings)
         return settings
+
+    def update_preorders(self, data: PreOrderSettingsUpdate) -> SettingsModel:
+        """Aplica un PATCH parcial a la config de pre-órdenes (vigencia + tope)."""
+        settings = self.get_or_init()
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(settings, field, value)
+        self.db.commit()
+        self.db.refresh(settings)
+        return settings
+
+    def get_preorder_config(self) -> dict:
+        """Vigencia y tope de pre-órdenes vigentes (fuente de verdad en runtime).
+
+        Lo consumen ``PreOrderService`` (expires_at + tope de abiertas),
+        ``PreOrderReviewService`` (refresco de expires_at al generar el enlace) y los
+        carriers de cotización (vigencia mostrada en la proforma).
+        """
+        settings = self.get_or_init()
+        return {
+            "preorder_validity_days": settings.preorder_validity_days,
+            "max_open_preorders_per_client": settings.max_open_preorders_per_client,
+        }
 
     def update_company(self, data: CompanySettingsUpdate) -> SettingsModel:
         """Aplica un PATCH parcial a los datos de la empresa."""

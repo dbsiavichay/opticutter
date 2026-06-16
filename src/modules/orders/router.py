@@ -7,7 +7,6 @@ from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.schemas import (
     CuttingPlanResponse,
-    OrderCreate,
     OrderExportResponse,
     OrderInvoiceUpdate,
     OrderResponse,
@@ -33,12 +32,6 @@ _FORMAT_QUERY = Query(
     description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
     pattern="^(pdf|base64)$",
 )
-
-
-@router.post("/", response_model=DataResponse[OrderResponse], status_code=201)
-def create_order(data: OrderCreate, svc: OrderService = Depends(order_service)):
-    """Crea (o recupera, por idempotencia) una orden congelando el snapshot."""
-    return ok(svc.create(data))
 
 
 @router.get("/", response_model=PaginatedResponse[OrderResponse])

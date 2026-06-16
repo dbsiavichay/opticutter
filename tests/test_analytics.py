@@ -5,7 +5,7 @@ precisión (la máquina de estados no deja alcanzar todos los casos limpio). El 
 y el ``db_session`` comparten la misma SQLite en memoria por el override de ``get_db``.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from src.modules.orders.model import (
     OrderLineModel,
@@ -62,7 +62,6 @@ def _seed_order(
         total_boards_used=boards,
         created_at=created_at,
         confirmed_at=created_at,
-        expires_at=created_at + timedelta(days=15),
     )
     if lines is not None:
         order.lines = lines
@@ -94,7 +93,6 @@ def test_summary_empty_range_returns_zeros_not_nulls(client):
         "wasteEstimateM2",
         "pendingOrdersCount",
         "cancellationRate",
-        "expiryRate",
         "orderCount",
         "realizedRevenue",
         "averageTicket",
@@ -110,17 +108,15 @@ def test_summary_revenue_and_rates_isolated_by_status(client, db_session):
     _seed_order(db_session, client_id=1, status="completed", total=100.0)
     _seed_order(db_session, client_id=2, status="confirmed", total=200.0)
     _seed_order(db_session, client_id=1, status="cancelled", total=50.0)
-    _seed_order(db_session, client_id=3, status="expired", total=30.0)
 
     data = client.get("/api/v1/analytics/summary", params=_RANGE).json()["data"]
 
-    assert data["orderCount"] == 4
+    assert data["orderCount"] == 3
     assert data["realizedRevenue"] == 100.0  # solo completed
     assert data["averageTicket"] == 100.0  # 100 / 1 completada
     assert data["pendingOrdersCount"] == 1  # confirmed (approved: 0)
-    assert data["cancellationRate"] == 0.25  # 1 / 4
-    assert data["expiryRate"] == 0.25  # 1 / 4
-    assert data["activeClientsCount"] == 3  # clientes 1, 2, 3 distintos
+    assert data["cancellationRate"] == round(1 / 3, 4)  # 1 / 3
+    assert data["activeClientsCount"] == 2  # clientes 1 y 2 distintos
 
 
 def test_summary_efficiency_is_area_weighted_and_ignores_edge_banding(
@@ -258,7 +254,7 @@ def test_breakdown_status_densifies_all_states(client, db_session):
     ]
 
     assert data["dimension"] == "status"
-    assert len(data["items"]) == 9  # todos los OrderStatus
+    assert len(data["items"]) == 6  # todos los OrderStatus
     by_key = {it["key"]: it for it in data["items"]}
     assert by_key["completed"]["orderCount"] == 2
     assert by_key["completed"]["revenue"] == 300.0
@@ -272,7 +268,7 @@ def test_breakdown_status_empty_range(client):
     data = client.get("/api/v1/analytics/breakdown/status", params=_RANGE).json()[
         "data"
     ]
-    assert len(data["items"]) == 9
+    assert len(data["items"]) == 6
     assert all(it["orderCount"] == 0 and it["revenue"] == 0 for it in data["items"])
 
 
@@ -302,41 +298,9 @@ def test_operations_lifecycle_dwell_times(client, db_session):
     assert cycle[("approved", "in_production")]["avgHours"] == 3.0
 
 
-def test_operations_expiry_before_approval_rate(client, db_session):
-    # A: confirmed → expired (sin aprobar) → numerador.
-    _seed_order(
-        db_session,
-        status="expired",
-        history=[
-            _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
-            _hist("expired", datetime(2026, 6, 16, 0, 0), from_status="confirmed"),
-        ],
-    )
-    # B: confirmed → approved → expired → no cuenta (llegó a approved).
-    _seed_order(
-        db_session,
-        status="expired",
-        history=[
-            _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
-            _hist("approved", datetime(2026, 6, 15, 1, 0), from_status="confirmed"),
-            _hist("expired", datetime(2026, 6, 16, 0, 0), from_status="approved"),
-        ],
-    )
-    # C: solo confirmed → denominador, no numerador.
-    _seed_order(
-        db_session,
-        status="confirmed",
-        history=[_hist("confirmed", datetime(2026, 6, 15, 0, 0))],
-    )
-
-    data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
-    assert data["expiryBeforeApprovalRate"] == round(1 / 3, 4)
-
-
 def test_operations_empty_range(client):
     data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
     assert data["averageEfficiency"] == 0
     assert data["totalAreaCutM2"] == 0
     assert data["wasteEstimateM2"] == 0
-    assert data["expiryBeforeApprovalRate"] == 0
     assert data["lifecycle"] == []

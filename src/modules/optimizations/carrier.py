@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -15,6 +15,9 @@ class ProformaCarrier:
     reference: str
     client: object
     company: dict = field(default_factory=dict)
+    # Vigencia (días) que muestra la proforma; ``None`` la omite (p. ej. una orden
+    # ya confirmada no es una cotización vigente). La fijan los carriers de cotización.
+    validity_days: Optional[int] = None
     requirements: List[dict] = field(default_factory=list)
     materials_summary: List[dict] = field(default_factory=list)
     edge_bandings_summary: List[dict] = field(default_factory=list)
@@ -33,17 +36,24 @@ class ProformaCarrier:
 
     @classmethod
     def from_payload(
-        cls, payload: dict, client, reference: str, company: dict | None = None
+        cls,
+        payload: dict,
+        client,
+        reference: str,
+        company: dict | None = None,
+        validity_days: Optional[int] = None,
     ) -> "ProformaCarrier":
         """Construye el portador desde un payload de optimización + el cliente.
 
         ``company`` es el membrete vigente (datos de la empresa) que se renderiza en
-        vivo; no forma parte del snapshot con precio.
+        vivo; no forma parte del snapshot con precio. ``validity_days`` es la vigencia
+        de la cotización que muestra la proforma (``None`` la omite).
         """
         return cls(
             reference=reference,
             client=client,
             company=company or {},
+            validity_days=validity_days,
             requirements=payload.get("requirements") or [],
             materials_summary=payload.get("materials_summary") or [],
             edge_bandings_summary=payload.get("edge_bandings_summary") or [],

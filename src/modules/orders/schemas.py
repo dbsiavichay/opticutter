@@ -135,7 +135,6 @@ class OrderResponse(CamelModel):
     notes: Optional[str] = None
     created_at: datetime
     confirmed_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
     lines: List[OrderLineResponse] = Field(default_factory=list)
     pieces: List[OrderPieceResponse] = Field(default_factory=list)
     history: List[OrderStatusHistoryResponse] = Field(default_factory=list)
