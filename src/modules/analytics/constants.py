@@ -14,7 +14,7 @@ from src.modules.orders.model import OrderStatus
 REALIZED_STATUSES = {OrderStatus.completed}
 
 # Ingreso perdido: no se cobrará nunca.
-LOST_STATUSES = {OrderStatus.cancelled, OrderStatus.expired}
+LOST_STATUSES = {OrderStatus.cancelled}
 
 # Pipeline comprometido: vinculado pero aún no completado.
 BOOKED_STATUSES = {
@@ -24,20 +24,18 @@ BOOKED_STATUSES = {
     OrderStatus.cut,
 }
 
-# ``draft``/``quoted`` se excluyen de todo ingreso (no vinculantes; hoy las órdenes
-# nacen en ``confirmed``).
+# Pendientes (abiertas, pre-producción): vinculadas pero aún sin entrar a taller. Hoy
+# las órdenes nacen ya ``confirmed`` (la cotización mutable vive en la pre-orden).
+PENDING_STATUSES = {OrderStatus.confirmed, OrderStatus.approved}
 
 # Etiquetas legibles por estado para los desgloses (eje del embudo).
 STATUS_LABELS = {
-    OrderStatus.draft: "Borrador",
-    OrderStatus.quoted: "Cotizada",
     OrderStatus.confirmed: "Confirmada",
     OrderStatus.approved: "Aprobada",
     OrderStatus.in_production: "En producción",
     OrderStatus.cut: "Cortada",
     OrderStatus.completed: "Completada",
     OrderStatus.cancelled: "Cancelada",
-    OrderStatus.expired: "Expirada",
 }
 
 

@@ -1,6 +1,8 @@
 """Tests del plan de corte por orden: materialización, marcado táctil y gate."""
 
 from src.modules.orders.model import OrderBoardModel, OrderPlacedPieceModel
+from src.modules.orders.schemas import OrderCreate
+from src.modules.orders.service import OrderService
 
 
 def _create_client(client, identifier="0991112233", phone="0991112233"):
@@ -46,11 +48,17 @@ def _order_payload(client_id, product_id, height=400, width=600, quantity=3):
     }
 
 
-def _create_order(client, quantity=3, width=600):
+def _mint(client, db_session, payload):
+    """Mintea una orden por el servicio (la creación HTTP se retiró) y la lee vía GET."""
+    order = OrderService(db_session).create(OrderCreate.model_validate(payload))
+    return client.get(f"/api/v1/orders/{order.id}").json()["data"]
+
+
+def _create_order(client, db_session, quantity=3, width=600):
     c = _create_client(client)
     b = _create_board(client)
     payload = _order_payload(c["id"], b["id"], quantity=quantity, width=width)
-    return client.post("/api/v1/orders/", json=payload).json()["data"]
+    return _mint(client, db_session, payload)
 
 
 def _to_production(client, order_id):
@@ -69,9 +77,9 @@ def _get_plan(client, order_id):
     return resp.json()["data"]
 
 
-def test_create_order_materializes_cutting_plan(client):
+def test_create_order_materializes_cutting_plan(client, db_session):
     """Crear la orden expande el snapshot en tableros físicos y piezas colocadas."""
-    order = _create_order(client, quantity=3)
+    order = _create_order(client, db_session, quantity=3)
     plan = _get_plan(client, order["id"])
 
     assert plan["orderId"] == order["id"]
@@ -116,9 +124,9 @@ def test_cutting_plan_unknown_order_returns_404(client):
     assert resp.status_code == 404
 
 
-def test_mark_piece_requires_in_production(client):
+def test_mark_piece_requires_in_production(client, db_session):
     """Antes de producción no hay nada que cortar: marcar da 422."""
-    order = _create_order(client)
+    order = _create_order(client, db_session)
     piece_id = _get_plan(client, order["id"])["boards"][0]["pieces"][0]["id"]
 
     resp = client.patch(
@@ -129,8 +137,8 @@ def test_mark_piece_requires_in_production(client):
     assert "producción" in resp.json()["errors"][0]["message"]
 
 
-def test_mark_and_unmark_piece_updates_progress(client):
-    order = _create_order(client, quantity=3)
+def test_mark_and_unmark_piece_updates_progress(client, db_session):
+    order = _create_order(client, db_session, quantity=3)
     _to_production(client, order["id"])
     piece_id = _get_plan(client, order["id"])["boards"][0]["pieces"][0]["id"]
     url = f"/api/v1/orders/{order['id']}/cutting-plan/pieces/{piece_id}"
@@ -152,16 +160,12 @@ def test_mark_and_unmark_piece_updates_progress(client):
     assert undone["progress"] == {"cutPieces": 0, "totalPieces": 3}
 
 
-def test_mark_piece_of_another_order_returns_404(client):
+def test_mark_piece_of_another_order_returns_404(client, db_session):
     """Una pieza ajena a la orden no existe para ella (404, sin filtrar datos)."""
     c = _create_client(client)
     b = _create_board(client)
-    first = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=600)
-    ).json()["data"]
-    second = client.post(
-        "/api/v1/orders/", json=_order_payload(c["id"], b["id"], width=500)
-    ).json()["data"]
+    first = _mint(client, db_session, _order_payload(c["id"], b["id"], width=600))
+    second = _mint(client, db_session, _order_payload(c["id"], b["id"], width=500))
     _to_production(client, first["id"])
     foreign_piece = _get_plan(client, second["id"])["boards"][0]["pieces"][0]["id"]
 
@@ -172,9 +176,9 @@ def test_mark_piece_of_another_order_returns_404(client):
     assert resp.status_code == 404
 
 
-def test_transition_to_cut_blocked_until_all_pieces_marked(client):
+def test_transition_to_cut_blocked_until_all_pieces_marked(client, db_session):
     """Gate de producción: in_production → cut exige el plan de corte completo."""
-    order = _create_order(client, quantity=3)
+    order = _create_order(client, db_session, quantity=3)
     _to_production(client, order["id"])
     pieces = _get_plan(client, order["id"])["boards"][0]["pieces"]
 
@@ -202,7 +206,7 @@ def test_transition_to_cut_blocked_until_all_pieces_marked(client):
 
 def test_lazy_materialization_for_legacy_orders(client, db_session):
     """Órdenes previas a la feature reconstruyen el plan desde el snapshot."""
-    order = _create_order(client, quantity=2)
+    order = _create_order(client, db_session, quantity=2)
 
     # Simula una orden creada antes de la feature: sin filas de plan de corte.
     db_session.query(OrderPlacedPieceModel).delete()

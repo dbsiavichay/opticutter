@@ -1,5 +1,7 @@
 """Tests del módulo settings: configuración única persistida y editable vía API."""
 
+from datetime import datetime
+
 from src.shared.config import config
 
 
@@ -86,6 +88,61 @@ def test_cutting_settings_drive_optimization(client):
     second = client.post("/api/v1/optimize/", json=payload).json()["data"]
 
     assert first["optimizationHash"] != second["optimizationHash"]
+
+
+# --- Pre-órdenes (cotización mutable) -----------------------------------------
+def test_get_preorders_seeds_from_config(client):
+    """El primer GET siembra la sección preorders con los defaults de ``config``."""
+    resp = client.get("/api/v1/settings/preorders")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["preorderValidityDays"] == config.PREORDER_VALIDITY_DAYS
+    assert data["maxOpenPreordersPerClient"] == config.MAX_OPEN_PREORDERS_PER_CLIENT
+
+
+def test_patch_preorders_persists_and_is_partial(client):
+    """El PATCH parcial persiste solo lo enviado y no pisa el resto."""
+    before = client.get("/api/v1/settings/preorders").json()["data"]
+
+    resp = client.patch("/api/v1/settings/preorders", json={"preorderValidityDays": 30})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["preorderValidityDays"] == 30
+
+    after = client.get("/api/v1/settings/preorders").json()["data"]
+    assert after["preorderValidityDays"] == 30
+    # El tope queda intacto.
+    assert after["maxOpenPreordersPerClient"] == before["maxOpenPreordersPerClient"]
+
+
+def test_patch_preorders_rejects_below_one(client):
+    """Validación: vigencia y tope deben ser ≥ 1 (422)."""
+    assert (
+        client.patch(
+            "/api/v1/settings/preorders", json={"preorderValidityDays": 0}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.patch(
+            "/api/v1/settings/preorders", json={"maxOpenPreordersPerClient": 0}
+        ).status_code
+        == 422
+    )
+
+
+def test_preorder_validity_comes_from_settings(client):
+    """La pre-orden toma su vigencia de settings (no de env): el gap = días config."""
+    created_client = _create_client(client)
+    board = _create_board(client)
+
+    client.patch("/api/v1/settings/preorders", json={"preorderValidityDays": 7})
+    pre = client.post(
+        "/api/v1/preorders/", json=_optimize_payload(created_client["id"], board["id"])
+    ).json()["data"]
+
+    created = datetime.fromisoformat(pre["createdAt"])
+    expires = datetime.fromisoformat(pre["expiresAt"])
+    assert (expires - created).days == 7
 
 
 # --- Datos de la empresa ------------------------------------------------------

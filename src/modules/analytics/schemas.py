@@ -30,7 +30,6 @@ class AnalyticsSummary(CamelModel):
     # Estados / pipeline.
     pending_orders_count: int
     cancellation_rate: float  # 0..1
-    expiry_rate: float  # 0..1
     # Tendencia base.
     order_count: int
     realized_revenue: float
@@ -86,5 +85,4 @@ class OperationsReport(CamelModel):
     average_efficiency: float
     total_area_cut_m2: float
     waste_estimate_m2: float
-    expiry_before_approval_rate: float
     lifecycle: List[DwellTime]

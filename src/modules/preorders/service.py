@@ -14,7 +14,7 @@ from src.modules.preorders.model import (
     PreOrderStatus,
 )
 from src.modules.preorders.schemas import PreOrderCreate, PreOrderUpdate
-from src.shared.config import config
+from src.modules.settings.service import SettingsService
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
 
@@ -33,6 +33,7 @@ class PreOrderService:
     def __init__(self, db: Session):
         self.db = db
         self.optimization_service = OptimizationService(db)
+        self.settings_service = SettingsService(db)
 
     def get_or_404(self, preorder_id: int) -> PreOrderModel:
         preorder = self.db.get(PreOrderModel, preorder_id)
@@ -69,6 +70,9 @@ class PreOrderService:
             raise EntityNotFoundError("Client", data.client_id)
         self._enforce_open_cap(data.client_id)
 
+        validity_days = self.settings_service.get_preorder_config()[
+            "preorder_validity_days"
+        ]
         now = datetime.utcnow()
         preorder = PreOrderModel(
             client_id=data.client_id,
@@ -78,7 +82,7 @@ class PreOrderService:
             source=data.source,
             notes=data.notes,
             created_at=now,
-            expires_at=now + timedelta(days=config.PREORDER_VALIDITY_DAYS),
+            expires_at=now + timedelta(days=validity_days),
         )
         self.db.add(preorder)
         self.db.flush()  # asigna id para componer el code legible
@@ -143,13 +147,16 @@ class PreOrderService:
         return self.optimization_service.optimize_response(self.build_request(preorder))
 
     def build_carrier(self, preorder: PreOrderModel) -> ProformaCarrier:
-        """Portador de proforma (PDF) recalculado para la pre-orden."""
+        """Portador de proforma (PDF) recalculado para la pre-orden (cotización)."""
         payload, _ = self.compute_payload(preorder)
         return ProformaCarrier.from_payload(
             payload,
             preorder.client,
             reference=preorder.code or f"PRE-{preorder.id:06d}",
-            company=self.optimization_service.settings_service.get_company(),
+            company=self.settings_service.get_company(),
+            validity_days=self.settings_service.get_preorder_config()[
+                "preorder_validity_days"
+            ],
         )
 
     def _ensure_open(self, preorder: PreOrderModel) -> None:
@@ -196,7 +203,10 @@ class PreOrderService:
         if any([self._expire_if_stale(p) for p in candidates]):
             self.db.commit()
         active = sum(1 for p in candidates if p.status in _OPEN_VALUES)
-        if active >= config.MAX_OPEN_PREORDERS_PER_CLIENT:
+        cap = self.settings_service.get_preorder_config()[
+            "max_open_preorders_per_client"
+        ]
+        if active >= cap:
             raise BusinessRuleError(
                 f"El cliente ya tiene {active} pre-orden(es) abierta(s); "
                 "ciérrelas o espere a que expiren antes de crear otra."

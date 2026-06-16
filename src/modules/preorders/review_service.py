@@ -85,10 +85,13 @@ class PreOrderReviewService:
             if previous.status == ReviewLinkStatus.active.value:
                 previous.status = ReviewLinkStatus.revoked.value
 
+        validity_days = self.preorders.settings_service.get_preorder_config()[
+            "preorder_validity_days"
+        ]
         now = datetime.utcnow()
         preorder.status = PreOrderStatus.sent.value
         preorder.sent_at = now
-        preorder.expires_at = now + timedelta(days=config.PREORDER_VALIDITY_DAYS)
+        preorder.expires_at = now + timedelta(days=validity_days)
 
         raw_token = secrets.token_urlsafe(32)
         link = PreOrderReviewLinkModel(

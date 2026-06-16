@@ -9,42 +9,31 @@ from src.shared.database import Base
 
 
 class OrderStatus(str, Enum):
-    """Estados del proceso comercial de una orden."""
+    """Estados del proceso productivo de una orden.
 
-    draft = "draft"
-    quoted = "quoted"
+    La revisión previa del cliente (cotización mutable) vive en la pre-orden; una
+    orden nace ya ``confirmed`` y desde ahí sólo avanza por producción.
+    """
+
     confirmed = "confirmed"
     approved = "approved"
     in_production = "in_production"
     cut = "cut"
     completed = "completed"
     cancelled = "cancelled"
-    expired = "expired"
 
 
 # Estados sin salida: la orden ya no se transforma.
-TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled, OrderStatus.expired}
-
-# Pendientes (abiertas, pre-producción): cuentan para el tope antiabuso por cliente
-# y para el barrido perezoso de vigencia. La revisión previa del cliente ahora vive
-# en la pre-orden, así que una orden nace ya ``confirmed`` (sin estado ``quoted``).
-PENDING_STATUSES = {OrderStatus.confirmed, OrderStatus.approved}
+TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled}
 
 # Mapa de transiciones válidas de la máquina de estados (ver diseño §7.2).
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
-    OrderStatus.draft: {OrderStatus.quoted, OrderStatus.cancelled},
-    OrderStatus.quoted: {
-        OrderStatus.confirmed,
-        OrderStatus.expired,
-        OrderStatus.cancelled,
-    },
     OrderStatus.confirmed: {OrderStatus.approved, OrderStatus.cancelled},
     OrderStatus.approved: {OrderStatus.in_production, OrderStatus.cancelled},
     OrderStatus.in_production: {OrderStatus.cut},
     OrderStatus.cut: {OrderStatus.completed},
     OrderStatus.completed: set(),
     OrderStatus.cancelled: set(),
-    OrderStatus.expired: set(),
 }
 
 
@@ -74,7 +63,6 @@ class OrderModel(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
     lines: Mapped[list["OrderLineModel"]] = relationship(

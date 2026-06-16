@@ -5,6 +5,8 @@ from src.modules.settings.schemas import (
     CompanySettingsUpdate,
     CuttingSettingsResponse,
     CuttingSettingsUpdate,
+    PreOrderSettingsResponse,
+    PreOrderSettingsUpdate,
 )
 from src.modules.settings.service import SettingsService, settings_service
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
@@ -24,6 +26,20 @@ def update_cutting_settings(
 ):
     """Actualiza (parcialmente) los parámetros de corte."""
     return ok(svc.update_cutting(data))
+
+
+@router.get("/preorders", response_model=DataResponse[PreOrderSettingsResponse])
+def get_preorder_settings(svc: SettingsService = Depends(settings_service)):
+    """Devuelve la config de pre-órdenes vigente (sembrada desde config si falta)."""
+    return ok(svc.get_or_init())
+
+
+@router.patch("/preorders", response_model=DataResponse[PreOrderSettingsResponse])
+def update_preorder_settings(
+    data: PreOrderSettingsUpdate, svc: SettingsService = Depends(settings_service)
+):
+    """Actualiza (parcialmente) la vigencia y el tope de pre-órdenes."""
+    return ok(svc.update_preorders(data))
 
 
 @router.get("/company", response_model=DataResponse[CompanySettingsResponse])
