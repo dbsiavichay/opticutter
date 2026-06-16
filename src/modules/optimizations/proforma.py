@@ -247,7 +247,7 @@ class ProformaService:
         logo.hAlign = "LEFT"
 
         header_table = Table(
-            [[logo, ProformaService._build_contact_block(styles)]],
+            [[logo, ProformaService._build_contact_block(carrier, styles)]],
             colWidths=[CONTENT_WIDTH * 0.38, CONTENT_WIDTH * 0.62],
         )
         header_table.setStyle(
@@ -317,8 +317,12 @@ class ProformaService:
         return [header_table, rule, title_bar]
 
     @staticmethod
-    def _build_contact_block(styles) -> Table:
-        """Bloque de contacto con iconos: WhatsApp, correo y sucursales."""
+    def _build_contact_block(carrier: ProformaCarrier, styles) -> Table:
+        """Bloque de contacto con iconos: WhatsApp, correo y sucursales.
+
+        Lee los datos de la empresa (membrete) en vivo desde ``carrier.company``.
+        """
+        company = carrier.company or {}
         text_style = ParagraphStyle(
             "Contact",
             parent=styles["Normal"],
@@ -332,14 +336,14 @@ class ProformaService:
         rows = [
             [
                 _scaled_image(ICON_WHATSAPP, icon_w),
-                Paragraph(config.COMPANY_PHONE, text_style),
+                Paragraph(company.get("phone", ""), text_style),
             ],
             [
                 _scaled_image(ICON_EMAIL, icon_w),
-                Paragraph(config.COMPANY_EMAIL, text_style),
+                Paragraph(company.get("email", ""), text_style),
             ],
         ]
-        for branch in config.COMPANY_BRANCHES:
+        for branch in company.get("branches") or []:
             rows.append(
                 [
                     _scaled_image(ICON_ADDRESS, icon_w),

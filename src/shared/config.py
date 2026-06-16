@@ -61,7 +61,9 @@ class Config:
         env("SECRET_KEY") if ENVIRONMENT == "production" else env("SECRET_KEY", "")
     )
 
-    # Parámetros de corte (mm)
+    # Parámetros de corte (mm). Solo siembran la fila singleton de `settings` en su
+    # primera lectura; la fuente de verdad en runtime es la tabla `settings`
+    # (editable vía PATCH /settings/cutting).
     KERF = env.float("KERF", 5.0)
     TOP_TRIM = env.float("TOP_TRIM", 0.0)
     BOTTOM_TRIM = env.float("BOTTOM_TRIM", 0.0)
@@ -87,8 +89,9 @@ class Config:
     # usa HashRouter, por eso la base termina en "/#" (ruta = {base}/review/{token}).
     FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3001/#")
 
-    # Datos de la empresa (membrete de la proforma). Valores dummy por defecto;
-    # los reales se definen en el .env.
+    # Datos de la empresa (membrete de la proforma). Valores dummy por defecto que
+    # solo siembran la fila singleton de `settings` en su primera lectura; la fuente
+    # de verdad en runtime es la tabla `settings` (editable vía PATCH /settings/company).
     COMPANY_NAME = env("COMPANY_NAME", "Mi Empresa")
     COMPANY_TAGLINE = env("COMPANY_TAGLINE", "eslogan de la empresa")
     COMPANY_EMAIL = env("COMPANY_EMAIL", "correo@empresa.com")

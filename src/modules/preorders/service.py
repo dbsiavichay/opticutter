@@ -149,6 +149,7 @@ class PreOrderService:
             payload,
             preorder.client,
             reference=preorder.code or f"PRE-{preorder.id:06d}",
+            company=self.optimization_service.settings_service.get_company(),
         )
 
     def _ensure_open(self, preorder: PreOrderModel) -> None:

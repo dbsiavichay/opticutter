@@ -14,6 +14,7 @@ class ProformaCarrier:
 
     reference: str
     client: object
+    company: dict = field(default_factory=dict)
     requirements: List[dict] = field(default_factory=list)
     materials_summary: List[dict] = field(default_factory=list)
     edge_bandings_summary: List[dict] = field(default_factory=list)
@@ -31,11 +32,18 @@ class ProformaCarrier:
         return round(self.total_boards_cost + self.total_edge_banding_cost, 2)
 
     @classmethod
-    def from_payload(cls, payload: dict, client, reference: str) -> "ProformaCarrier":
-        """Construye el portador desde un payload de optimización + el cliente."""
+    def from_payload(
+        cls, payload: dict, client, reference: str, company: dict | None = None
+    ) -> "ProformaCarrier":
+        """Construye el portador desde un payload de optimización + el cliente.
+
+        ``company`` es el membrete vigente (datos de la empresa) que se renderiza en
+        vivo; no forma parte del snapshot con precio.
+        """
         return cls(
             reference=reference,
             client=client,
+            company=company or {},
             requirements=payload.get("requirements") or [],
             materials_summary=payload.get("materials_summary") or [],
             edge_bandings_summary=payload.get("edge_bandings_summary") or [],
@@ -49,15 +57,18 @@ class ProformaCarrier:
         )
 
     @classmethod
-    def from_order(cls, order) -> "ProformaCarrier":
+    def from_order(cls, order, company: dict | None = None) -> "ProformaCarrier":
         """Construye el portador desde una orden (snapshot + precios congelados).
 
         El desglose (tableros vs tapacantos) se toma del snapshot inmutable; el
-        gran total congelado vive en ``order.total`` (= tableros + tapacantos).
+        gran total congelado vive en ``order.total`` (= tableros + tapacantos). El
+        membrete (``company``) se renderiza en vivo, no se congela en el snapshot.
         """
         snapshot = order.optimization_snapshot or {}
         reference = order.code or f"ORD-{order.id:06d}"
-        carrier = cls.from_payload(snapshot, order.client, reference=reference)
+        carrier = cls.from_payload(
+            snapshot, order.client, reference=reference, company=company
+        )
         # La orden congela el conteo de tableros al confirmar.
         carrier.total_boards_used = order.total_boards_used
         return carrier

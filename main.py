@@ -13,6 +13,7 @@ from src.modules.orders.router import router as orders_router
 from src.modules.preorders.public_router import router as preorders_public_router
 from src.modules.preorders.router import router as preorders_router
 from src.modules.products.router import router as products_router
+from src.modules.settings.router import router as settings_router
 from src.modules.system.router import router as system_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
@@ -69,6 +70,7 @@ app.include_router(orders_router, prefix="/api/v1")
 app.include_router(preorders_router, prefix="/api/v1")
 app.include_router(preorders_public_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
+app.include_router(settings_router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -30,8 +30,8 @@ from src.modules.optimizations.schemas import (
 )
 from src.modules.products.model import ProductModel, ProductType
 from src.modules.products.service import ProductService
+from src.modules.settings.service import SettingsService
 from src.shared.cache import cache
-from src.shared.config import config
 from src.shared.database import get_db
 from src.shared.exceptions import (
     BusinessRuleError,
@@ -60,6 +60,7 @@ class OptimizationService:
         self.db = db
         self.product_service = ProductService(db)
         self.material_resolver = MaterialResolver(db)
+        self.settings_service = SettingsService(db)
 
     def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
         """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``.
@@ -109,7 +110,10 @@ class OptimizationService:
             raise EntityNotFoundError("Client", client_id)
         require_phone(client)
         return ProformaCarrier.from_payload(
-            payload, client, reference=f"OPT-{optimization_hash[:8]}"
+            payload,
+            client,
+            reference=f"OPT-{optimization_hash[:8]}",
+            company=self.settings_service.get_company(),
         )
 
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
@@ -127,13 +131,15 @@ class OptimizationService:
             request.requirements
         )
 
+        settings = self.settings_service.get_or_init()
         cutting_params = CuttingParameters(
-            kerf=config.KERF,
-            top_trim=config.TOP_TRIM,
-            bottom_trim=config.BOTTOM_TRIM,
-            left_trim=config.LEFT_TRIM,
-            right_trim=config.RIGHT_TRIM,
+            kerf=settings.kerf,
+            top_trim=settings.top_trim,
+            bottom_trim=settings.bottom_trim,
+            left_trim=settings.left_trim,
+            right_trim=settings.right_trim,
         )
+        waste_factor = settings.edge_banding_waste_factor
 
         # Resuelve a dimensiones+costo solo los materiales realmente referenciados,
         # agnóstico al origen (catálogo/retazo/manual). Aquí vive el único punto que
@@ -147,7 +153,7 @@ class OptimizationService:
         eb_products = self._resolve_edge_banding_products(request.requirements)
 
         optimization_hash = self._compute_hash(
-            request, cutting_params, resolved, eb_products
+            request, cutting_params, resolved, eb_products, waste_factor
         )
 
         cached = cache.get_json(optimization_hash)
@@ -166,7 +172,9 @@ class OptimizationService:
             for key, reqs in requirements_by_key.items()
         ]
 
-        payload = self._build_result_payload(request, results, resolved, eb_products)
+        payload = self._build_result_payload(
+            request, results, resolved, eb_products, waste_factor
+        )
         cache.set_json(optimization_hash, payload)
         return payload, optimization_hash
 
@@ -201,6 +209,7 @@ class OptimizationService:
         cutting_params: CuttingParameters,
         resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
+        waste_factor: float,
     ) -> str:
         """Hash sha256 determinista de las entradas que afectan el resultado.
 
@@ -231,7 +240,7 @@ class OptimizationService:
                 "bottom_trim": cutting_params.bottom_trim,
                 "left_trim": cutting_params.left_trim,
                 "right_trim": cutting_params.right_trim,
-                "edge_banding_waste_factor": config.EDGE_BANDING_WASTE_FACTOR,
+                "edge_banding_waste_factor": waste_factor,
             },
             "edge_prices": edge_prices,
         }
@@ -365,6 +374,7 @@ class OptimizationService:
         self,
         requirements: List[Requirement],
         eb_products: Dict[int, ProductModel],
+        waste_factor: float,
     ) -> Tuple[List[dict], float]:
         """Agrega el metraje de tapacanto por tipo y devuelve ``(summary, total)``.
 
@@ -373,7 +383,7 @@ class OptimizationService:
         independiente de la rotación. Se aplica la merma configurada y se redondea
         al metro entero que se cobra.
         """
-        waste = config.EDGE_BANDING_WASTE_FACTOR
+        waste = waste_factor
         net_mm: Dict[int, float] = defaultdict(float)
         for req in requirements:
             spec = req.edge_banding
@@ -492,6 +502,7 @@ class OptimizationService:
         results: List[Tuple[List[Requirement], List[CuttingLayout]]],
         resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
+        waste_factor: float,
     ) -> dict:
         """Arma el payload cacheable/serializable del resultado de optimización.
 
@@ -531,7 +542,9 @@ class OptimizationService:
                 layout_dicts.append(layout_dict)
 
         edge_bandings_summary, total_edge_banding_cost = (
-            self._build_edge_bandings_summary(request.requirements, eb_products)
+            self._build_edge_bandings_summary(
+                request.requirements, eb_products, waste_factor
+            )
         )
         return {
             "total_boards_used": total_boards_used,
