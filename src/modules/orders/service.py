@@ -105,11 +105,8 @@ class OrderService:
         total_edge_banding_cost = payload.get("total_edge_banding_cost", 0.0)
         grand_total = round(total_boards_cost + total_edge_banding_cost, 2)
 
-        # Estado de nacimiento: 'confirmed' (flujo directo, default) congela la
-        # confirmación ya; 'quoted' deja la cotización abierta a revisión del
-        # cliente (expires_at = vigencia de la cotización).
-        born_quoted = data.status == OrderStatus.quoted
-
+        # La orden nace 'confirmed' (la revisión previa del cliente, antes 'quoted',
+        # vive ahora en la pre-orden, que mintea esta orden al confirmar).
         now = datetime.utcnow()
         order = OrderModel(
             client_id=data.client_id,
@@ -123,7 +120,7 @@ class OrderService:
             source=data.source,
             notes=data.notes,
             created_at=now,
-            confirmed_at=None if born_quoted else now,
+            confirmed_at=now,
             expires_at=now + timedelta(days=config.ORDER_VALIDITY_DAYS),
         )
         # Líneas de cobro = tableros usados + tapacantos (productos consumidos).
@@ -176,8 +173,8 @@ class OrderService:
             OrderStatusHistoryModel(
                 from_status=None,
                 to_status=data.status.value,
-                actor="sales" if born_quoted else "system",
-                note="Cotización creada" if born_quoted else "Orden creada",
+                actor="system",
+                note="Orden creada",
             )
         ]
 

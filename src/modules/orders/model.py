@@ -26,8 +26,9 @@ class OrderStatus(str, Enum):
 TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled, OrderStatus.expired}
 
 # Pendientes (abiertas, pre-producción): cuentan para el tope antiabuso por cliente
-# y para el barrido perezoso de vigencia (una cotización vence igual que una orden).
-PENDING_STATUSES = {OrderStatus.quoted, OrderStatus.confirmed, OrderStatus.approved}
+# y para el barrido perezoso de vigencia. La revisión previa del cliente ahora vive
+# en la pre-orden, así que una orden nace ya ``confirmed`` (sin estado ``quoted``).
+PENDING_STATUSES = {OrderStatus.confirmed, OrderStatus.approved}
 
 # Mapa de transiciones válidas de la máquina de estados (ver diseño §7.2).
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
@@ -45,14 +46,6 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.cancelled: set(),
     OrderStatus.expired: set(),
 }
-
-
-class ReviewLinkStatus(str, Enum):
-    """Estados de un enlace de revisión del cliente."""
-
-    active = "active"
-    used = "used"
-    revoked = "revoked"
 
 
 class OrderModel(Base):
@@ -95,12 +88,6 @@ class OrderModel(Base):
         back_populates="order",
         cascade="all, delete-orphan",
         order_by="OrderStatusHistoryModel.id",
-    )
-    review_links: Mapped[list["OrderReviewLinkModel"]] = relationship(
-        "OrderReviewLinkModel",
-        back_populates="order",
-        cascade="all, delete-orphan",
-        order_by="OrderReviewLinkModel.id",
     )
     boards: Mapped[list["OrderBoardModel"]] = relationship(
         "OrderBoardModel",
@@ -236,35 +223,6 @@ class OrderPlacedPieceModel(Base):
     order: Mapped["OrderModel"] = relationship("OrderModel")
     board: Mapped["OrderBoardModel"] = relationship(
         "OrderBoardModel", back_populates="pieces"
-    )
-
-
-class OrderReviewLinkModel(Base):
-    """Enlace seguro de revisión del cliente (el token es la credencial).
-
-    Solo se persiste el sha256 del token; el token crudo se devuelve una única
-    vez al generarlo y es irrecuperable (perderlo = regenerar, lo que revoca el
-    anterior). Un solo enlace ``active`` por orden, garantizado en el servicio.
-    """
-
-    __tablename__ = "order_review_links"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    status: Mapped[str] = mapped_column(
-        String(16), default=ReviewLinkStatus.active.value
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    # Espejo de order.expires_at al generar (defensa en profundidad; la vigencia
-    # de la orden es el mecanismo primario de expiración).
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # Auditoría de la acción del cliente: {"action", "ip", "user_agent", "note"}.
-    used_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-
-    order: Mapped["OrderModel"] = relationship(
-        "OrderModel", back_populates="review_links"
     )
 
 
