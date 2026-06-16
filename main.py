@@ -9,8 +9,9 @@ from src.modules.analytics.router import router as analytics_router
 from src.modules.clients.router import router as clients_router
 from src.modules.optimization_drafts.router import router as optimization_drafts_router
 from src.modules.optimizations.router import router as optimizations_router
-from src.modules.orders.public_router import router as orders_public_router
 from src.modules.orders.router import router as orders_router
+from src.modules.preorders.public_router import router as preorders_public_router
+from src.modules.preorders.router import router as preorders_router
 from src.modules.products.router import router as products_router
 from src.modules.system.router import router as system_router
 from src.shared.config import config
@@ -65,7 +66,8 @@ app.include_router(clients_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")
 app.include_router(optimization_drafts_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
-app.include_router(orders_public_router, prefix="/api/v1")
+app.include_router(preorders_router, prefix="/api/v1")
+app.include_router(preorders_public_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 
 
