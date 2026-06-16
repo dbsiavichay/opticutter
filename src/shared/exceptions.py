@@ -34,6 +34,20 @@ class ConflictError(AppError):
     code = "CONFLICT"
 
 
+class AuthenticationError(AppError):
+    """Credenciales ausentes o inválidas (no autenticado)."""
+
+    status_code = 401
+    code = "UNAUTHORIZED"
+
+
+class AuthorizationError(AppError):
+    """Autenticado pero sin permiso para la acción (rol insuficiente)."""
+
+    status_code = 403
+    code = "FORBIDDEN"
+
+
 class BusinessRuleError(AppError):
     """Se violó una regla de negocio."""
 

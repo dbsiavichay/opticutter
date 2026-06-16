@@ -58,8 +58,22 @@ class Config:
     )
 
     SECRET_KEY = (
-        env("SECRET_KEY") if ENVIRONMENT == "production" else env("SECRET_KEY", "")
+        env("SECRET_KEY")
+        if ENVIRONMENT == "production"
+        else env("SECRET_KEY", "dev-secret-change-me")
     )
+
+    # JWT (autenticación). HS256 firma con SECRET_KEY; el access token expira a los
+    # ACCESS_TOKEN_EXPIRE_MINUTES. En producción SECRET_KEY es obligatorio (arriba);
+    # en otros entornos cae a un placeholder de desarrollo.
+    JWT_ALGORITHM = env("JWT_ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 480)
+
+    # Semilla del primer administrador (migración idempotente). Si ambos están
+    # definidos y no existe un usuario con ese email, la migración lo crea con rol
+    # "administrador". Vacíos = no se siembra nada.
+    ADMIN_EMAIL = env("ADMIN_EMAIL", "")
+    ADMIN_PASSWORD = env("ADMIN_PASSWORD", "")
 
     # Parámetros de corte (mm). Solo siembran la fila singleton de `settings` en su
     # primera lectura; la fuente de verdad en runtime es la tabla `settings`
