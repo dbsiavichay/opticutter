@@ -14,6 +14,7 @@ import src.modules.orders.model  # noqa: F401,E402
 import src.modules.preorders.model  # noqa: F401,E402
 import src.modules.products.model  # noqa: F401,E402
 import src.modules.settings.model  # noqa: F401,E402
+import src.modules.users.model  # noqa: F401,E402
 from main import app
 from src.shared.cache import cache
 from src.shared.database import Base, get_db

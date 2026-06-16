@@ -15,6 +15,8 @@ from src.modules.preorders.router import router as preorders_router
 from src.modules.products.router import router as products_router
 from src.modules.settings.router import router as settings_router
 from src.modules.system.router import router as system_router
+from src.modules.users.auth_router import router as auth_router
+from src.modules.users.router import router as users_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
 from src.shared.middleware import RequestIDMiddleware
@@ -62,6 +64,8 @@ register_exception_handlers(app)
 
 # Incluir rutas
 app.include_router(system_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 app.include_router(products_router, prefix="/api/v1")
 app.include_router(clients_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")

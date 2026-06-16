@@ -1,0 +1,68 @@
+from typing import List, Optional, Tuple
+
+from fastapi import Depends
+from sqlalchemy.orm import Session
+
+from src.modules.users.enums import UserRole
+from src.modules.users.model import UserModel
+from src.modules.users.schemas import UserCreate, UserUpdate
+from src.shared.crud import CRUDService
+from src.shared.database import get_db
+from src.shared.security import hash_password, verify_password
+
+
+class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
+    """CRUD de usuarios + autenticación. Hashea la contraseña al crear/actualizar."""
+
+    model = UserModel
+    conflict_messages = {"email": "El email ya está registrado"}
+
+    def create(self, data: UserCreate) -> UserModel:
+        """Crea un usuario hasheando la contraseña; nunca la persiste en claro."""
+        payload = data.model_dump(exclude={"password", "role"})
+        user = UserModel(
+            **payload,
+            role=data.role.value,
+            hashed_password=hash_password(data.password),
+        )
+        return self._persist(user)
+
+    def update(self, id: int, data: UserUpdate) -> UserModel:
+        """Actualiza un usuario; si llega ``password`` la rehashea."""
+        obj = self.get_or_404(id)
+        changes = data.model_dump(exclude_unset=True)
+        if "password" in changes:
+            obj.hashed_password = hash_password(changes.pop("password"))
+        if changes.get("role") is not None:
+            changes["role"] = UserRole(changes["role"]).value
+        for field, value in changes.items():
+            setattr(obj, field, value)
+        return self._persist(obj)
+
+    def get_by_email(self, email: str) -> Optional[UserModel]:
+        """Obtiene un usuario por email (identificador de login)."""
+        return self.db.query(UserModel).filter(UserModel.email == email).first()
+
+    def authenticate(self, email: str, password: str) -> Optional[UserModel]:
+        """Valida credenciales; devuelve el usuario si están activas y coinciden."""
+        user = self.get_by_email(email)
+        if user is None or not user.is_active:
+            return None
+        if not verify_password(password, user.hashed_password):
+            return None
+        return user
+
+    def search_paginated(
+        self, search: str, limit: int = 20, offset: int = 0
+    ) -> Tuple[List[UserModel], int]:
+        """Busca usuarios por email o nombre; ``(items, total)``."""
+        pattern = f"%{search}%"
+        query = self.db.query(UserModel).filter(
+            UserModel.email.ilike(pattern) | UserModel.full_name.ilike(pattern)
+        )
+        return self._paginate(query, limit, offset)
+
+
+def user_service(db: Session = Depends(get_db)) -> UserService:
+    """Provider de ``UserService`` para inyección en rutas."""
+    return UserService(db)

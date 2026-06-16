@@ -80,6 +80,8 @@ def page(items: Sequence, total: int, limit: int, offset: int) -> dict:
 # el ``response_model`` genérico de cada ruta.
 ERROR_RESPONSES = {
     400: {"model": ErrorResponse, "description": "Solicitud inválida"},
+    401: {"model": ErrorResponse, "description": "No autenticado"},
+    403: {"model": ErrorResponse, "description": "Sin permiso"},
     404: {"model": ErrorResponse, "description": "Recurso no encontrado"},
     409: {"model": ErrorResponse, "description": "Conflicto de estado"},
     422: {"model": ErrorResponse, "description": "Error de validación"},

@@ -14,8 +14,10 @@ from src.modules.optimization_drafts.model import (  # noqa: F401
 )
 from src.modules.optimizations.model import OptimizationModel  # noqa: F401
 from src.modules.orders import model as orders_model  # noqa: F401
+from src.modules.preorders import model as preorders_model  # noqa: F401
 from src.modules.products.model import ProductModel  # noqa: F401
 from src.modules.settings.model import SettingsModel  # noqa: F401
+from src.modules.users.model import UserModel  # noqa: F401
 from src.shared.config import config as app_config
 from src.shared.database import Base
 
