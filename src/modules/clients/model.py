@@ -4,9 +4,10 @@ from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
-class ClientModel(Base):
+class ClientModel(TimestampMixin, AuditMixin, Base):
     """Modelo ORM para clientes."""
 
     __tablename__ = "clients"

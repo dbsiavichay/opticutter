@@ -5,6 +5,7 @@ from sqlalchemy import JSON, Boolean, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class ProductType(str, Enum):
@@ -19,7 +20,7 @@ class ProductType(str, Enum):
     HARDWARE = "hardware"  # herraje (futuro)
 
 
-class ProductModel(Base):
+class ProductModel(TimestampMixin, AuditMixin, Base):
     """Catálogo unificado: columnas comunes + ``attributes`` específicos por tipo.
 
     Lo común (``code``, ``name``, ``price``, ``type``, ``is_active``) son columnas

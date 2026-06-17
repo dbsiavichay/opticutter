@@ -30,6 +30,7 @@ from src.modules.orders.schemas import (
     PieceCutResponse,
     PlacedPieceResponse,
 )
+from src.shared.audit import Actor, system_actor
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, ConflictError, EntityNotFoundError
 
@@ -61,11 +62,13 @@ class OrderService:
         orders = query.order_by(OrderModel.id.desc()).offset(offset).limit(limit).all()
         return orders, total
 
-    def create(self, data: OrderCreate) -> OrderModel:
+    def create(self, data: OrderCreate, actor: Optional[Actor] = None) -> OrderModel:
         """Recalcula (cache-first), congela el snapshot y crea la orden.
 
         Idempotente: un re-POST idéntico devuelve la orden activa existente.
+        ``actor`` audita el origen (cliente al confirmar la pre-orden, o sistema).
         """
+        actor = actor or system_actor()
         # Regla de negocio: el cliente debe existir y tener un celular registrado
         # antes de congelar cualquier pedido (también bloquea re-POST sin celular).
         client = self.db.get(ClientModel, data.client_id)
@@ -108,6 +111,7 @@ class OrderService:
             notes=data.notes,
             created_at=now,
             confirmed_at=now,
+            created_by=actor.user_id,
         )
         # Líneas de cobro = tableros usados + tapacantos (productos consumidos).
         order.lines = [
@@ -159,7 +163,9 @@ class OrderService:
             OrderStatusHistoryModel(
                 from_status=None,
                 to_status=data.status.value,
-                actor="system",
+                actor=actor.type,
+                actor_user_id=actor.user_id,
+                actor_label=actor.label,
                 note="Orden creada",
             )
         ]
@@ -175,14 +181,15 @@ class OrderService:
         self,
         order_id: int,
         to_status: OrderStatus,
-        actor: str = "system",
+        actor: Optional[Actor] = None,
         note: Optional[str] = None,
     ) -> OrderModel:
         """Valida y aplica una transición de estado, registrando el historial.
 
         Gate de producción: pasar a ``cut`` exige que todas las piezas del plan
-        de corte estén marcadas como cortadas.
+        de corte estén marcadas como cortadas. ``actor`` audita quién la origina.
         """
+        actor = actor or system_actor()
         order = self.get_or_404(order_id)
         if (
             to_status == OrderStatus.cut
@@ -235,13 +242,19 @@ class OrderService:
         )
 
     def mark_piece_cut(
-        self, order_id: int, placed_piece_id: int, cut: bool
+        self,
+        order_id: int,
+        placed_piece_id: int,
+        cut: bool,
+        actor: Optional[Actor] = None,
     ) -> PieceCutResponse:
         """Marca (o desmarca) una pieza colocada como cortada, idempotente.
 
         Solo con la orden ``in_production``: antes no hay nada que cortar y
-        después el corte ya quedó cerrado por la transición.
+        después el corte ya quedó cerrado por la transición. ``actor`` registra
+        quién la cortó (FK + etiqueta), en sincronía con ``cut_at``.
         """
+        actor = actor or system_actor()
         order = self.get_or_404(order_id)
         self._ensure_cutting_plan(order)
         if order.status != OrderStatus.in_production.value:
@@ -253,8 +266,12 @@ class OrderService:
             raise EntityNotFoundError("OrderPlacedPiece", placed_piece_id)
         if cut and piece.cut_at is None:
             piece.cut_at = datetime.utcnow()
+            piece.cut_by = actor.user_id
+            piece.cut_by_label = actor.label
         elif not cut:
             piece.cut_at = None
+            piece.cut_by = None
+            piece.cut_by_label = None
         self.db.commit()
         self.db.refresh(piece)
         all_pieces = [p for board in order.boards for p in board.pieces]
@@ -281,7 +298,7 @@ class OrderService:
         self,
         order: OrderModel,
         to_status: OrderStatus,
-        actor: str = "system",
+        actor: Actor,
         note: Optional[str] = None,
     ) -> None:
         """Valida y aplica la transición sin commit (el llamador persiste).
@@ -298,7 +315,9 @@ class OrderService:
             OrderStatusHistoryModel(
                 from_status=current.value,
                 to_status=to_status.value,
-                actor=actor,
+                actor=actor.type,
+                actor_user_id=actor.user_id,
+                actor_label=actor.label,
                 note=note,
             )
         )
@@ -435,6 +454,8 @@ def _piece_response(piece: OrderPlacedPieceModel) -> PlacedPieceResponse:
         edges=piece.edges,
         cut=piece.cut_at is not None,
         cut_at=piece.cut_at,
+        cut_by=piece.cut_by,
+        cut_by_label=piece.cut_by_label,
     )
 
 
