@@ -416,6 +416,7 @@ def test_order_charges_edge_banding(client, db_session):
         db_session,
         {
             "clientId": c["id"],
+            "branchId": 1,
             "materials": _materials(b["id"]),
             "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },
@@ -454,6 +455,7 @@ def test_order_proforma_with_edge_banding_renders(client, db_session):
         db_session,
         {
             "clientId": c["id"],
+            "branchId": 1,
             "materials": _materials(b["id"]),
             "requirements": [_requirement(eb["id"], ["top", "bottom"])],
         },

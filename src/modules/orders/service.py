@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.patterns import base_label
@@ -31,12 +32,19 @@ from src.modules.orders.schemas import (
     PlacedPieceResponse,
 )
 from src.shared.audit import Actor, system_actor
+from src.shared.branch_scope import BranchScopedMixin
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, ConflictError, EntityNotFoundError
 
 
-class OrderService:
-    """Crea órdenes (snapshot inmutable), gestiona estados y antiabuso."""
+class OrderService(BranchScopedMixin):
+    """Crea órdenes (snapshot inmutable), gestiona estados y antiabuso.
+
+    Aislada por sucursal (``BranchScopedMixin``): los listados y accesos por id se
+    filtran por la sucursal del usuario; el administrador (scope ``None``) ve todas.
+    """
+
+    model = OrderModel
 
     def __init__(self, db: Session):
         self.db = db
@@ -51,13 +59,20 @@ class OrderService:
     def list_orders(
         self,
         status: Optional[OrderStatus] = None,
+        branch_scope: Optional[int] = None,
+        branch_filter: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[OrderModel], int]:
-        """Lista órdenes (más recientes primero) con conteo total: ``(items, total)``."""
+        """Lista órdenes (más recientes primero) con conteo total: ``(items, total)``.
+
+        ``branch_scope`` aísla al staff a su sucursal; el admin (``None``) ve todas y
+        puede estrechar a una con ``branch_filter``.
+        """
         query = self.db.query(OrderModel)
         if status is not None:
             query = query.filter(OrderModel.status == status.value)
+        query = self._apply_branch_scope(query, branch_scope, branch_filter)
         total = query.count()
         orders = query.order_by(OrderModel.id.desc()).offset(offset).limit(limit).all()
         return orders, total
@@ -75,6 +90,9 @@ class OrderService:
         if client is None:
             raise EntityNotFoundError("Client", data.client_id)
         require_phone(client)
+        # La sucursal viene del llamador de confianza (la pre-orden al confirmar);
+        # se valida que exista y esté activa. ``branch_scope=None`` ⇒ exige branchId.
+        branch_id = resolve_branch_for_create(self.db, None, data.branch_id)
 
         opt_request = OptimizeRequest(
             materials=data.materials,
@@ -87,7 +105,9 @@ class OrderService:
         # congelan tal cual el snapshot. Sus líneas/piezas quedan con ``product_id``
         # nulo y se identifican por ``product_code``/``product_name``.
 
-        existing = self._find_active_duplicate(data.client_id, optimization_hash)
+        existing = self._find_active_duplicate(
+            branch_id, data.client_id, optimization_hash
+        )
         if existing is not None:
             return existing
 
@@ -100,6 +120,7 @@ class OrderService:
         now = datetime.utcnow()
         order = OrderModel(
             client_id=data.client_id,
+            branch_id=branch_id,
             status=data.status.value,
             optimization_snapshot=payload,
             optimization_hash=optimization_hash,
@@ -183,6 +204,7 @@ class OrderService:
         to_status: OrderStatus,
         actor: Optional[Actor] = None,
         note: Optional[str] = None,
+        branch_scope: Optional[int] = None,
     ) -> OrderModel:
         """Valida y aplica una transición de estado, registrando el historial.
 
@@ -190,7 +212,7 @@ class OrderService:
         de corte estén marcadas como cortadas. ``actor`` audita quién la origina.
         """
         actor = actor or system_actor()
-        order = self.get_or_404(order_id)
+        order = self.get_scoped_or_404(order_id, branch_scope)
         if (
             to_status == OrderStatus.cut
             and order.status == OrderStatus.in_production.value
@@ -211,9 +233,11 @@ class OrderService:
         self.db.refresh(order)
         return order
 
-    def get_cutting_plan(self, order_id: int) -> CuttingPlanResponse:
+    def get_cutting_plan(
+        self, order_id: int, branch_scope: Optional[int] = None
+    ) -> CuttingPlanResponse:
         """Plan de corte para la vista de taller: tableros físicos + avance."""
-        order = self.get_or_404(order_id)
+        order = self.get_scoped_or_404(order_id, branch_scope)
         self._ensure_cutting_plan(order)
         boards = [
             OrderBoardResponse(
@@ -247,6 +271,7 @@ class OrderService:
         placed_piece_id: int,
         cut: bool,
         actor: Optional[Actor] = None,
+        branch_scope: Optional[int] = None,
     ) -> PieceCutResponse:
         """Marca (o desmarca) una pieza colocada como cortada, idempotente.
 
@@ -255,7 +280,7 @@ class OrderService:
         quién la cortó (FK + etiqueta), en sincronía con ``cut_at``.
         """
         actor = actor or system_actor()
-        order = self.get_or_404(order_id)
+        order = self.get_scoped_or_404(order_id, branch_scope)
         self._ensure_cutting_plan(order)
         if order.status != OrderStatus.in_production.value:
             raise BusinessRuleError(
@@ -324,14 +349,17 @@ class OrderService:
         order.status = to_status.value
 
     def set_external_invoice_id(
-        self, order_id: int, external_invoice_id: str
+        self,
+        order_id: int,
+        external_invoice_id: str,
+        branch_scope: Optional[int] = None,
     ) -> OrderModel:
         """Asocia (costura de facturación) el ID de la factura externa a la orden.
 
         Idempotente con el mismo ID; si ya hay otro asociado lanza ``ConflictError``
         para no pisar una factura ya emitida.
         """
-        order = self.get_or_404(order_id)
+        order = self.get_scoped_or_404(order_id, branch_scope)
         if (
             order.external_invoice_id is not None
             and order.external_invoice_id != external_invoice_id
@@ -345,9 +373,11 @@ class OrderService:
         self.db.refresh(order)
         return order
 
-    def build_export(self, order_id: int) -> OrderExportResponse:
+    def build_export(
+        self, order_id: int, branch_scope: Optional[int] = None
+    ) -> OrderExportResponse:
         """Proyecta la orden como documento de facturación neutral (cobro=tableros)."""
-        order = self.get_or_404(order_id)
+        order = self.get_scoped_or_404(order_id, branch_scope)
         lines = [
             OrderExportLine(
                 description=_line_description(line),
@@ -371,13 +401,18 @@ class OrderService:
         )
 
     def _find_active_duplicate(
-        self, client_id: int, optimization_hash: str
+        self, branch_id: int, client_id: int, optimization_hash: str
     ) -> Optional[OrderModel]:
-        """Orden no terminal del cliente con el mismo hash (idempotencia)."""
+        """Orden no terminal de la misma sucursal+cliente con igual hash (idempotencia).
+
+        Incluye la sucursal en la clave: el mismo cliente puede pedir lo mismo en dos
+        sucursales y son órdenes distintas.
+        """
         terminal = [s.value for s in TERMINAL_STATUSES]
         return (
             self.db.query(OrderModel)
             .filter(
+                OrderModel.branch_id == branch_id,
                 OrderModel.client_id == client_id,
                 OrderModel.optimization_hash == optimization_hash,
                 OrderModel.status.not_in(terminal),

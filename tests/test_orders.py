@@ -40,9 +40,14 @@ def _create_board(client, code="MEL18"):
     ).json()["data"]
 
 
+# Sucursal por defecto sembrada por conftest (id=1).
+_BRANCH = 1
+
+
 def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
     return {
         "clientId": client_id,
+        "branchId": _BRANCH,
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {
@@ -312,6 +317,7 @@ def _manual_material_payload(client_id):
     """Orden con un único material 'manual' (fuera del catálogo)."""
     return {
         "clientId": client_id,
+        "branchId": _BRANCH,
         "materials": [
             {
                 "key": "m1",
@@ -366,6 +372,7 @@ def test_create_mixed_catalog_and_offcut_order(client, db_session):
 
     payload = {
         "clientId": c["id"],
+        "branchId": _BRANCH,
         "materials": [
             {"key": "b1", "source": "catalog", "productId": b["id"]},
             {

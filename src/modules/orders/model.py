@@ -46,6 +46,9 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
+    # Sucursal dueña de la orden: hecho histórico inmutable (heredado de la pre-orden
+    # al confirmar). Mover de sucursal a un vendedor no reasigna sus órdenes pasadas.
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=OrderStatus.confirmed.value)
 
     optimization_snapshot: Mapped[dict] = mapped_column(JSON)

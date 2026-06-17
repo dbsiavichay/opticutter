@@ -23,6 +23,8 @@ class OptimizationDraftModel(TimestampMixin, AuditMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
+    # Sucursal dueña del borrador: aísla el trabajo en progreso entre sucursales.
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     client_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("clients.id"), nullable=True
     )

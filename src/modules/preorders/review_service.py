@@ -68,7 +68,10 @@ class PreOrderReviewService:
         self.orders = OrderService(db)
 
     def generate(
-        self, preorder_id: int, actor: Optional[Actor] = None
+        self,
+        preorder_id: int,
+        actor: Optional[Actor] = None,
+        branch_scope: Optional[int] = None,
     ) -> Tuple[PreOrderReviewLinkModel, str]:
         """Crea un enlace nuevo (revocando el activo previo) y devuelve el token.
 
@@ -78,7 +81,7 @@ class PreOrderReviewService:
         ``(link, token_crudo)``; el token solo existe en esta respuesta.
         """
         actor = actor or system_actor()
-        preorder = self.preorders.get_or_404(preorder_id)
+        preorder = self.preorders.get_scoped_or_404(preorder_id, branch_scope)
         if preorder.status not in {s.value for s in OPEN_STATUSES}:
             raise BusinessRuleError(
                 "Solo se puede generar un enlace de revisión para una pre-orden "
@@ -117,9 +120,11 @@ class PreOrderReviewService:
         self.db.refresh(link)
         return link, raw_token
 
-    def get_latest_info(self, preorder_id: int) -> PreOrderReviewLinkModel:
+    def get_latest_info(
+        self, preorder_id: int, branch_scope: Optional[int] = None
+    ) -> PreOrderReviewLinkModel:
         """Último enlace de la pre-orden (metadatos; nunca expone el token)."""
-        preorder = self.preorders.get_or_404(preorder_id)
+        preorder = self.preorders.get_scoped_or_404(preorder_id, branch_scope)
         if not preorder.review_links:
             raise EntityNotFoundError("ReviewLink de la pre-orden", preorder_id)
         return preorder.review_links[-1]
@@ -157,6 +162,7 @@ class PreOrderReviewService:
                 materials=preorder.materials,
                 requirements=preorder.requirements,
                 client_id=preorder.client_id,
+                branch_id=preorder.branch_id,
                 notes=preorder.notes,
                 source=preorder.source,
             ),

@@ -26,6 +26,10 @@ class OrderCreate(CamelModel):
         ..., min_length=1, description="Cut list to optimize and freeze into the order"
     )
     client_id: int = Field(..., description="Client ID placing the order")
+    branch_id: Optional[int] = Field(
+        default=None,
+        description="Owning branch (inherited from the pre-order on confirmation)",
+    )
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
     status: Literal[OrderStatus.confirmed] = Field(

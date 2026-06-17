@@ -8,6 +8,8 @@ protegerá con ``require_role(*RESOURCE_ROLES[clave])`` (ver ``dependencies.py``
 |-------------------------------|---------------|----------|----------|
 | users:manage                  | sí            | no       | no       |
 | settings:manage               | sí            | no       | no       |
+| branches:manage               | sí            | no       | no       |
+| branches:read                 | sí            | sí       | sí       |
 | clients:manage                | sí            | sí       | no       |
 | products:write                | sí            | no       | no       |
 | products:read                 | sí            | sí       | no       |
@@ -28,6 +30,10 @@ _OPERATOR = UserRole.OPERATOR
 RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     "users:manage": (_ADMIN,),
     "settings:manage": (_ADMIN,),
+    # Sucursales: solo el admin las administra (CRUD). La lectura la necesita
+    # cualquier staff para poblar selectores y mostrar el nombre de su sucursal.
+    "branches:manage": (_ADMIN,),
+    "branches:read": (_ADMIN, _SELLER, _OPERATOR),
     "clients:manage": (_ADMIN, _SELLER),
     "products:write": (_ADMIN,),
     "products:read": (_ADMIN, _SELLER),

@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from src.modules.branches.service import branch_letterhead, resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.schemas import OptimizeRequest, OptimizeResponse
@@ -17,20 +18,26 @@ from src.modules.preorders.model import (
 from src.modules.preorders.schemas import PreOrderCreate, PreOrderUpdate
 from src.modules.settings.service import SettingsService
 from src.shared.audit import Actor, system_actor
+from src.shared.branch_scope import BranchScopedMixin
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
 
 _OPEN_VALUES = [s.value for s in OPEN_STATUSES]
 
 
-class PreOrderService:
+class PreOrderService(BranchScopedMixin):
     """Gestiona pre-órdenes: CRUD mutable, recálculo cache-first y antiabuso.
 
     No congela nada: guarda los inputs (``materials`` + ``requirements``) y delega
     el cómputo en ``OptimizationService.compute`` (cache-first) cada vez que hace
     falta mostrar la cotización o el PDF. La Orden inmutable se mintea aparte, al
     confirmar el cliente (ver ``PreOrderReviewService``).
+
+    Aislada por sucursal (``BranchScopedMixin``): el staff solo ve/edita las de su
+    sucursal; el admin (scope ``None``) todas.
     """
+
+    model = PreOrderModel
 
     def __init__(self, db: Session):
         self.db = db
@@ -50,16 +57,23 @@ class PreOrderService:
         self,
         status: Optional[PreOrderStatus] = None,
         client_id: Optional[int] = None,
+        branch_scope: Optional[int] = None,
+        branch_filter: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[PreOrderModel], int]:
-        """Lista pre-órdenes (más recientes primero) con conteo: ``(items, total)``."""
+        """Lista pre-órdenes (más recientes primero) con conteo: ``(items, total)``.
+
+        ``branch_scope`` aísla al staff a su sucursal; el admin (``None``) ve todas y
+        puede estrechar con ``branch_filter``.
+        """
         self._sweep_expired()
         query = self.db.query(PreOrderModel)
         if status is not None:
             query = query.filter(PreOrderModel.status == status.value)
         if client_id is not None:
             query = query.filter(PreOrderModel.client_id == client_id)
+        query = self._apply_branch_scope(query, branch_scope, branch_filter)
         total = query.count()
         items = (
             query.order_by(PreOrderModel.id.desc()).offset(offset).limit(limit).all()
@@ -67,13 +81,21 @@ class PreOrderService:
         return items, total
 
     def create(
-        self, data: PreOrderCreate, actor: Optional[Actor] = None
+        self,
+        data: PreOrderCreate,
+        actor: Optional[Actor] = None,
+        branch_scope: Optional[int] = None,
     ) -> PreOrderModel:
-        """Crea una pre-orden abierta (``draft``) con los inputs del optimizador."""
+        """Crea una pre-orden abierta (``draft``) con los inputs del optimizador.
+
+        La sucursal se resuelve desde ``branch_scope`` (staff → la suya; admin → la
+        indicada en ``data.branch_id``). El tope antiabuso se evalúa por sucursal.
+        """
         actor = actor or system_actor()
         if self.db.get(ClientModel, data.client_id) is None:
             raise EntityNotFoundError("Client", data.client_id)
-        self._enforce_open_cap(data.client_id)
+        branch_id = resolve_branch_for_create(self.db, branch_scope, data.branch_id)
+        self._enforce_open_cap(data.client_id, branch_id)
 
         validity_days = self.settings_service.get_preorder_config()[
             "preorder_validity_days"
@@ -81,6 +103,7 @@ class PreOrderService:
         now = datetime.utcnow()
         preorder = PreOrderModel(
             client_id=data.client_id,
+            branch_id=branch_id,
             status=PreOrderStatus.draft.value,
             materials=[m.model_dump(mode="json") for m in data.materials],
             requirements=[r.model_dump(mode="json") for r in data.requirements],
@@ -101,11 +124,15 @@ class PreOrderService:
         return preorder
 
     def update(
-        self, preorder_id: int, data: PreOrderUpdate, actor: Optional[Actor] = None
+        self,
+        preorder_id: int,
+        data: PreOrderUpdate,
+        actor: Optional[Actor] = None,
+        branch_scope: Optional[int] = None,
     ) -> PreOrderModel:
         """Edita una pre-orden abierta; rechaza si ya es terminal (confirmed/etc.)."""
         actor = actor or system_actor()
-        preorder = self.get_or_404(preorder_id)
+        preorder = self.get_scoped_or_404(preorder_id, branch_scope)
         self._ensure_open(preorder)
         fields = data.model_dump(exclude_unset=True)
         if data.client_id is not None:
@@ -139,9 +166,9 @@ class PreOrderService:
         self.db.refresh(preorder)
         return preorder
 
-    def delete(self, preorder_id: int) -> None:
+    def delete(self, preorder_id: int, branch_scope: Optional[int] = None) -> None:
         """Elimina una pre-orden (salvo si ya fue confirmada: tiene una orden viva)."""
-        preorder = self.get_or_404(preorder_id)
+        preorder = self.get_scoped_or_404(preorder_id, branch_scope)
         if preorder.status == PreOrderStatus.confirmed.value:
             raise BusinessRuleError(
                 "No se puede eliminar una pre-orden ya confirmada; la orden generada "
@@ -177,6 +204,7 @@ class PreOrderService:
             validity_days=self.settings_service.get_preorder_config()[
                 "preorder_validity_days"
             ],
+            branch=branch_letterhead(self.db, preorder.branch_id),
         )
 
     def _record_transition(
@@ -237,12 +265,17 @@ class PreOrderService:
             return True
         return False
 
-    def _enforce_open_cap(self, client_id: int) -> None:
-        """Bloquea si el cliente excede el tope de pre-órdenes abiertas."""
+    def _enforce_open_cap(self, client_id: int, branch_id: int) -> None:
+        """Bloquea si el cliente excede el tope de pre-órdenes abiertas en la sucursal.
+
+        El tope se cuenta por ``(sucursal, cliente)``: un mismo cliente puede tener
+        cotizaciones abiertas en sucursales distintas sin interferir entre sí.
+        """
         candidates = (
             self.db.query(PreOrderModel)
             .filter(
                 PreOrderModel.client_id == client_id,
+                PreOrderModel.branch_id == branch_id,
                 PreOrderModel.status.in_(_OPEN_VALUES),
             )
             .all()

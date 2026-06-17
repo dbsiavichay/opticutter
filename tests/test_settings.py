@@ -28,6 +28,7 @@ def _create_board(client, code="MEL18"):
 def _optimize_payload(client_id, product_id):
     return {
         "clientId": client_id,
+        "branchId": 1,  # sucursal por defecto sembrada por conftest
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {

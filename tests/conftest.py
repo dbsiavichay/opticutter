@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Importar los modelos puebla ``Base.metadata`` antes de ``create_all``.
+import src.modules.branches.model  # noqa: F401,E402
 import src.modules.clients.model  # noqa: F401,E402
 import src.modules.optimization_drafts.model  # noqa: F401,E402
 import src.modules.optimizations.model  # noqa: F401,E402
@@ -17,6 +18,7 @@ import src.modules.settings.model  # noqa: F401,E402
 import src.modules.users.model  # noqa: F401,E402
 import src.modules.users.refresh_token_model  # noqa: F401,E402
 from main import app
+from src.modules.branches.model import BranchModel
 from src.modules.users.schemas import UserCreate
 from src.modules.users.service import UserService
 from src.shared.cache import cache
@@ -25,6 +27,10 @@ from src.shared.database import Base, get_db
 # Credenciales del admin que el cliente autenticado por defecto usa (ver ``client``).
 _CONFTEST_ADMIN_EMAIL = "conftest-admin@empresa.com"
 _CONFTEST_ADMIN_PWD = "conftest-admin-pwd"
+
+# Sucursal por defecto sembrada en cada base de prueba (primer insert ⇒ id estable).
+# Las suites la referencian al crear órdenes/pre-órdenes/borradores/usuarios staff.
+DEFAULT_BRANCH_ID = 1
 
 
 class _InMemoryRedis:
@@ -64,6 +70,10 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = TestingSession()
+    # Siembra la sucursal por defecto (id=1): el aislamiento multi-sucursal exige
+    # que órdenes/pre-órdenes/borradores y el staff cuelguen de una sucursal.
+    session.add(BranchModel(code="MATRIZ", name="Casa Matriz", is_active=True))
+    session.commit()
     try:
         yield session
     finally:

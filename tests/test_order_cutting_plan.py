@@ -33,6 +33,7 @@ def _create_board(client, code="MEL18"):
 def _order_payload(client_id, product_id, height=400, width=600, quantity=3):
     return {
         "clientId": client_id,
+        "branchId": 1,  # sucursal por defecto sembrada por conftest
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {

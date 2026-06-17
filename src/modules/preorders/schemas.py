@@ -31,6 +31,13 @@ class PreOrderCreate(CamelModel):
     client_id: int = Field(..., description="Client the quote is for")
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
+    branch_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Target branch. Ignored for branch staff (forced to their own branch); "
+            "required for a global admin."
+        ),
+    )
 
 
 class PreOrderUpdate(CamelModel):

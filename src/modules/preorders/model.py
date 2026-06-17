@@ -62,6 +62,8 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
+    # Sucursal dueña de la cotización (heredada por la orden al confirmar).
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     status: Mapped[str] = mapped_column(String(16), default=PreOrderStatus.draft.value)
 
     # Inputs del optimizador, tal cual, para recalcular (no se guarda snapshot).
