@@ -16,6 +16,7 @@ from src.modules.orders.schemas import (
 )
 from src.modules.orders.service import OrderService, order_service
 from src.modules.settings.service import SettingsService, settings_service
+from src.modules.users.dependencies import require_permission
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -27,6 +28,13 @@ from src.shared.responses import (
 
 router = APIRouter(prefix="/orders", tags=["orders"], responses=ERROR_RESPONSES)
 
+# Lectura/proforma: admin + vendedor + operador. Escritura (estado, factura,
+# export): admin + vendedor. Plan de corte (ver/marcar + hoja de producción):
+# admin + vendedor + operador (el operador trabaja en taller).
+_READ = Depends(require_permission("orders:read"))
+_WRITE = Depends(require_permission("orders:write"))
+_CUTTING = Depends(require_permission("cutting_plan"))
+
 _FORMAT_QUERY = Query(
     default="pdf",
     description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
@@ -34,7 +42,7 @@ _FORMAT_QUERY = Query(
 )
 
 
-@router.get("/", response_model=PaginatedResponse[OrderResponse])
+@router.get("/", response_model=PaginatedResponse[OrderResponse], dependencies=[_READ])
 def list_orders(
     status: Optional[OrderStatus] = Query(
         default=None, description="Filtra órdenes por estado"
@@ -49,13 +57,19 @@ def list_orders(
     return page(items, total, paging.limit, paging.offset)
 
 
-@router.get("/{order_id}", response_model=DataResponse[OrderResponse])
+@router.get(
+    "/{order_id}", response_model=DataResponse[OrderResponse], dependencies=[_READ]
+)
 def get_order(order_id: int, svc: OrderService = Depends(order_service)):
     """Obtiene una orden por ID."""
     return ok(svc.get_or_404(order_id))
 
 
-@router.patch("/{order_id}/status", response_model=DataResponse[OrderResponse])
+@router.patch(
+    "/{order_id}/status",
+    response_model=DataResponse[OrderResponse],
+    dependencies=[_WRITE],
+)
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdate,
@@ -66,7 +80,9 @@ def update_order_status(
 
 
 @router.get(
-    "/{order_id}/cutting-plan", response_model=DataResponse[CuttingPlanResponse]
+    "/{order_id}/cutting-plan",
+    response_model=DataResponse[CuttingPlanResponse],
+    dependencies=[_CUTTING],
 )
 def get_cutting_plan(order_id: int, svc: OrderService = Depends(order_service)):
     """Plan de corte para la vista de taller: tableros físicos, piezas y avance."""
@@ -76,6 +92,7 @@ def get_cutting_plan(order_id: int, svc: OrderService = Depends(order_service)):
 @router.patch(
     "/{order_id}/cutting-plan/pieces/{piece_id}",
     response_model=DataResponse[PieceCutResponse],
+    dependencies=[_CUTTING],
 )
 def mark_piece_cut(
     order_id: int,
@@ -90,7 +107,11 @@ def mark_piece_cut(
     return ok(svc.mark_piece_cut(order_id, piece_id, data.cut))
 
 
-@router.post("/{order_id}/invoice", response_model=DataResponse[OrderResponse])
+@router.post(
+    "/{order_id}/invoice",
+    response_model=DataResponse[OrderResponse],
+    dependencies=[_WRITE],
+)
 def set_order_invoice(
     order_id: int,
     data: OrderInvoiceUpdate,
@@ -100,7 +121,11 @@ def set_order_invoice(
     return ok(svc.set_external_invoice_id(order_id, data.external_invoice_id))
 
 
-@router.get("/{order_id}/export", response_model=DataResponse[OrderExportResponse])
+@router.get(
+    "/{order_id}/export",
+    response_model=DataResponse[OrderExportResponse],
+    dependencies=[_WRITE],
+)
 def export_order(order_id: int, svc: OrderService = Depends(order_service)):
     """Documento de facturación neutral para el proveedor externo (cobro=tableros)."""
     return ok(svc.build_export(order_id))
@@ -108,7 +133,7 @@ def export_order(order_id: int, svc: OrderService = Depends(order_service)):
 
 # Exentos de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
 # variante base64 son "el archivo, transportado", no recursos JSON de dominio.
-@router.get("/{order_id}/proforma")
+@router.get("/{order_id}/proforma", dependencies=[_READ])
 def get_order_proforma(
     order_id: int,
     format: str = _FORMAT_QUERY,
@@ -122,7 +147,7 @@ def get_order_proforma(
     return pdf_response(pdf_buffer, f"proforma_{order.code or order.id}.pdf", format)
 
 
-@router.get("/{order_id}/production-sheet")
+@router.get("/{order_id}/production-sheet", dependencies=[_CUTTING])
 def get_order_production_sheet(
     order_id: int,
     format: str = _FORMAT_QUERY,

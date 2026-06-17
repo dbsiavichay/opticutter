@@ -65,9 +65,12 @@ class Config:
 
     # JWT (autenticación). HS256 firma con SECRET_KEY; el access token expira a los
     # ACCESS_TOKEN_EXPIRE_MINUTES. En producción SECRET_KEY es obligatorio (arriba);
-    # en otros entornos cae a un placeholder de desarrollo.
+    # en otros entornos cae a un placeholder de desarrollo. El access token es corto
+    # (renovable vía /auth/refresh): el front presenta el refresh token y obtiene un
+    # par nuevo. REFRESH_TOKEN_EXPIRE_DAYS acota la vida del refresh (opaco, revocable).
     JWT_ALGORITHM = env("JWT_ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 480)
+    ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
+    REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
     # Semilla del primer administrador (migración idempotente). Si ambos están
     # definidos y no existe un usuario con ese email, la migración lo crea con rol

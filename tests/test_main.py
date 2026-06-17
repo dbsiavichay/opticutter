@@ -148,6 +148,8 @@ def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
         raise RuntimeError("boom")
 
     from src.modules.products.service import ProductService
+    from src.modules.users.schemas import UserCreate
+    from src.modules.users.service import UserService
 
     monkeypatch.setattr(ProductService, "get_or_404", _boom)
 
@@ -157,7 +159,23 @@ def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app, raise_server_exceptions=False) as test_client:
-            resp = test_client.get("/api/v1/products/1")
+            # El endpoint exige auth: autentica como admin para llegar al handler
+            # (donde el monkeypatch dispara la excepción no controlada).
+            UserService(db_session).create(
+                UserCreate(
+                    email="boom-admin@empresa.com",
+                    password="boom-admin-pwd",
+                    role="administrador",
+                    full_name="Boom",
+                )
+            )
+            token = test_client.post(
+                "/api/v1/auth/login",
+                json={"email": "boom-admin@empresa.com", "password": "boom-admin-pwd"},
+            ).json()["data"]["accessToken"]
+            resp = test_client.get(
+                "/api/v1/products/1", headers={"Authorization": f"Bearer {token}"}
+            )
         assert resp.status_code == 500
         body = resp.json()
         assert body["errors"][0]["code"] == "INTERNAL_SERVER_ERROR"

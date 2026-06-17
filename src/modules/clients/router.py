@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from src.modules.clients.schemas import ClientCreate, ClientResponse, ClientUpdate
 from src.modules.clients.service import ClientService, client_service
+from src.modules.users.dependencies import require_permission
 from src.shared.exceptions import EntityNotFoundError
 from src.shared.pagination import PageParams
 from src.shared.responses import (
@@ -14,7 +15,13 @@ from src.shared.responses import (
     page,
 )
 
-router = APIRouter(prefix="/clients", tags=["clients"], responses=ERROR_RESPONSES)
+# Gestión de clientes: "administrador" y "vendedor" (RESOURCE_ROLES["clients:manage"]).
+router = APIRouter(
+    prefix="/clients",
+    tags=["clients"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("clients:manage"))],
+)
 
 
 @router.post("/", response_model=DataResponse[ClientResponse], status_code=201)

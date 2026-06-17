@@ -17,6 +17,7 @@ from src.modules.preorders.schemas import (
     ReviewLinkResponse,
 )
 from src.modules.preorders.service import PreOrderService, preorder_service
+from src.modules.users.dependencies import require_permission
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -26,7 +27,15 @@ from src.shared.responses import (
     page,
 )
 
-router = APIRouter(prefix="/preorders", tags=["preorders"], responses=ERROR_RESPONSES)
+# Pre-órdenes (cotización interna): "administrador" y "vendedor"
+# (RESOURCE_ROLES["preorders"]). El flujo público del cliente vive en
+# ``public_router.py`` y se autentica solo por el token del enlace.
+router = APIRouter(
+    prefix="/preorders",
+    tags=["preorders"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("preorders"))],
+)
 
 _FORMAT_QUERY = Query(
     default="pdf",

@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from src.modules.users.enums import UserRole
 from src.modules.users.model import UserModel
-from src.modules.users.schemas import UserCreate, UserUpdate
+from src.modules.users.schemas import ProfileUpdate, UserCreate, UserUpdate
 from src.shared.crud import CRUDService
 from src.shared.database import get_db
+from src.shared.exceptions import AuthenticationError
 from src.shared.security import hash_password, verify_password
 
 
@@ -38,6 +39,27 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         for field, value in changes.items():
             setattr(obj, field, value)
         return self._persist(obj)
+
+    def update_profile(self, user: UserModel, data: ProfileUpdate) -> UserModel:
+        """Autoservicio: el propio usuario edita su perfil (solo ``full_name``).
+
+        No toca ``role``/``is_active``/``email``: eso es gestión y vive en el CRUD
+        solo-admin. Semántica PATCH: solo aplica los campos enviados.
+        """
+        for field, value in data.model_dump(exclude_unset=True).items():
+            setattr(user, field, value)
+        return self._persist(user)
+
+    def change_password(self, user: UserModel, current: str, new: str) -> None:
+        """Autoservicio: cambia la propia contraseña verificando la actual.
+
+        Lanza ``AuthenticationError`` (401) si la contraseña actual no coincide.
+        El caller revoca los refresh tokens para forzar re-login en otros equipos.
+        """
+        if not verify_password(current, user.hashed_password):
+            raise AuthenticationError("La contraseña actual es incorrecta")
+        user.hashed_password = hash_password(new)
+        self._persist(user)
 
     def get_by_email(self, email: str) -> Optional[UserModel]:
         """Obtiene un usuario por email (identificador de login)."""

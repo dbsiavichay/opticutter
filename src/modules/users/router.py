@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from src.modules.users.dependencies import require_permission
 from src.modules.users.schemas import UserCreate, UserResponse, UserUpdate
 from src.modules.users.service import UserService, user_service
 from src.shared.pagination import PageParams
@@ -13,9 +14,13 @@ from src.shared.responses import (
     page,
 )
 
-# Nota: en esta fase el CRUD queda abierto. El enforcement (solo "administrador")
-# se añadirá con Depends(require_role(UserRole.ADMIN)) según permissions.py.
-router = APIRouter(prefix="/users", tags=["users"], responses=ERROR_RESPONSES)
+# Gestión de usuarios: solo "administrador" (RESOURCE_ROLES["users:manage"]).
+router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("users:manage"))],
+)
 
 
 @router.post("/", response_model=DataResponse[UserResponse], status_code=201)

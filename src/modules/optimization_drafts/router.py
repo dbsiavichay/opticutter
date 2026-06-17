@@ -10,6 +10,7 @@ from src.modules.optimization_drafts.service import (
     OptimizationDraftService,
     optimization_draft_service,
 )
+from src.modules.users.dependencies import require_permission
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -19,10 +20,12 @@ from src.shared.responses import (
     page,
 )
 
+# Borradores del optimizador: "administrador" y "vendedor" (RESOURCE_ROLES["optimizer"]).
 router = APIRouter(
     prefix="/optimization-drafts",
     tags=["optimization-drafts"],
     responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("optimizer"))],
 )
 
 
