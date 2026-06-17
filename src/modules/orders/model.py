@@ -6,6 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, Stri
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class OrderStatus(str, Enum):
@@ -37,7 +38,7 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
 }
 
 
-class OrderModel(Base):
+class OrderModel(TimestampMixin, AuditMixin, Base):
     """Raíz de agregado: pedido con snapshot inmutable y máquina de estados."""
 
     __tablename__ = "orders"
@@ -61,13 +62,7 @@ class OrderModel(Base):
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # Quién creó la orden: staff (flujo directo) o NULL si nació de una
-    # confirmación de cliente / del sistema (la pre-orden audita ese origen).
-    created_by: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
-    )
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
     lines: Mapped[list["OrderLineModel"]] = relationship(
@@ -90,7 +85,7 @@ class OrderModel(Base):
     )
 
 
-class OrderLineModel(Base):
+class OrderLineModel(TimestampMixin, AuditMixin, Base):
     """Línea de COBRO: un producto facturado (cantidad × precio congelado).
 
     Hoy el cobro es por tableros usados; el modelo admite cualquier producto
@@ -121,7 +116,7 @@ class OrderLineModel(Base):
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="lines")
 
 
-class OrderPieceModel(Base):
+class OrderPieceModel(TimestampMixin, AuditMixin, Base):
     """Pieza de la LISTA DE CORTE (insumo de producción; no se cobra).
 
     ``product_id`` referencia el tablero (producto tipo ``board``) del que se corta;
@@ -148,7 +143,7 @@ class OrderPieceModel(Base):
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="pieces")
 
 
-class OrderBoardModel(Base):
+class OrderBoardModel(TimestampMixin, AuditMixin, Base):
     """Tablero FÍSICO del plan de corte, materializado desde el snapshot.
 
     Cada fila es una hoja real a cortar (los ``layout_groups`` del snapshot solo
@@ -186,7 +181,7 @@ class OrderBoardModel(Base):
     )
 
 
-class OrderPlacedPieceModel(Base):
+class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
     """Pieza COLOCADA en un tablero físico: la unidad que el operario marca.
 
     Geometría ya rotada (x, y, width, height) lista para dibujar; las dims
@@ -223,7 +218,7 @@ class OrderPlacedPieceModel(Base):
     )
 
 
-class OrderStatusHistoryModel(Base):
+class OrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
     """Auditoría de transiciones de estado de una orden.
 
     ``actor`` es el TIPO de actor (``staff``/``client``/``system``); ``actor_user_id``
@@ -243,6 +238,5 @@ class OrderStatusHistoryModel(Base):
     )
     actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="history")

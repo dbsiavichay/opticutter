@@ -1,16 +1,14 @@
-from datetime import datetime
-
-from sqlalchemy import JSON, DateTime, Float, Integer, String
+from sqlalchemy import JSON, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
-from src.shared.mixins import AuditMixin
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 # La configuración es única: una sola fila con este id fijo (patrón singleton).
 SETTINGS_ID = 1
 
 
-class SettingsModel(AuditMixin, Base):
+class SettingsModel(TimestampMixin, AuditMixin, Base):
     """Configuración única de la aplicación (fila singleton, ``id=1``).
 
     Persiste lo que antes vivía solo en variables de entorno: los parámetros de
@@ -42,8 +40,3 @@ class SettingsModel(AuditMixin, Base):
     company_email: Mapped[str] = mapped_column(String(128))
     company_phone: Mapped[str] = mapped_column(String(128))
     company_branches: Mapped[list] = mapped_column(JSON, default=list)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )

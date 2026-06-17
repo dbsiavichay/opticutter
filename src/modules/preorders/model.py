@@ -6,7 +6,7 @@ from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
-from src.shared.mixins import AuditMixin
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class PreOrderStatus(str, Enum):
@@ -47,7 +47,7 @@ class ReviewLinkStatus(str, Enum):
     revoked = "revoked"
 
 
-class PreOrderModel(AuditMixin, Base):
+class PreOrderModel(TimestampMixin, AuditMixin, Base):
     """Cotización mutable: inputs del optimizador + enlace de revisión del cliente.
 
     A diferencia de la Orden (snapshot inmutable congelado), la pre-orden guarda
@@ -79,10 +79,6 @@ class PreOrderModel(AuditMixin, Base):
         ForeignKey("orders.id"), nullable=True
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -105,7 +101,7 @@ class PreOrderModel(AuditMixin, Base):
     )
 
 
-class PreOrderReviewLinkModel(Base):
+class PreOrderReviewLinkModel(TimestampMixin, AuditMixin, Base):
     """Enlace seguro de revisión del cliente (el token es la credencial).
 
     Solo se persiste el sha256 del token; el token crudo se devuelve una única vez
@@ -121,7 +117,6 @@ class PreOrderReviewLinkModel(Base):
     status: Mapped[str] = mapped_column(
         String(16), default=ReviewLinkStatus.active.value
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     # Espejo de preorder.expires_at al generar (defensa en profundidad).
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -133,7 +128,7 @@ class PreOrderReviewLinkModel(Base):
     )
 
 
-class PreOrderStatusHistoryModel(Base):
+class PreOrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
     """Auditoría de transiciones de estado de una pre-orden (espejo de orders).
 
     ``actor`` es el TIPO (``staff``/``client``/``system``); ``actor_user_id`` la FK
@@ -153,7 +148,6 @@ class PreOrderStatusHistoryModel(Base):
     )
     actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     preorder: Mapped["PreOrderModel"] = relationship(
         "PreOrderModel", back_populates="history"
