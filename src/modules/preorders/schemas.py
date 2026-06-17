@@ -43,6 +43,25 @@ class PreOrderUpdate(CamelModel):
     source: Optional[str] = Field(default=None, max_length=32)
 
 
+class PreOrderStatusHistoryResponse(CamelModel):
+    """Entrada de auditoría de una transición de estado de la pre-orden."""
+
+    id: int
+    from_status: Optional[PreOrderStatus] = None
+    to_status: PreOrderStatus
+    actor: Optional[str] = Field(
+        default=None, description="Actor type: staff | client | system"
+    )
+    actor_user_id: Optional[int] = Field(
+        default=None, description="Staff user id (null for client/system)"
+    )
+    actor_label: Optional[str] = Field(
+        default=None, description="Frozen actor name at the time of the action"
+    )
+    note: Optional[str] = None
+    created_at: datetime
+
+
 class PreOrderResponse(CamelModel):
     """Detalle de una pre-orden con su optimización recalculada (precios vivos)."""
 
@@ -73,6 +92,7 @@ class PreOrderResponse(CamelModel):
     optimization: OptimizeResponse = Field(
         ..., description="Recomputed cutting result with live prices"
     )
+    history: List[PreOrderStatusHistoryResponse] = Field(default_factory=list)
 
 
 class PreOrderSummaryResponse(CamelModel):

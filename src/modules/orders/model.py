@@ -63,6 +63,11 @@ class OrderModel(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Quién creó la orden: staff (flujo directo) o NULL si nació de una
+    # confirmación de cliente / del sistema (la pre-orden audita ese origen).
+    created_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
     lines: Mapped[list["OrderLineModel"]] = relationship(
@@ -207,6 +212,10 @@ class OrderPlacedPieceModel(Base):
     # Lados canteados geométricos, tal cual el snapshot (nulo si no lleva canto).
     edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     cut_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Quién marcó la pieza como cortada: FK al operario + etiqueta congelada.
+    # NULL mientras esté pendiente (en sincronía con ``cut_at``).
+    cut_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cut_by_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel")
     board: Mapped["OrderBoardModel"] = relationship(
@@ -215,7 +224,12 @@ class OrderPlacedPieceModel(Base):
 
 
 class OrderStatusHistoryModel(Base):
-    """Auditoría de transiciones de estado de una orden."""
+    """Auditoría de transiciones de estado de una orden.
+
+    ``actor`` es el TIPO de actor (``staff``/``client``/``system``); ``actor_user_id``
+    es la FK al usuario de staff (NULL para cliente/sistema) y ``actor_label`` el
+    snapshot legible del nombre al momento del hecho.
+    """
 
     __tablename__ = "order_status_history"
 
@@ -224,6 +238,10 @@ class OrderStatusHistoryModel(Base):
     from_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     to_status: Mapped[str] = mapped_column(String(32))
     actor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

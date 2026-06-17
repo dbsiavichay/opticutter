@@ -19,7 +19,7 @@ from src.modules.users.auth_router import router as auth_router
 from src.modules.users.router import router as users_router
 from src.shared.config import config
 from src.shared.errors import register_exception_handlers
-from src.shared.middleware import RequestIDMiddleware
+from src.shared.middleware import CurrentUserMiddleware, RequestIDMiddleware
 
 # Configurar logging
 logging.basicConfig(
@@ -55,6 +55,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Usuario autenticado en contexto para auditoría genérica (created_by/updated_by).
+app.add_middleware(CurrentUserMiddleware)
 # Correlación por request (requestId + header X-Request-ID). Se añade de último
 # para envolver al resto del stack y estar disponible en éxito y en error.
 app.add_middleware(RequestIDMiddleware)

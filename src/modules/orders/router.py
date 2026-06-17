@@ -17,6 +17,8 @@ from src.modules.orders.schemas import (
 from src.modules.orders.service import OrderService, order_service
 from src.modules.settings.service import SettingsService, settings_service
 from src.modules.users.dependencies import require_permission
+from src.modules.users.model import UserModel
+from src.shared.audit import staff_actor
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -68,15 +70,19 @@ def get_order(order_id: int, svc: OrderService = Depends(order_service)):
 @router.patch(
     "/{order_id}/status",
     response_model=DataResponse[OrderResponse],
-    dependencies=[_WRITE],
 )
 def update_order_status(
     order_id: int,
     data: OrderStatusUpdate,
     svc: OrderService = Depends(order_service),
+    current_user: UserModel = Depends(require_permission("orders:write")),
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
-    return ok(svc.transition(order_id, data.status, actor="sales", note=data.note))
+    return ok(
+        svc.transition(
+            order_id, data.status, actor=staff_actor(current_user), note=data.note
+        )
+    )
 
 
 @router.get(
@@ -92,19 +98,23 @@ def get_cutting_plan(order_id: int, svc: OrderService = Depends(order_service)):
 @router.patch(
     "/{order_id}/cutting-plan/pieces/{piece_id}",
     response_model=DataResponse[PieceCutResponse],
-    dependencies=[_CUTTING],
 )
 def mark_piece_cut(
     order_id: int,
     piece_id: int,
     data: PieceCutUpdate,
     svc: OrderService = Depends(order_service),
+    current_user: UserModel = Depends(require_permission("cutting_plan")),
 ):
     """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.
 
     Solo con la orden ``in_production``. Idempotente: re-marcar no cambia nada.
     """
-    return ok(svc.mark_piece_cut(order_id, piece_id, data.cut))
+    return ok(
+        svc.mark_piece_cut(
+            order_id, piece_id, data.cut, actor=staff_actor(current_user)
+        )
+    )
 
 
 @router.post(

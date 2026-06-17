@@ -6,6 +6,7 @@ from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin
 
 
 class PreOrderStatus(str, Enum):
@@ -46,7 +47,7 @@ class ReviewLinkStatus(str, Enum):
     revoked = "revoked"
 
 
-class PreOrderModel(Base):
+class PreOrderModel(AuditMixin, Base):
     """Cotización mutable: inputs del optimizador + enlace de revisión del cliente.
 
     A diferencia de la Orden (snapshot inmutable congelado), la pre-orden guarda
@@ -96,6 +97,12 @@ class PreOrderModel(Base):
         cascade="all, delete-orphan",
         order_by="PreOrderReviewLinkModel.id",
     )
+    history: Mapped[list["PreOrderStatusHistoryModel"]] = relationship(
+        "PreOrderStatusHistoryModel",
+        back_populates="preorder",
+        cascade="all, delete-orphan",
+        order_by="PreOrderStatusHistoryModel.id",
+    )
 
 
 class PreOrderReviewLinkModel(Base):
@@ -123,4 +130,31 @@ class PreOrderReviewLinkModel(Base):
 
     preorder: Mapped["PreOrderModel"] = relationship(
         "PreOrderModel", back_populates="review_links"
+    )
+
+
+class PreOrderStatusHistoryModel(Base):
+    """Auditoría de transiciones de estado de una pre-orden (espejo de orders).
+
+    ``actor`` es el TIPO (``staff``/``client``/``system``); ``actor_user_id`` la FK
+    al usuario de staff (NULL para cliente/sistema) y ``actor_label`` el snapshot
+    legible del nombre al momento del hecho.
+    """
+
+    __tablename__ = "preorder_status_history"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    preorder_id: Mapped[int] = mapped_column(ForeignKey("preorders.id"), index=True)
+    from_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(32))
+    actor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    preorder: Mapped["PreOrderModel"] = relationship(
+        "PreOrderModel", back_populates="history"
     )

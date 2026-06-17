@@ -34,6 +34,7 @@ from src.modules.preorders.model import (
     ReviewLinkStatus,
 )
 from src.modules.preorders.service import PreOrderService
+from src.shared.audit import Actor, client_actor, system_actor
 from src.shared.config import config
 from src.shared.database import get_db
 from src.shared.exceptions import (
@@ -66,7 +67,9 @@ class PreOrderReviewService:
         self.preorders = PreOrderService(db)
         self.orders = OrderService(db)
 
-    def generate(self, preorder_id: int) -> Tuple[PreOrderReviewLinkModel, str]:
+    def generate(
+        self, preorder_id: int, actor: Optional[Actor] = None
+    ) -> Tuple[PreOrderReviewLinkModel, str]:
         """Crea un enlace nuevo (revocando el activo previo) y devuelve el token.
 
         Solo para pre-órdenes abiertas (``draft``/``sent``); exige que el cliente
@@ -74,6 +77,7 @@ class PreOrderReviewService:
         Transiciona la pre-orden a ``sent`` y refresca su vigencia. Devuelve
         ``(link, token_crudo)``; el token solo existe en esta respuesta.
         """
+        actor = actor or system_actor()
         preorder = self.preorders.get_or_404(preorder_id)
         if preorder.status not in {s.value for s in OPEN_STATUSES}:
             raise BusinessRuleError(
@@ -89,6 +93,14 @@ class PreOrderReviewService:
             "preorder_validity_days"
         ]
         now = datetime.utcnow()
+        if preorder.status != PreOrderStatus.sent.value:
+            self.preorders._record_transition(
+                preorder,
+                preorder.status,
+                PreOrderStatus.sent,
+                actor,
+                note="Enlace de revisión enviado",
+            )
         preorder.status = PreOrderStatus.sent.value
         preorder.sent_at = now
         preorder.expires_at = now + timedelta(days=validity_days)
@@ -139,6 +151,7 @@ class PreOrderReviewService:
         if status == PreOrderStatus.confirmed:
             return preorder  # ya confirmada: reintento benigno
 
+        actor = client_actor()
         order = self.orders.create(
             OrderCreate(
                 materials=preorder.materials,
@@ -146,10 +159,14 @@ class PreOrderReviewService:
                 client_id=preorder.client_id,
                 notes=preorder.notes,
                 source=preorder.source,
-            )
+            ),
+            actor=actor,
         )
 
         now = datetime.utcnow()
+        self.preorders._record_transition(
+            preorder, preorder.status, PreOrderStatus.confirmed, actor, note=note
+        )
         preorder.status = PreOrderStatus.confirmed.value
         preorder.confirmed_at = now
         preorder.order_id = order.id
@@ -180,6 +197,13 @@ class PreOrderReviewService:
             )
 
         now = datetime.utcnow()
+        self.preorders._record_transition(
+            preorder,
+            preorder.status,
+            PreOrderStatus.rejected,
+            client_actor(),
+            note=note,
+        )
         preorder.status = PreOrderStatus.rejected.value
         self._mark_used(link, "rejected", now, note, meta)
         self.db.commit()
@@ -209,6 +233,14 @@ class PreOrderReviewService:
 
         # 'sent' o 'changes_requested': registra/actualiza la solicitud y mantiene
         # el enlace activo (sin marcarlo usado).
+        if preorder.status != PreOrderStatus.changes_requested.value:
+            self.preorders._record_transition(
+                preorder,
+                preorder.status,
+                PreOrderStatus.changes_requested,
+                client_actor(),
+                note=note,
+            )
         preorder.status = PreOrderStatus.changes_requested.value
         preorder.client_note = note
         self.db.commit()

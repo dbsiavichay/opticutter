@@ -12,9 +12,11 @@ from src.modules.preorders.model import (
     OPEN_STATUSES,
     PreOrderModel,
     PreOrderStatus,
+    PreOrderStatusHistoryModel,
 )
 from src.modules.preorders.schemas import PreOrderCreate, PreOrderUpdate
 from src.modules.settings.service import SettingsService
+from src.shared.audit import Actor, system_actor
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
 
@@ -64,8 +66,11 @@ class PreOrderService:
         )
         return items, total
 
-    def create(self, data: PreOrderCreate) -> PreOrderModel:
+    def create(
+        self, data: PreOrderCreate, actor: Optional[Actor] = None
+    ) -> PreOrderModel:
         """Crea una pre-orden abierta (``draft``) con los inputs del optimizador."""
+        actor = actor or system_actor()
         if self.db.get(ClientModel, data.client_id) is None:
             raise EntityNotFoundError("Client", data.client_id)
         self._enforce_open_cap(data.client_id)
@@ -83,6 +88,10 @@ class PreOrderService:
             notes=data.notes,
             created_at=now,
             expires_at=now + timedelta(days=validity_days),
+            created_by=actor.user_id,
+        )
+        self._record_transition(
+            preorder, None, PreOrderStatus.draft, actor, note="Pre-orden creada"
         )
         self.db.add(preorder)
         self.db.flush()  # asigna id para componer el code legible
@@ -91,8 +100,11 @@ class PreOrderService:
         self.db.refresh(preorder)
         return preorder
 
-    def update(self, preorder_id: int, data: PreOrderUpdate) -> PreOrderModel:
+    def update(
+        self, preorder_id: int, data: PreOrderUpdate, actor: Optional[Actor] = None
+    ) -> PreOrderModel:
         """Edita una pre-orden abierta; rechaza si ya es terminal (confirmed/etc.)."""
+        actor = actor or system_actor()
         preorder = self.get_or_404(preorder_id)
         self._ensure_open(preorder)
         fields = data.model_dump(exclude_unset=True)
@@ -113,8 +125,16 @@ class PreOrderService:
         # Si el cliente había pedido cambios, editar = "atendido": la pre-orden
         # vuelve a 'sent' (la pelota regresa al cliente) y se limpia la solicitud.
         if preorder.status == PreOrderStatus.changes_requested.value:
+            self._record_transition(
+                preorder,
+                preorder.status,
+                PreOrderStatus.sent,
+                actor,
+                note="Cambios atendidos; reenviada al cliente",
+            )
             preorder.status = PreOrderStatus.sent.value
             preorder.client_note = None
+        preorder.updated_by = actor.user_id
         self.db.commit()
         self.db.refresh(preorder)
         return preorder
@@ -159,6 +179,26 @@ class PreOrderService:
             ],
         )
 
+    def _record_transition(
+        self,
+        preorder: PreOrderModel,
+        from_status: Optional[str],
+        to_status: PreOrderStatus,
+        actor: Actor,
+        note: Optional[str] = None,
+    ) -> None:
+        """Anexa una entrada de historial de transición (la persiste el llamador)."""
+        preorder.history.append(
+            PreOrderStatusHistoryModel(
+                from_status=from_status,
+                to_status=to_status.value,
+                actor=actor.type,
+                actor_user_id=actor.user_id,
+                actor_label=actor.label,
+                note=note,
+            )
+        )
+
     def _ensure_open(self, preorder: PreOrderModel) -> None:
         if preorder.status not in _OPEN_VALUES:
             raise BusinessRuleError(
@@ -186,6 +226,13 @@ class PreOrderService:
             and preorder.status in _OPEN_VALUES
             and preorder.expires_at < datetime.utcnow()
         ):
+            self._record_transition(
+                preorder,
+                preorder.status,
+                PreOrderStatus.expired,
+                system_actor(),
+                note="Vigencia vencida",
+            )
             preorder.status = PreOrderStatus.expired.value
             return True
         return False

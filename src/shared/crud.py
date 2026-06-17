@@ -1,11 +1,14 @@
 from typing import Generic, List, Optional, Tuple, Type, TypeVar
 
 from pydantic import BaseModel
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session
 
+from src.shared.context import get_current_user_id
 from src.shared.database import Base
 from src.shared.exceptions import ConflictError, EntityNotFoundError
+from src.shared.mixins import AuditMixin
 
 ModelT = TypeVar("ModelT", bound=Base)
 CreateT = TypeVar("CreateT", bound=BaseModel)
@@ -59,11 +62,29 @@ class CRUDService(Generic[ModelT, CreateT, UpdateT]):
             setattr(obj, field, value)
         return self._persist(obj)
 
+    def _stamp_actor(self, obj: ModelT) -> None:
+        """Estampa ``created_by``/``updated_by`` desde el usuario del request.
+
+        Centralizado en ``_persist`` para cubrir también los servicios que lo
+        invocan directo (p. ej. ``ProductService``). Distingue alta de edición por
+        la identidad del objeto (transitorio = aún sin PK = creación). No-op para
+        modelos sin ``AuditMixin`` o requests sin usuario (públicos).
+        """
+        if not isinstance(obj, AuditMixin):
+            return
+        user_id = get_current_user_id()
+        if user_id is None:
+            return
+        if inspect(obj).identity is None:  # transitorio: es un alta
+            obj.created_by = user_id
+        obj.updated_by = user_id
+
     def delete(self, id: int) -> None:
         self.db.delete(self.get_or_404(id))
         self.db.commit()
 
     def _persist(self, obj: ModelT) -> ModelT:
+        self._stamp_actor(obj)
         try:
             self.db.add(obj)
             self.db.commit()

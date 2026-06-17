@@ -17,7 +17,9 @@ from src.modules.preorders.schemas import (
     ReviewLinkResponse,
 )
 from src.modules.preorders.service import PreOrderService, preorder_service
-from src.modules.users.dependencies import require_permission
+from src.modules.users.dependencies import get_current_user, require_permission
+from src.modules.users.model import UserModel
+from src.shared.audit import staff_actor
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -63,15 +65,18 @@ def _detail(svc: PreOrderService, preorder: PreOrderModel) -> PreOrderResponse:
         materials=preorder.materials,
         requirements=preorder.requirements,
         optimization=svc.build_optimize_response(preorder),
+        history=preorder.history,
     )
 
 
 @router.post("/", response_model=DataResponse[PreOrderResponse], status_code=201)
 def create_preorder(
-    data: PreOrderCreate, svc: PreOrderService = Depends(preorder_service)
+    data: PreOrderCreate,
+    svc: PreOrderService = Depends(preorder_service),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """Crea una pre-orden (cotización mutable) con los inputs del optimizador."""
-    return ok(_detail(svc, svc.create(data)))
+    return ok(_detail(svc, svc.create(data, actor=staff_actor(current_user))))
 
 
 @router.get("/", response_model=PaginatedResponse[PreOrderSummaryResponse])
@@ -103,9 +108,12 @@ def update_preorder(
     preorder_id: int,
     data: PreOrderUpdate,
     svc: PreOrderService = Depends(preorder_service),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """Edita una pre-orden abierta (draft/sent)."""
-    return ok(_detail(svc, svc.update(preorder_id, data)))
+    return ok(
+        _detail(svc, svc.update(preorder_id, data, actor=staff_actor(current_user)))
+    )
 
 
 @router.delete("/{preorder_id}", status_code=204)
@@ -120,14 +128,16 @@ def delete_preorder(preorder_id: int, svc: PreOrderService = Depends(preorder_se
     status_code=201,
 )
 def create_review_link(
-    preorder_id: int, svc: PreOrderReviewService = Depends(preorder_review_service)
+    preorder_id: int,
+    svc: PreOrderReviewService = Depends(preorder_review_service),
+    current_user: UserModel = Depends(get_current_user),
 ):
     """Genera el enlace de revisión del cliente (revoca el anterior si existía).
 
     Transiciona la pre-orden a ``sent``. El token solo se expone en esta respuesta;
     si se pierde, se regenera.
     """
-    link, raw_token = svc.generate(preorder_id)
+    link, raw_token = svc.generate(preorder_id, actor=staff_actor(current_user))
     return ok(
         ReviewLinkResponse(
             token=raw_token,

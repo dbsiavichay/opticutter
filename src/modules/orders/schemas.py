@@ -115,7 +115,15 @@ class OrderStatusHistoryResponse(CamelModel):
     id: int
     from_status: Optional[OrderStatus] = None
     to_status: OrderStatus
-    actor: Optional[str] = None
+    actor: Optional[str] = Field(
+        default=None, description="Actor type: staff | client | system"
+    )
+    actor_user_id: Optional[int] = Field(
+        default=None, description="Staff user id (null for client/system)"
+    )
+    actor_label: Optional[str] = Field(
+        default=None, description="Frozen actor name at the time of the action"
+    )
     note: Optional[str] = None
     created_at: datetime
 
@@ -158,6 +166,12 @@ class PlacedPieceResponse(CamelModel):
     )
     cut: bool = Field(..., description="Whether the piece was already cut")
     cut_at: Optional[datetime] = None
+    cut_by: Optional[int] = Field(
+        default=None, description="User id who cut the piece (null while pending)"
+    )
+    cut_by_label: Optional[str] = Field(
+        default=None, description="Frozen name of who cut the piece"
+    )
 
 
 class CuttingProgress(CamelModel):

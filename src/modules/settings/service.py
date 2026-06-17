@@ -9,6 +9,7 @@ from src.modules.settings.schemas import (
     PreOrderSettingsUpdate,
 )
 from src.shared.config import config
+from src.shared.context import get_current_user_id
 from src.shared.database import get_db
 
 # Los datos de empresa se exponen en la API como ``name/tagline/...`` pero se
@@ -70,11 +71,18 @@ class SettingsService:
             self.db.rollback()
             return self.db.get(SettingsModel, SETTINGS_ID)
 
+    def _stamp_updated_by(self, settings: SettingsModel) -> None:
+        """Marca quién editó la fila singleton (no pasa por ``CRUDService``)."""
+        user_id = get_current_user_id()
+        if user_id is not None:
+            settings.updated_by = user_id
+
     def update_cutting(self, data: CuttingSettingsUpdate) -> SettingsModel:
         """Aplica un PATCH parcial a los parámetros de corte."""
         settings = self.get_or_init()
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(settings, field, value)
+        self._stamp_updated_by(settings)
         self.db.commit()
         self.db.refresh(settings)
         return settings
@@ -84,6 +92,7 @@ class SettingsService:
         settings = self.get_or_init()
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(settings, field, value)
+        self._stamp_updated_by(settings)
         self.db.commit()
         self.db.refresh(settings)
         return settings
@@ -106,6 +115,7 @@ class SettingsService:
         settings = self.get_or_init()
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(settings, _COMPANY_FIELD_MAP[field], value)
+        self._stamp_updated_by(settings)
         self.db.commit()
         self.db.refresh(settings)
         return settings
