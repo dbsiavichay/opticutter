@@ -1,13 +1,13 @@
-from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
-class OptimizationModel(Base):
+class OptimizationModel(TimestampMixin, AuditMixin, Base):
     """Modelo ORM de la tabla ``optimizations`` (conservada, pero ya sin escrituras:
     las optimizaciones son cache-only desde S2). Sin relación ORM hacia ``clients``:
     el cómputo es efímero y la orden es la raíz durable."""
@@ -22,6 +22,4 @@ class OptimizationModel(Base):
     materials_summary: Mapped[dict] = mapped_column(JSON, nullable=True)
     layout_groups: Mapped[dict] = mapped_column(JSON, nullable=True)
     optimization_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))

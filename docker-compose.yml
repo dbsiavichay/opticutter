@@ -17,6 +17,21 @@ services:
       - "3000:3000"
     depends_on:
       - redis
+      - postgres
+    networks:
+      - cutter_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: cutter_db
+      POSTGRES_USER: cutter
+      POSTGRES_PASSWORD: cutter
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
     networks:
       - cutter_network
 
@@ -30,3 +45,6 @@ services:
 networks:
   cutter_network:
     driver: bridge
+
+volumes:
+  postgres_data:

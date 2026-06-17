@@ -5,9 +5,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
-class RefreshTokenModel(Base):
+class RefreshTokenModel(TimestampMixin, AuditMixin, Base):
     """Refresh token emitido al iniciar sesión: par renovable del access JWT.
 
     Solo se guarda el ``token_hash`` (sha256), nunca el token en claro. La rotación
@@ -25,4 +26,3 @@ class RefreshTokenModel(Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -1,13 +1,13 @@
-from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
+from src.shared.mixins import AuditMixin, TimestampMixin
 
 
-class OptimizationDraftModel(Base):
+class OptimizationDraftModel(TimestampMixin, AuditMixin, Base):
     """Borrador del optimizador: trabajo en progreso, durable y mutable.
 
     A diferencia de la optimización (cómputo efímero, cache-only) y de la orden
@@ -27,8 +27,3 @@ class OptimizationDraftModel(Base):
         ForeignKey("clients.id"), nullable=True
     )
     payload: Mapped[dict] = mapped_column(JSON)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
