@@ -46,15 +46,41 @@ class UserResponse(UserBase):
     created_at: datetime = Field(..., description="Fecha de creación")
 
 
+class ProfileUpdate(CamelModel):
+    """Autoservicio: el propio usuario edita su perfil (solo ``fullName``)."""
+
+    full_name: Optional[str] = Field(
+        None, max_length=128, description="Nombre completo"
+    )
+
+
+class ChangePasswordRequest(CamelModel):
+    """Autoservicio: cambio de la propia contraseña verificando la actual."""
+
+    current_password: str = Field(..., description="Contraseña actual")
+    new_password: str = Field(
+        ..., min_length=8, max_length=128, description="Nueva contraseña"
+    )
+
+
 class LoginRequest(CamelModel):
     email: EmailStr = Field(..., description="Email de login")
     password: str = Field(..., description="Contraseña")
 
 
-class TokenResponse(CamelModel):
-    """Respuesta del login: token de acceso + datos del usuario autenticado."""
+class RefreshRequest(CamelModel):
+    """Canje del refresh token por un par nuevo en ``/auth/refresh``."""
 
-    access_token: str = Field(..., description="JWT de acceso")
+    refresh_token: str = Field(..., description="Refresh token opaco emitido al login")
+
+
+class TokenResponse(CamelModel):
+    """Respuesta de login/refresh: par de tokens + datos del usuario autenticado."""
+
+    access_token: str = Field(..., description="JWT de acceso (corto)")
+    refresh_token: str = Field(
+        ..., description="Refresh token opaco (largo, revocable)"
+    )
     token_type: str = Field(default="bearer", description="Tipo de token")
-    expires_in: int = Field(..., description="Vigencia del token en segundos")
+    expires_in: int = Field(..., description="Vigencia del access token en segundos")
     user: UserResponse = Field(..., description="Usuario autenticado")

@@ -6,6 +6,8 @@ Infraestructura sin dependencias de FastAPI/SQLAlchemy. El módulo de usuarios
 de ``shared.config``.
 """
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -65,3 +67,21 @@ def decode_access_token(token: str) -> dict:
         raise AuthenticationError("El token de sesión expiró") from exc
     except jwt.InvalidTokenError as exc:
         raise AuthenticationError("Token de sesión inválido") from exc
+
+
+def generate_refresh_token() -> str:
+    """Genera un refresh token opaco de 256 bits (CSPRNG).
+
+    Es la credencial que canjea ``/auth/refresh`` por un nuevo access token. Opaco
+    (no JWT) para poder revocarlo: en reposo solo se guarda su ``hash_token``.
+    """
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(raw: str) -> str:
+    """sha256 hex de un token opaco. Se persiste el hash, nunca el token en claro.
+
+    Un token aleatorio de 256 bits es su propio salt, por eso sha256 sin salt basta
+    (mismo criterio que los enlaces de revisión de pre-órdenes).
+    """
+    return hashlib.sha256(raw.encode()).hexdigest()

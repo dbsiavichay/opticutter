@@ -3,9 +3,16 @@ from fastapi import APIRouter, Depends, Query
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.optimizations.schemas import OptimizeRequest, OptimizeResponse
 from src.modules.optimizations.service import OptimizationService, optimization_service
+from src.modules.users.dependencies import require_permission
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-router = APIRouter(prefix="/optimize", tags=["optimize"], responses=ERROR_RESPONSES)
+# Optimizador: "administrador" y "vendedor" (RESOURCE_ROLES["optimizer"]).
+router = APIRouter(
+    prefix="/optimize",
+    tags=["optimize"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("optimizer"))],
+)
 
 
 @router.post("/", response_model=DataResponse[OptimizeResponse])

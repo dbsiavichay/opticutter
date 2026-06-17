@@ -15,9 +15,16 @@ from src.modules.analytics.schemas import (
     TimeSeries,
 )
 from src.modules.analytics.service import AnalyticsService, analytics_service
+from src.modules.users.dependencies import require_permission
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-router = APIRouter(prefix="/analytics", tags=["analytics"], responses=ERROR_RESPONSES)
+# Analítica del dashboard: solo "administrador" (RESOURCE_ROLES["analytics"]).
+router = APIRouter(
+    prefix="/analytics",
+    tags=["analytics"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("analytics"))],
+)
 
 
 @router.get("/summary", response_model=DataResponse[AnalyticsSummary])

@@ -9,9 +9,16 @@ from src.modules.settings.schemas import (
     PreOrderSettingsUpdate,
 )
 from src.modules.settings.service import SettingsService, settings_service
+from src.modules.users.dependencies import require_permission
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-router = APIRouter(prefix="/settings", tags=["settings"], responses=ERROR_RESPONSES)
+# Configuración del sistema: solo "administrador" (RESOURCE_ROLES["settings:manage"]).
+router = APIRouter(
+    prefix="/settings",
+    tags=["settings"],
+    responses=ERROR_RESPONSES,
+    dependencies=[Depends(require_permission("settings:manage"))],
+)
 
 
 @router.get("/cutting", response_model=DataResponse[CuttingSettingsResponse])

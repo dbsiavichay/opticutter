@@ -1,9 +1,11 @@
 """Dependencias de autenticación y autorización.
 
-``get_current_user`` resuelve el usuario autenticado desde el JWT y ``require_role``
-restringe por rol. Hoy solo las consume ``GET /auth/me``; el resto de endpoints
-del sistema siguen abiertos. En la fase de *enforcement* se aplicará ``require_role``
-a cada ruta según la matriz documentada en ``permissions.py``.
+``get_current_user`` resuelve el usuario autenticado desde el JWT; ``require_role``
+restringe por rol y ``require_permission`` por **área** (clave de la matriz
+``RESOURCE_ROLES``). Los endpoints declaran intención con
+``Depends(require_permission("orders:write"))`` y la matriz queda como única fuente
+de verdad. ``require_role`` valida contra el rol **leído de la BD** (vía
+``get_current_user``), así que un cambio de rol surte efecto al instante.
 """
 
 from typing import Optional
@@ -13,6 +15,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.modules.users.enums import UserRole
 from src.modules.users.model import UserModel
+from src.modules.users.permissions import RESOURCE_ROLES
 from src.modules.users.service import UserService, user_service
 from src.shared.exceptions import AuthenticationError, AuthorizationError
 from src.shared.security import decode_access_token
@@ -43,8 +46,8 @@ def get_current_user(
 def require_role(*roles: UserRole):
     """Factory de dependencia: exige que el usuario tenga uno de ``roles``.
 
-    Listo para usar en la fase de enforcement, p. ej.
-    ``Depends(require_role(UserRole.ADMIN))`` en el CRUD de usuarios.
+    p. ej. ``Depends(require_role(UserRole.ADMIN))``. Prefiere ``require_permission``
+    cuando exista una clave de área en ``RESOURCE_ROLES`` (centraliza la política).
     """
     allowed = {role.value for role in roles}
 
@@ -54,3 +57,12 @@ def require_role(*roles: UserRole):
         return current_user
 
     return dependency
+
+
+def require_permission(resource: str):
+    """Dependencia de autorización por área, resuelta contra ``RESOURCE_ROLES``.
+
+    ``Depends(require_permission("orders:write"))``. Una clave inexistente revienta
+    con ``KeyError`` al **cargar el router** (no en runtime), atrapando typos en CI.
+    """
+    return require_role(*RESOURCE_ROLES[resource])
