@@ -50,9 +50,11 @@ def _seed_order(
     lines=None,
     history=None,
     optimization_hash="h",
+    branch_id=1,
 ):
     order = OrderModel(
         client_id=client_id,
+        branch_id=branch_id,
         status=status,
         optimization_snapshot={},
         optimization_hash=optimization_hash,

@@ -18,6 +18,13 @@ class DraftCreate(CamelModel):
     client_id: Optional[int] = Field(
         default=None, description="Optional client this draft is associated with"
     )
+    branch_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Target branch. Ignored for branch staff (forced to their own branch); "
+            "required for a global admin."
+        ),
+    )
     payload: dict = Field(
         ..., description="Opaque optimizer form state (materials + pieces, as-is)"
     )

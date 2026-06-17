@@ -29,17 +29,23 @@ def client(anon_client):
     return anon_client
 
 
+# Sucursal por defecto sembrada por conftest (id=1); el staff cuelga de ella.
+_BRANCH = 1
+
+
 def _user_payload(
     email="seller@empresa.com",
     password="supersecret",
     role="vendedor",
     full_name="Vendedor Uno",
+    branch_id=_BRANCH,
 ):
     return {
         "email": email,
         "password": password,
         "role": role,
         "fullName": full_name,
+        "branchId": branch_id,
     }
 
 
@@ -69,9 +75,16 @@ def auth(client, db_session):
         email = email or f"{role}@empresa.com"
         svc = UserService(db_session)
         if svc.get_by_email(email) is None:
+            # El staff (vendedor/operador) cuelga de la sucursal por defecto; el
+            # admin es global (branch_id se ignora y queda en null).
+            branch_id = None if role == "administrador" else _BRANCH
             svc.create(
                 UserCreate(
-                    email=email, password=_PWD, role=role, full_name=role.title()
+                    email=email,
+                    password=_PWD,
+                    role=role,
+                    full_name=role.title(),
+                    branch_id=branch_id,
                 )
             )
         return _auth_header(_token(client, email))

@@ -66,3 +66,22 @@ def require_permission(resource: str):
     con ``KeyError`` al **cargar el router** (no en runtime), atrapando typos en CI.
     """
     return require_role(*RESOURCE_ROLES[resource])
+
+
+def get_branch_scope(
+    current_user: UserModel = Depends(get_current_user),
+) -> Optional[int]:
+    """Resuelve el alcance por sucursal del usuario autenticado.
+
+    ``None`` para el administrador (global: ve y opera todas las sucursales); el
+    ``branch_id`` asignado para el staff (vendedor/operador). Como ``get_current_user``
+    lee el usuario fresco de la BD en cada request, reasignar su sucursal surte efecto
+    al instante. Un staff sin sucursal asignada es un estado inválido (403).
+    """
+    if current_user.role == UserRole.ADMIN.value:
+        return None
+    if current_user.branch_id is None:
+        raise AuthorizationError(
+            "Tu usuario no tiene una sucursal asignada; contacta al administrador."
+        )
+    return current_user.branch_id

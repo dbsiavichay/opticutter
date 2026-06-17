@@ -2,6 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from src.modules.branches.service import branch_letterhead
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
@@ -16,7 +17,7 @@ from src.modules.orders.schemas import (
 )
 from src.modules.orders.service import OrderService, order_service
 from src.modules.settings.service import SettingsService, settings_service
-from src.modules.users.dependencies import require_permission
+from src.modules.users.dependencies import get_branch_scope, require_permission
 from src.modules.users.model import UserModel
 from src.shared.audit import staff_actor
 from src.shared.pagination import PageParams
@@ -49,12 +50,25 @@ def list_orders(
     status: Optional[OrderStatus] = Query(
         default=None, description="Filtra órdenes por estado"
     ),
+    branch_id: Optional[int] = Query(
+        default=None,
+        alias="branchId",
+        description="Solo admin: estrecha el listado a una sucursal (vacío = todas)",
+    ),
     paging: PageParams = Depends(),
     svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Lista órdenes con filtro por estado y paginación opcionales."""
+    """Lista órdenes con filtro por estado y paginación opcionales.
+
+    El staff solo ve las de su sucursal; el admin ve todas (o filtra con ``branchId``).
+    """
     items, total = svc.list_orders(
-        status=status, limit=paging.limit, offset=paging.offset
+        status=status,
+        branch_scope=branch_scope,
+        branch_filter=branch_id,
+        limit=paging.limit,
+        offset=paging.offset,
     )
     return page(items, total, paging.limit, paging.offset)
 
@@ -62,9 +76,13 @@ def list_orders(
 @router.get(
     "/{order_id}", response_model=DataResponse[OrderResponse], dependencies=[_READ]
 )
-def get_order(order_id: int, svc: OrderService = Depends(order_service)):
-    """Obtiene una orden por ID."""
-    return ok(svc.get_or_404(order_id))
+def get_order(
+    order_id: int,
+    svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Obtiene una orden por ID (404 si es de otra sucursal y no eres admin)."""
+    return ok(svc.get_scoped_or_404(order_id, branch_scope))
 
 
 @router.patch(
@@ -76,11 +94,16 @@ def update_order_status(
     data: OrderStatusUpdate,
     svc: OrderService = Depends(order_service),
     current_user: UserModel = Depends(require_permission("orders:write")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
     return ok(
         svc.transition(
-            order_id, data.status, actor=staff_actor(current_user), note=data.note
+            order_id,
+            data.status,
+            actor=staff_actor(current_user),
+            note=data.note,
+            branch_scope=branch_scope,
         )
     )
 
@@ -90,9 +113,13 @@ def update_order_status(
     response_model=DataResponse[CuttingPlanResponse],
     dependencies=[_CUTTING],
 )
-def get_cutting_plan(order_id: int, svc: OrderService = Depends(order_service)):
+def get_cutting_plan(
+    order_id: int,
+    svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
     """Plan de corte para la vista de taller: tableros físicos, piezas y avance."""
-    return ok(svc.get_cutting_plan(order_id))
+    return ok(svc.get_cutting_plan(order_id, branch_scope=branch_scope))
 
 
 @router.patch(
@@ -105,6 +132,7 @@ def mark_piece_cut(
     data: PieceCutUpdate,
     svc: OrderService = Depends(order_service),
     current_user: UserModel = Depends(require_permission("cutting_plan")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.
 
@@ -112,7 +140,11 @@ def mark_piece_cut(
     """
     return ok(
         svc.mark_piece_cut(
-            order_id, piece_id, data.cut, actor=staff_actor(current_user)
+            order_id,
+            piece_id,
+            data.cut,
+            actor=staff_actor(current_user),
+            branch_scope=branch_scope,
         )
     )
 
@@ -126,9 +158,14 @@ def set_order_invoice(
     order_id: int,
     data: OrderInvoiceUpdate,
     svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Asocia el ID de la factura externa (costura con el proveedor de facturación)."""
-    return ok(svc.set_external_invoice_id(order_id, data.external_invoice_id))
+    return ok(
+        svc.set_external_invoice_id(
+            order_id, data.external_invoice_id, branch_scope=branch_scope
+        )
+    )
 
 
 @router.get(
@@ -136,9 +173,13 @@ def set_order_invoice(
     response_model=DataResponse[OrderExportResponse],
     dependencies=[_WRITE],
 )
-def export_order(order_id: int, svc: OrderService = Depends(order_service)):
+def export_order(
+    order_id: int,
+    svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
     """Documento de facturación neutral para el proveedor externo (cobro=tableros)."""
-    return ok(svc.build_export(order_id))
+    return ok(svc.build_export(order_id, branch_scope=branch_scope))
 
 
 # Exentos de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
@@ -149,10 +190,15 @@ def get_order_proforma(
     format: str = _FORMAT_QUERY,
     svc: OrderService = Depends(order_service),
     settings_svc: SettingsService = Depends(settings_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Proforma comercial (con precios congelados) renderizada desde el snapshot."""
-    order = svc.get_or_404(order_id)
-    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
+    order = svc.get_scoped_or_404(order_id, branch_scope)
+    carrier = ProformaCarrier.from_order(
+        order,
+        company=settings_svc.get_company(),
+        branch=branch_letterhead(svc.db, order.branch_id),
+    )
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
     return pdf_response(pdf_buffer, f"proforma_{order.code or order.id}.pdf", format)
 
@@ -163,9 +209,14 @@ def get_order_production_sheet(
     format: str = _FORMAT_QUERY,
     svc: OrderService = Depends(order_service),
     settings_svc: SettingsService = Depends(settings_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Hoja de producción (lista de corte y disposición, SIN precios) para el taller."""
-    order = svc.get_or_404(order_id)
-    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
+    order = svc.get_scoped_or_404(order_id, branch_scope)
+    carrier = ProformaCarrier.from_order(
+        order,
+        company=settings_svc.get_company(),
+        branch=branch_letterhead(svc.db, order.branch_id),
+    )
     pdf_buffer = ProformaService.generate_production_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"produccion_{order.code or order.id}.pdf", format)

@@ -16,6 +16,13 @@ class UserBase(CamelModel):
         default=UserRole.OPERATOR,
         description="Rol: administrador, vendedor u operador",
     )
+    branch_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Sucursal asignada (obligatoria para vendedor/operador). El "
+            "administrador es global: se ignora y queda en null."
+        ),
+    )
 
 
 class UserCreate(UserBase):
@@ -33,6 +40,9 @@ class UserUpdate(CamelModel):
     )
     role: Optional[UserRole] = Field(None, description="Rol del usuario")
     is_active: Optional[bool] = Field(None, description="Activo/inactivo (baja lógica)")
+    branch_id: Optional[int] = Field(
+        None, description="Sucursal asignada (staff); null/ignorado para administrador"
+    )
     password: Optional[str] = Field(
         None, min_length=8, max_length=128, description="Nueva contraseña"
     )

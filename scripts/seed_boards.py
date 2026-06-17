@@ -6,6 +6,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.modules.products.model import ProductModel, ProductType
+from src.modules.users.model import (
+    UserModel,  # noqa: F401 — registers users table for FK resolution
+)
 from src.shared.database import SessionLocal
 
 TEXTURE_DESC = {

@@ -22,7 +22,11 @@ FORM_PAYLOAD = {
 
 
 def _payload(name="Cocina Pérez", payload=None, client_id=None):
-    body = {"name": name, "payload": payload if payload is not None else FORM_PAYLOAD}
+    body = {
+        "name": name,
+        "branchId": 1,  # sucursal por defecto sembrada por conftest
+        "payload": payload if payload is not None else FORM_PAYLOAD,
+    }
     if client_id is not None:
         body["clientId"] = client_id
     return body

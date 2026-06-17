@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.modules.users.enums import UserRole
@@ -24,3 +24,9 @@ class UserModel(TimestampMixin, AuditMixin, Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default=UserRole.OPERATOR.value)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Sucursal asignada al staff (vendedor/operador). NULL = administrador global,
+    # que ve y opera todas las sucursales. Editable por el admin (mueve de sucursal);
+    # el cambio surte efecto al instante (la sucursal no viaja en el JWT).
+    branch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("branches.id"), index=True, nullable=True
+    )

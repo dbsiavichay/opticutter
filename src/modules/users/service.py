@@ -3,12 +3,17 @@ from typing import List, Optional, Tuple
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from src.modules.branches.model import BranchModel
 from src.modules.users.enums import UserRole
 from src.modules.users.model import UserModel
 from src.modules.users.schemas import ProfileUpdate, UserCreate, UserUpdate
 from src.shared.crud import CRUDService
 from src.shared.database import get_db
-from src.shared.exceptions import AuthenticationError
+from src.shared.exceptions import (
+    AuthenticationError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.shared.security import hash_password, verify_password
 
 
@@ -18,12 +23,32 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
     model = UserModel
     conflict_messages = {"email": "El email ya está registrado"}
 
+    def _normalize_branch(
+        self, role_value: str, branch_id: Optional[int]
+    ) -> Optional[int]:
+        """Concilia rol y sucursal: admin global (None); staff exige una válida.
+
+        El administrador ve y opera todas las sucursales, así que su ``branch_id``
+        se fuerza a ``None``. El vendedor/operador debe tener una sucursal existente.
+        """
+        if role_value == UserRole.ADMIN.value:
+            return None
+        if branch_id is None:
+            raise ValidationError(
+                "El vendedor/operador requiere una sucursal asignada (branchId).",
+                field="branchId",
+            )
+        if self.db.get(BranchModel, branch_id) is None:
+            raise EntityNotFoundError("Branch", branch_id)
+        return branch_id
+
     def create(self, data: UserCreate) -> UserModel:
         """Crea un usuario hasheando la contraseña; nunca la persiste en claro."""
-        payload = data.model_dump(exclude={"password", "role"})
+        payload = data.model_dump(exclude={"password", "role", "branch_id"})
         user = UserModel(
             **payload,
             role=data.role.value,
+            branch_id=self._normalize_branch(data.role.value, data.branch_id),
             hashed_password=hash_password(data.password),
         )
         return self._persist(user)
@@ -38,6 +63,9 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
             changes["role"] = UserRole(changes["role"]).value
         for field, value in changes.items():
             setattr(obj, field, value)
+        # Concilia rol↔sucursal sobre el estado resultante (cubre cambios de rol y/o
+        # de sucursal, y normaliza al admin a sucursal nula).
+        obj.branch_id = self._normalize_branch(obj.role, obj.branch_id)
         return self._persist(obj)
 
     def update_profile(self, user: UserModel, data: ProfileUpdate) -> UserModel:

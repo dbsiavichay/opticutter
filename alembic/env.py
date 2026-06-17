@@ -8,6 +8,7 @@ from alembic import context
 
 # Importar los modelos de cada módulo puebla ``Base.metadata`` para que
 # ``alembic revision --autogenerate`` detecte las tablas.
+from src.modules.branches.model import BranchModel  # noqa: F401
 from src.modules.clients.model import ClientModel  # noqa: F401
 from src.modules.optimization_drafts.model import (  # noqa: F401
     OptimizationDraftModel,
