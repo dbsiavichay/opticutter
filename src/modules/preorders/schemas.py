@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from pydantic import Field
 
+from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
     MaterialInput,
@@ -75,6 +76,7 @@ class PreOrderResponse(CamelModel):
     id: int
     code: Optional[str] = None
     client: ClientResponse = Field(..., description="Client information")
+    branch: BranchRefResponse = Field(..., description="Owning branch")
     status: PreOrderStatus
     notes: Optional[str] = None
     client_note: Optional[str] = Field(
@@ -108,6 +110,7 @@ class PreOrderSummaryResponse(CamelModel):
     id: int
     code: Optional[str] = None
     client: ClientResponse
+    branch: BranchRefResponse = Field(..., description="Owning branch")
     status: PreOrderStatus
     source: Optional[str] = None
     order_id: Optional[int] = None

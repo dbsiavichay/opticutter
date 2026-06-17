@@ -83,6 +83,10 @@ def test_create_order_freezes_snapshot_and_charges_boards(client, db_session):
     assert data["status"] == "confirmed"
     assert data["code"] == f"ORD-{datetime.utcnow().year}-{data['id']:04d}"
     assert data["client"]["id"] == c["id"]
+    # La orden expone su sucursal dueña (referencia compacta) para el dashboard.
+    assert data["branch"]["id"] == _BRANCH
+    assert data["branch"]["code"] == "MATRIZ"
+    assert data["branch"]["name"] == "Casa Matriz"
     assert len(data["optimizationHash"]) == 64
 
     # Cobro = tableros: una línea por tipo de tablero (desde materials_summary).

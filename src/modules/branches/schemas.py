@@ -39,3 +39,16 @@ class BranchResponse(BranchBase):
 
     id: int = Field(..., description="ID de la sucursal")
     is_active: bool = Field(..., description="Activa/inactiva")
+
+
+class BranchRefResponse(CamelModel):
+    """Referencia compacta a una sucursal para incrustar en otras respuestas.
+
+    La consumen órdenes, pre-órdenes y borradores para que el frontend muestre a qué
+    sucursal pertenece cada documento sin arrastrar los datos de contacto del
+    membrete (``address``/``phone``) en cada fila de un listado.
+    """
+
+    id: int = Field(..., description="ID de la sucursal")
+    code: str = Field(..., description="Código único de la sucursal")
+    name: str = Field(..., description="Nombre de la sucursal")

@@ -11,7 +11,10 @@ resume lo que cambia para el frontend (dashboard React). Detalle de auth en
 - Cada **usuario** staff (`vendedor`/`operador`) está atado a **una** sucursal
   (`branchId`). El **administrador** es global (`branchId` nulo): ve y opera todas.
 - **Órdenes, pre-órdenes y borradores** guardan su `branchId`. Es un hecho histórico:
-  reasignar la sucursal de un usuario **no** mueve sus documentos previos.
+  reasignar la sucursal de un usuario **no** mueve sus documentos previos. Sus
+  respuestas (detalle y listado) **incrustan** la sucursal dueña como un objeto
+  compacto `branch: { id, code, name }`, para que el dashboard pueda mostrar la columna
+  "Sucursal" sin una llamada extra.
 - **Clientes y productos siguen siendo globales** (una sola cartera / catálogo).
 
 ## Aislamiento (qué ve/hace cada quién)
