@@ -86,6 +86,7 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
+    branch: Mapped["BranchModel"] = relationship("BranchModel")  # noqa: F821
     order: Mapped[Optional["OrderModel"]] = relationship(  # noqa: F821
         "OrderModel", foreign_keys=[order_id]
     )

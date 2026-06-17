@@ -1,7 +1,7 @@
 from typing import Optional
 
 from sqlalchemy import JSON, ForeignKey, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
 from src.shared.mixins import AuditMixin, TimestampMixin
@@ -29,3 +29,5 @@ class OptimizationDraftModel(TimestampMixin, AuditMixin, Base):
         ForeignKey("clients.id"), nullable=True
     )
     payload: Mapped[dict] = mapped_column(JSON)
+
+    branch: Mapped["BranchModel"] = relationship("BranchModel")  # noqa: F821

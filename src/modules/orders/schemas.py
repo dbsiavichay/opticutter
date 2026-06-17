@@ -3,6 +3,7 @@ from typing import List, Literal, Optional
 
 from pydantic import Field
 
+from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
     CutSegment,
@@ -136,6 +137,7 @@ class OrderResponse(CamelModel):
     id: int
     code: Optional[str] = None
     client: ClientResponse = Field(..., description="Client information")
+    branch: BranchRefResponse = Field(..., description="Owning branch")
     status: OrderStatus
     currency: str
     subtotal: float

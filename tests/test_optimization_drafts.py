@@ -46,6 +46,9 @@ def test_create_and_get_draft_roundtrips_payload(client):
     created = resp.json()["data"]
     assert created["name"] == "Cocina Pérez"
     assert created["clientId"] is None
+    # El borrador expone su sucursal dueña (referencia compacta).
+    assert created["branch"]["id"] == 1
+    assert created["branch"]["code"] == "MATRIZ"
     assert "id" in created
     assert "createdAt" in created and "updatedAt" in created
 

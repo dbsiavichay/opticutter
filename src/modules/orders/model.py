@@ -68,6 +68,7 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
+    branch: Mapped["BranchModel"] = relationship("BranchModel")  # noqa: F821
     lines: Mapped[list["OrderLineModel"]] = relationship(
         "OrderLineModel", back_populates="order", cascade="all, delete-orphan"
     )

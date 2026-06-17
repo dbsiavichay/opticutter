@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic import Field
 
+from src.modules.branches.schemas import BranchRefResponse
 from src.shared.schemas import CamelModel
 
 
@@ -44,6 +45,7 @@ class DraftResponse(CamelModel):
     id: int
     name: str
     client_id: Optional[int] = None
+    branch: BranchRefResponse = Field(..., description="Owning branch")
     payload: dict
     created_at: datetime
     updated_at: datetime
@@ -55,5 +57,6 @@ class DraftSummaryResponse(CamelModel):
     id: int
     name: str
     client_id: Optional[int] = None
+    branch: BranchRefResponse = Field(..., description="Owning branch")
     created_at: datetime
     updated_at: datetime

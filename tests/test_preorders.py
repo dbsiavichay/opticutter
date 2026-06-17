@@ -27,6 +27,9 @@ def test_create_preorder_is_draft_with_live_optimization(client):
     assert data["code"].startswith("PRE-")
     assert data["orderId"] is None
     assert data["client"]["id"] == c["id"]
+    # La pre-orden expone su sucursal dueña (referencia compacta).
+    assert data["branch"]["id"] == 1
+    assert data["branch"]["code"] == "MATRIZ"
     assert data["expiresAt"] is not None
 
     # Inputs crudos editables (lo que el formulario del optimizador re-renderiza).
