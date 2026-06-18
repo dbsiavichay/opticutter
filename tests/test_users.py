@@ -531,9 +531,11 @@ def test_orders_read_allows_operator(client, auth):
     assert client.get("/api/v1/orders/", headers=auth("operador")).status_code == 200
 
 
-def test_orders_write_blocks_operator(client, auth):
+def test_orders_transition_allows_operator(client, auth):
+    # Operadores tienen acceso al endpoint orders:transition.
+    # El payload inválido da 422 (validación Pydantic), no 403 (auth denegada).
     resp = client.patch("/api/v1/orders/999/status", json={}, headers=auth("operador"))
-    assert resp.status_code == 403
+    assert resp.status_code not in (401, 403)
 
 
 def test_cutting_plan_allows_operator(client, auth):

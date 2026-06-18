@@ -12,6 +12,7 @@ from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
     TERMINAL_STATUSES,
+    TRANSITION_ROLES,
     TRANSITIONS,
     OrderBoardModel,
     OrderLineModel,
@@ -34,7 +35,12 @@ from src.modules.orders.schemas import (
 from src.shared.audit import Actor, system_actor
 from src.shared.branch_scope import BranchScopedMixin
 from src.shared.database import get_db
-from src.shared.exceptions import BusinessRuleError, ConflictError, EntityNotFoundError
+from src.shared.exceptions import (
+    AuthorizationError,
+    BusinessRuleError,
+    ConflictError,
+    EntityNotFoundError,
+)
 
 
 class OrderService(BranchScopedMixin):
@@ -208,15 +214,25 @@ class OrderService(BranchScopedMixin):
     ) -> OrderModel:
         """Valida y aplica una transición de estado, registrando el historial.
 
-        Gate de producción: pasar a ``cut`` exige que todas las piezas del plan
-        de corte estén marcadas como cortadas. ``actor`` audita quién la origina.
+        Verifica que el rol del actor esté autorizado para la transición concreta
+        (TRANSITION_ROLES). Gate de producción: pasar a ``cut`` exige que todas
+        las piezas del plan de corte estén marcadas.
         """
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
-        if (
-            to_status == OrderStatus.cut
-            and order.status == OrderStatus.in_production.value
-        ):
+        current = OrderStatus(order.status)
+
+        # Validación de rol por transición antes de tocar el estado.
+        if actor.role is not None:
+            allowed = TRANSITION_ROLES.get((current, to_status), ())
+            if allowed and actor.role not in (r.value for r in allowed):
+                raise AuthorizationError(
+                    f"Tu rol no puede ejecutar la transición "
+                    f"'{current.value}' → '{to_status.value}'"
+                )
+
+        # Gate: todas las piezas deben estar cortadas antes de cerrar el corte.
+        if to_status == OrderStatus.cut and order.status == OrderStatus.cutting.value:
             self._ensure_cutting_plan(order)
             pending = (
                 self.db.query(OrderPlacedPieceModel)
@@ -228,7 +244,19 @@ class OrderService(BranchScopedMixin):
             )
             if pending:
                 raise BusinessRuleError(f"Faltan {pending} pieza(s) por cortar")
+
         self._apply_transition(order, to_status, actor=actor, note=note)
+
+        # Asignación al transicionar a ``cutting``; limpieza al regresar a ``in_production``.
+        if to_status == OrderStatus.cutting:
+            order.assigned_to_id = actor.user_id
+            order.assigned_at = datetime.utcnow()
+            order.assigned_to_label = actor.label
+        elif to_status == OrderStatus.in_production and current == OrderStatus.cutting:
+            order.assigned_to_id = None
+            order.assigned_at = None
+            order.assigned_to_label = None
+
         self.db.commit()
         self.db.refresh(order)
         return order
@@ -282,9 +310,9 @@ class OrderService(BranchScopedMixin):
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
         self._ensure_cutting_plan(order)
-        if order.status != OrderStatus.in_production.value:
+        if order.status != OrderStatus.cutting.value:
             raise BusinessRuleError(
-                "Solo se pueden marcar piezas con la orden en producción"
+                "Solo se pueden marcar piezas con la orden en corte (cutting)"
             )
         piece = self.db.get(OrderPlacedPieceModel, placed_piece_id)
         if piece is None or piece.order_id != order.id:

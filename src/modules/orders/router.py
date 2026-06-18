@@ -31,12 +31,15 @@ from src.shared.responses import (
 
 router = APIRouter(prefix="/orders", tags=["orders"], responses=ERROR_RESPONSES)
 
-# Lectura/proforma: admin + vendedor + operador. Escritura (estado, factura,
-# export): admin + vendedor. Plan de corte (ver/marcar + hoja de producción):
-# admin + vendedor + operador (el operador trabaja en taller).
+# Lectura/proforma: admin + vendedor + operador. Escritura (crear, factura, export):
+# admin + vendedor. Transición de estado: admin + vendedor + operador (TRANSITION_ROLES
+# filtra por transición específica en el servicio). Plan de corte (ver + hoja de
+# producción): admin + vendedor + operador. Marcar piezas: admin + operador.
 _READ = Depends(require_permission("orders:read"))
 _WRITE = Depends(require_permission("orders:write"))
+_TRANSITION = Depends(require_permission("orders:transition"))
 _CUTTING = Depends(require_permission("cutting_plan"))
+_CUT = Depends(require_permission("orders:cut"))
 
 _FORMAT_QUERY = Query(
     default="pdf",
@@ -93,7 +96,7 @@ def update_order_status(
     order_id: int,
     data: OrderStatusUpdate,
     svc: OrderService = Depends(order_service),
-    current_user: UserModel = Depends(require_permission("orders:write")),
+    current_user: UserModel = Depends(require_permission("orders:transition")),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Transiciona el estado de una orden validando la máquina de estados."""
@@ -131,7 +134,7 @@ def mark_piece_cut(
     piece_id: int,
     data: PieceCutUpdate,
     svc: OrderService = Depends(order_service),
-    current_user: UserModel = Depends(require_permission("cutting_plan")),
+    current_user: UserModel = Depends(require_permission("orders:cut")),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
     """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.

@@ -156,17 +156,17 @@ def test_status_transitions_valid_and_invalid(client, db_session):
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
-    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "approved"})
+    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "in_production"})
     assert ok.status_code == 200
-    assert ok.json()["data"]["status"] == "approved"
+    assert ok.json()["data"]["status"] == "in_production"
 
-    ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "in_production"})
+    ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "cutting"})
     assert ok2.status_code == 200
-    assert ok2.json()["data"]["status"] == "in_production"
+    assert ok2.json()["data"]["status"] == "cutting"
     # Historial acumulado: creación + 2 transiciones.
     assert len(ok2.json()["data"]["history"]) == 3
 
-    # in_production → completed no es una transición válida.
+    # cutting → completed no es una transición válida.
     bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "completed"})
     assert bad.status_code == 422
     assert "inválida" in bad.json()["errors"][0]["message"]
@@ -189,12 +189,12 @@ def test_list_orders_filter_by_status(client, db_session):
     o1 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=600))
     _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
 
-    # Aprobar solo la primera.
-    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "approved"})
+    # Enviar la primera a producción.
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "in_production"})
 
-    approved = client.get("/api/v1/orders/", params={"status": "approved"}).json()
-    assert [o["id"] for o in approved["data"]] == [o1["id"]]
-    assert approved["meta"]["pagination"]["total"] == 1
+    in_prod = client.get("/api/v1/orders/", params={"status": "in_production"}).json()
+    assert [o["id"] for o in in_prod["data"]] == [o1["id"]]
+    assert in_prod["meta"]["pagination"]["total"] == 1
 
     confirmed = client.get("/api/v1/orders/", params={"status": "confirmed"}).json()
     assert o1["id"] not in [o["id"] for o in confirmed["data"]]

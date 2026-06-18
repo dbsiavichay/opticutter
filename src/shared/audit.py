@@ -22,11 +22,17 @@ class Actor:
     type: str
     user_id: Optional[int] = None
     label: Optional[str] = None
+    role: Optional[str] = None
 
 
 def staff_actor(user) -> Actor:
     """Actor de staff a partir del ``UserModel`` autenticado (FK + snapshot)."""
-    return Actor(ACTOR_STAFF, user_id=user.id, label=user.full_name or user.email)
+    return Actor(
+        ACTOR_STAFF,
+        user_id=user.id,
+        label=user.full_name or user.email,
+        role=user.role,
+    )
 
 
 def client_actor(label: Optional[str] = None) -> Actor:

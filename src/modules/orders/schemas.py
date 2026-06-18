@@ -149,6 +149,15 @@ class OrderResponse(CamelModel):
     notes: Optional[str] = None
     created_at: datetime
     confirmed_at: Optional[datetime] = None
+    assigned_to_id: Optional[int] = Field(
+        default=None, description="Operator who self-assigned the order (set on cutting)"
+    )
+    assigned_at: Optional[datetime] = Field(
+        default=None, description="When the operator took the order"
+    )
+    assigned_to_label: Optional[str] = Field(
+        default=None, description="Frozen operator name at assignment time"
+    )
     lines: List[OrderLineResponse] = Field(default_factory=list)
     pieces: List[OrderPieceResponse] = Field(default_factory=list)
     history: List[OrderStatusHistoryResponse] = Field(default_factory=list)
