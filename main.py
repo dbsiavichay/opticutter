@@ -17,14 +17,10 @@ from src.modules.products.router import router as products_router
 from src.modules.settings.router import router as settings_router
 from src.modules.system.router import router as system_router
 from src.modules.users.auth_router import router as auth_router
-from src.modules.users.enums import UserRole
-from src.modules.users.model import UserModel
 from src.modules.users.router import router as users_router
 from src.shared.config import config
-from src.shared.database import SessionLocal
 from src.shared.errors import register_exception_handlers
 from src.shared.middleware import CurrentUserMiddleware, RequestIDMiddleware
-from src.shared.security import hash_password
 
 # Configurar logging
 logging.basicConfig(
@@ -34,35 +30,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _seed_admin() -> None:
-    """Crea el primer administrador si ADMIN_EMAIL/ADMIN_PASSWORD están definidos y el email no existe aún."""
-    if not config.ADMIN_EMAIL or not config.ADMIN_PASSWORD:
-        return
-    db = SessionLocal()
-    try:
-        exists = (
-            db.query(UserModel).filter(UserModel.email == config.ADMIN_EMAIL).first()
-        )
-        if not exists:
-            db.add(
-                UserModel(
-                    email=config.ADMIN_EMAIL,
-                    hashed_password=hash_password(config.ADMIN_PASSWORD),
-                    role=UserRole.ADMIN.value,
-                    is_active=True,
-                )
-            )
-            db.commit()
-            logger.info("Admin sembrado: %s", config.ADMIN_EMAIL)
-    finally:
-        db.close()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manejo del ciclo de vida de la aplicación"""
     logger.info("Iniciando aplicación FastAPI")
-    _seed_admin()
     yield
     logger.info("Cerrando aplicación FastAPI")
 

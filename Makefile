@@ -54,6 +54,12 @@ run-local: ## Ejecuta la aplicación localmente
 seed-local: ## Siembra tableros y tapacantos en PostgreSQL local (puerto 5433)
 	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db .venv/bin/python scripts/seed_boards.py
 
+seed-admin: ## Crea el primer administrador desde ADMIN_EMAIL/ADMIN_PASSWORD en .env
+	.venv/bin/python scripts/seed_admin.py
+
+seed-demo: ## Siembra datos demo (sucursales/usuarios/clientes/pre-órdenes/órdenes por estado) en PostgreSQL local (5433). Usa reset=1 para regenerar.
+	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db REDIS_URL=redis://localhost:6379/0 .venv/bin/python scripts/seed_demo.py $(if $(reset),--reset)
+
 setup: ## Configuración inicial del proyecto
 	cp .env.example .env || true
 	@echo "Archivo .env creado. Edítalo según tus necesidades."
