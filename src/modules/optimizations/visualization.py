@@ -1,5 +1,6 @@
 import io
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional, Set, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -24,10 +25,81 @@ COLOR_EFFICIENCY = "#2E7D32"
 COLOR_WASTE_FILL = "#ECECEC"  # gris neutro: contrasta con el coral de las piezas
 COLOR_WASTE_OUTLINE = "#9E9E9E"
 
-# Grosor del borde de la pieza. Los lados canteados se resaltan con el mismo color
-# del borde, solo que con una línea más gruesa (sin franja de color por tipo).
+# Grosor del borde de la pieza. Los lados canteados se resaltan con una franja más
+# gruesa pegada al borde, por dentro de la pieza.
 PIECE_OUTLINE_WIDTH = 2
 EDGE_BANDING_WIDTH = PIECE_OUTLINE_WIDTH + 5
+# Paso (px) del rayado diagonal que distingue el canto duro en modo monocromo.
+HATCH_STEP = 6
+
+
+@dataclass(frozen=True)
+class _DiagramTheme:
+    """Colores del diagrama. ``brand`` (proforma, con marca) o ``mono`` (hoja de
+    producción, blanco y negro para el taller)."""
+
+    board_outline: str
+    piece_fill: str
+    piece_outline: str
+    dim: str
+    label: str
+    efficiency: str
+    waste_fill: str
+    waste_outline: str
+    edge: str  # color de la franja del canto
+
+
+_BRAND_THEME = _DiagramTheme(
+    board_outline=COLOR_BOARD_OUTLINE,
+    piece_fill=COLOR_PIECE_FILL,
+    piece_outline=COLOR_PIECE_OUTLINE,
+    dim=COLOR_DIM,
+    label=COLOR_LABEL,
+    efficiency=COLOR_EFFICIENCY,
+    waste_fill=COLOR_WASTE_FILL,
+    waste_outline=COLOR_WASTE_OUTLINE,
+    edge=COLOR_PIECE_OUTLINE,
+)
+# Monocromo: contornos/cotas/etiquetas en negro, pieza en blanco; el retazo gris ya
+# es neutro y sirve igual. El canto se diferencia por relleno (sólido vs. rayado).
+_MONO_THEME = _DiagramTheme(
+    board_outline="black",
+    piece_fill="white",
+    piece_outline="black",
+    dim="black",
+    label="black",
+    efficiency="black",
+    waste_fill=COLOR_WASTE_FILL,
+    waste_outline=COLOR_WASTE_OUTLINE,
+    edge="black",
+)
+
+
+def _draw_edge_strip(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    rect: Tuple[int, int, int, int],
+    color: str,
+    hatched: bool,
+) -> None:
+    """Pinta la franja de un canto dentro de ``rect``. Sólida (canto suave) o con
+    rayado diagonal (canto duro). El rayado se dibuja en una imagen temporal del
+    tamaño de la franja y se pega, de modo que queda recortado a la franja."""
+    x0, y0, x1, y1 = rect
+    if not hatched:
+        draw.rectangle(rect, fill=color)
+        return
+    w, h = x1 - x0, y1 - y0
+    if w <= 0 or h <= 0:
+        return
+    draw.rectangle(rect, outline=color, width=1)
+    strip = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(strip)
+    offset = -h
+    while offset < w:
+        sdraw.line([(offset, h), (offset + h, 0)], fill=color, width=1)
+        offset += HATCH_STEP
+    img.paste(strip, (x0, y0), strip)
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -75,7 +147,7 @@ def _fit_label(
 class VisualizationService:
     @staticmethod
     def generate_layout_image(
-        group: dict, target_long: int = 2000
+        group: dict, target_long: int = 2000, mono: bool = False
     ) -> Tuple[io.BytesIO, Tuple[int, int]]:
         """Dibuja un único patrón de corte ocupando todo el lienzo.
 
@@ -109,14 +181,27 @@ class VisualizationService:
         label_font = _load_font(30)
         legend_font = _load_font(32)
 
-        # ¿Hay alguna pieza canteada en este patrón? (para la entrada de leyenda).
-        has_edge_banding = any(
-            (piece.get("edges") or {}).get("sides")
-            for piece in layout.get("placed_pieces", [])
-        )
+        theme = _MONO_THEME if mono else _BRAND_THEME
+
+        # Tipos de canto presentes en el patrón (para la leyenda). Un canteado sin
+        # tipo conocido (snapshots viejos) se trata como sólido → "Soft".
+        band_types: Set[str] = set()
+        for piece in layout.get("placed_pieces", []):
+            edges = piece.get("edges") or {}
+            if edges.get("sides"):
+                bt = edges.get("band_type")
+                band_types.add(bt if bt in ("Soft", "Hard") else "Soft")
 
         VisualizationService._draw_legend(
-            draw, margin, 24, legend_font, has_edge_banding, max_x=canvas_width - margin
+            img,
+            draw,
+            margin,
+            24,
+            legend_font,
+            theme,
+            mono=mono,
+            band_types=band_types,
+            max_x=canvas_width - margin,
         )
 
         board_x = margin
@@ -133,7 +218,7 @@ class VisualizationService:
         draw.text(
             (board_x + label_w + 30, board_y - 48),
             f"Eficiencia: {efficiency:.1f}%",
-            fill=COLOR_EFFICIENCY,
+            fill=theme.efficiency,
             font=header_font,
         )
 
@@ -144,13 +229,22 @@ class VisualizationService:
                 board_x + scaled_board_width,
                 board_y + scaled_board_height,
             ],
-            outline=COLOR_BOARD_OUTLINE,
+            outline=theme.board_outline,
             width=3,
         )
 
         for piece in layout.get("placed_pieces", []):
             VisualizationService._draw_piece(
-                img, draw, board_x, board_y, scale, piece, dim_font, label_font
+                img,
+                draw,
+                board_x,
+                board_y,
+                scale,
+                piece,
+                dim_font,
+                label_font,
+                theme,
+                mono=mono,
             )
 
         for remainder in layout.get("remainders", []):
@@ -161,8 +255,8 @@ class VisualizationService:
             if rw > 5 and rh > 5:
                 draw.rectangle(
                     [rx, ry, rx + rw, ry + rh],
-                    fill=COLOR_WASTE_FILL,
-                    outline=COLOR_WASTE_OUTLINE,
+                    fill=theme.waste_fill,
+                    outline=theme.waste_outline,
                     width=1,
                 )
 
@@ -173,45 +267,69 @@ class VisualizationService:
 
     @staticmethod
     def _draw_legend(
+        img: Image.Image,
         draw: ImageDraw.ImageDraw,
         x: int,
         y: int,
         legend_font: ImageFont.ImageFont,
-        has_edge_banding: bool = False,
+        theme: _DiagramTheme,
+        mono: bool = False,
+        band_types: Optional[Set[str]] = None,
         max_x: Optional[int] = None,
     ) -> None:
-        """Dibuja la leyenda de colores (pieza, retazo y, si aplica, lado canteado).
+        """Dibuja la leyenda (pieza, retazo y, según el patrón, los cantos).
 
+        En monocromo desglosa el canto suave (muestra sólida) y el duro (muestra
+        rayada) según los tipos presentes; con marca usa una sola "Lado canteado".
         Envuelve en una nueva fila cuando una entrada se saldría de ``max_x``.
         """
+        band_types = band_types or set()
+        # entradas: (fill, outline, width, text, hatched)
         legend = [
-            (COLOR_PIECE_FILL, COLOR_PIECE_OUTLINE, PIECE_OUTLINE_WIDTH, "Pieza"),
             (
-                COLOR_WASTE_FILL,
-                COLOR_WASTE_OUTLINE,
+                theme.piece_fill,
+                theme.piece_outline,
+                PIECE_OUTLINE_WIDTH,
+                "Pieza",
+                False,
+            ),
+            (
+                theme.waste_fill,
+                theme.waste_outline,
                 PIECE_OUTLINE_WIDTH,
                 "Retazo / Desperdicio",
+                False,
             ),
         ]
-        if has_edge_banding:
+        if mono:
+            if "Soft" in band_types:
+                legend.append((theme.edge, theme.edge, 1, "Canto suave", False))
+            if "Hard" in band_types:
+                legend.append(("white", theme.edge, 1, "Canto duro", True))
+        elif band_types:
             legend.append(
-                ("white", COLOR_PIECE_OUTLINE, EDGE_BANDING_WIDTH, "Lado canteado")
+                ("white", theme.edge, EDGE_BANDING_WIDTH, "Lado canteado", False)
             )
+
+        text_color = theme.label if mono else "black"
         box = 32
         start_x = x
-        for fill, outline, width, text in legend:
+        for fill, outline, width, text, hatched in legend:
             tw, th = _text_size(text, legend_font)
             item_w = box + 12 + tw + 50
             if max_x is not None and x > start_x and x + box + 12 + tw > max_x:
                 x = start_x
                 y += box + 16
-            draw.rectangle(
-                [x, y, x + box, y + box], fill=fill, outline=outline, width=width
-            )
+            if hatched:
+                _draw_edge_strip(img, draw, (x, y, x + box, y + box), outline, True)
+            else:
+                draw.rectangle(
+                    [x, y, x + box, y + box], fill=fill, outline=outline, width=width
+                )
             draw.text(
                 (x + box + 12, y + (box - th) // 2),
                 text,
-                fill="black",
+                fill=text_color,
                 font=legend_font,
             )
             x += item_w
@@ -226,6 +344,8 @@ class VisualizationService:
         piece: dict,
         dim_font: ImageFont.ImageFont,
         label_font: ImageFont.ImageFont,
+        theme: _DiagramTheme,
+        mono: bool = False,
     ) -> None:
         """Dibuja una pieza con el alto acotado a la izquierda, el ancho abajo y la
         etiqueta al centro."""
@@ -236,35 +356,37 @@ class VisualizationService:
 
         draw.rectangle(
             [px, py, px + pw, py + ph],
-            fill=COLOR_PIECE_FILL,
-            outline=COLOR_PIECE_OUTLINE,
+            fill=theme.piece_fill,
+            outline=theme.piece_outline,
             width=PIECE_OUTLINE_WIDTH,
         )
 
-        # Lados canteados: se resaltan con el mismo color del borde de la pieza, solo
-        # que con una banda más gruesa pintada DESDE el borde HACIA ADENTRO (se dibujan
-        # antes de las cotas para que los números queden legibles encima).
+        # Lados canteados: franja gruesa pegada al borde, por dentro de la pieza. En
+        # monocromo el canto duro va rayado en diagonal y el suave (o desconocido)
+        # sólido. Se dibujan antes de las cotas para que los números queden encima.
         edges = piece.get("edges") or {}
         sides = set(edges.get("sides") or [])
         if sides:
+            hatched = mono and edges.get("band_type") == "Hard"
             w = EDGE_BANDING_WIDTH
+            color = theme.edge
             if "top" in sides:
-                draw.rectangle([px, py, px + pw, py + w], fill=COLOR_PIECE_OUTLINE)
+                _draw_edge_strip(img, draw, (px, py, px + pw, py + w), color, hatched)
             if "bottom" in sides:
-                draw.rectangle(
-                    [px, py + ph - w, px + pw, py + ph], fill=COLOR_PIECE_OUTLINE
+                _draw_edge_strip(
+                    img, draw, (px, py + ph - w, px + pw, py + ph), color, hatched
                 )
             if "left" in sides:
-                draw.rectangle([px, py, px + w, py + ph], fill=COLOR_PIECE_OUTLINE)
+                _draw_edge_strip(img, draw, (px, py, px + w, py + ph), color, hatched)
             if "right" in sides:
-                draw.rectangle(
-                    [px + pw - w, py, px + pw, py + ph], fill=COLOR_PIECE_OUTLINE
+                _draw_edge_strip(
+                    img, draw, (px + pw - w, py, px + pw, py + ph), color, hatched
                 )
 
         pad = 4
 
         # Ancho (segunda medida) sobre el borde inferior, texto horizontal.
-        ancho = _text_image(str(int(piece["width"])), dim_font, COLOR_DIM)
+        ancho = _text_image(str(int(piece["width"])), dim_font, theme.dim)
         if ancho.width <= pw - 2 * pad and ancho.height <= ph - 2 * pad:
             img.paste(
                 ancho,
@@ -273,7 +395,7 @@ class VisualizationService:
             )
 
         # Alto (primera medida) sobre el borde izquierdo, texto vertical.
-        alto = _text_image(str(int(piece["height"])), dim_font, COLOR_DIM).rotate(
+        alto = _text_image(str(int(piece["height"])), dim_font, theme.dim).rotate(
             90, expand=True
         )
         if alto.height <= ph - 2 * pad and alto.width <= pw - 2 * pad:
@@ -288,13 +410,13 @@ class VisualizationService:
         if piece_id and not piece_id.startswith("piece_"):
             label = _fit_label(piece_id, label_font, pw - 2 * pad, ph - 2 * pad)
             if label:
-                stack.append(_text_image(label, label_font, COLOR_LABEL))
+                stack.append(_text_image(label, label_font, theme.label))
 
         notation = edges.get("notation")
         if notation:
             fitted = _fit_label(notation, dim_font, pw - 2 * pad, ph - 2 * pad)
             if fitted:
-                stack.append(_text_image(fitted, dim_font, COLOR_LABEL))
+                stack.append(_text_image(fitted, dim_font, theme.label))
 
         if stack:
             gap = 2

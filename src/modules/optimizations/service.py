@@ -352,6 +352,9 @@ class OptimizationService:
             "product_id": spec.product_id,
             "code": product.code if product else None,
             "color": attrs.get("color"),
+            # Tipo canónico (``Soft``/``Hard``) para diferenciar la franja en el
+            # diagrama (suave = sólida, duro = rayada). ``None`` en snapshots viejos.
+            "band_type": attrs.get("bandType"),
             # Notación de taller calculada desde los lados NOMINALES (estable bajo
             # rotación); ``geo`` solo sirve para pintar las bandas en el lado correcto.
             # ``attributes`` se persiste en camelCase → ``bandType``.
@@ -415,6 +418,7 @@ class OptimizationService:
                     "product_name": product.name,
                     "thickness": attrs.get("thickness"),
                     "color": attrs.get("color"),
+                    "band_type": attrs.get("bandType"),
                     "net_linear_m": round(net_m, 2),
                     "linear_m": round(with_waste, 2),
                     "billed_linear_m": billed,

@@ -201,6 +201,28 @@ def test_list_orders_filter_by_status(client, db_session):
     assert len(confirmed["data"]) == 1
 
 
+def test_list_orders_filter_by_multiple_statuses(client, db_session):
+    c = _create_client(client)
+    b = _create_board(client)
+    o1 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=600))
+    o2 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
+    o3 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=400))
+
+    # o1: confirmed → in_production → cutting; o2: queda confirmed; o3: in_production.
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "in_production"})
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "cutting"})
+    client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "in_production"})
+
+    # Repetir el parámetro filtra por varios estados a la vez.
+    resp = client.get(
+        "/api/v1/orders/", params={"status": ["confirmed", "cutting"]}
+    ).json()
+    ids = {o["id"] for o in resp["data"]}
+    assert ids == {o1["id"], o2["id"]}
+    assert o3["id"] not in ids
+    assert resp["meta"]["pagination"]["total"] == 2
+
+
 def test_get_order_404(client):
     assert client.get("/api/v1/orders/999999").status_code == 404
 

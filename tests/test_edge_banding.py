@@ -395,6 +395,9 @@ def test_placed_piece_notation_includes_band_type(client):
     placed = resp.json()["data"]["layouts"][0]["placedPieces"][0]
     assert placed["rotated"] is False
     assert placed["edges"]["notation"] == "2L1C CS"
+    # El tipo canónico viaja en la pieza colocada (diferencia suave/duro en el diagrama).
+    # ``edges`` es un dict crudo → la clave se serializa tal cual (snake_case).
+    assert placed["edges"]["band_type"] == "Soft"
 
 
 # --------------------------------------------------------------------------- #
@@ -465,6 +468,38 @@ def test_order_proforma_with_edge_banding_renders(client, db_session):
     assert proforma.status_code == 200
     assert len(proforma.content) > 1000
 
+    sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
+    assert sheet.status_code == 200
+    assert len(sheet.content) > 1000
+
+
+def test_production_sheet_renders_soft_and_hard_bands(client, db_session):
+    """La hoja de producción (B/N) renderiza piezas con canto suave y duro: ejercita
+    el rayado del canto duro y ambas entradas de leyenda. El summary expone bandType."""
+    c = _create_client(client)
+    b = _create_board(client)
+    soft = _create_edge_banding(client, code="TAP-SOFT", price=2.0, band_type="Soft")
+    hard = _create_edge_banding(client, code="TAP-HARD", price=3.0, band_type="Hard")
+
+    payload = {
+        "clientId": c["id"],
+        "branchId": 1,
+        "materials": _materials(b["id"]),
+        "requirements": [
+            _requirement(soft["id"], ["top", "bottom"]),
+            _requirement(hard["id"], ["left", "right"]),
+        ],
+    }
+
+    # El resumen de tapacantos expone el tipo (campo Pydantic → camelCase ``bandType``).
+    summary = client.post("/api/v1/optimize/", json=payload).json()["data"][
+        "edgeBandingsSummary"
+    ]
+    by_code = {entry["productCode"]: entry for entry in summary}
+    assert by_code["TAP-SOFT"]["bandType"] == "Soft"
+    assert by_code["TAP-HARD"]["bandType"] == "Hard"
+
+    order = _mint_order(client, db_session, payload)
     sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
     assert sheet.status_code == 200
     assert len(sheet.content) > 1000

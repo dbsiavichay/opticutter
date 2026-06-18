@@ -64,7 +64,7 @@ class OrderService(BranchScopedMixin):
 
     def list_orders(
         self,
-        status: Optional[OrderStatus] = None,
+        status: Optional[List[OrderStatus]] = None,
         branch_scope: Optional[int] = None,
         branch_filter: Optional[int] = None,
         limit: int = 20,
@@ -72,12 +72,13 @@ class OrderService(BranchScopedMixin):
     ) -> Tuple[List[OrderModel], int]:
         """Lista órdenes (más recientes primero) con conteo total: ``(items, total)``.
 
+        ``status`` filtra por uno o varios estados (lista vacía/``None`` = todos).
         ``branch_scope`` aísla al staff a su sucursal; el admin (``None``) ve todas y
         puede estrechar a una con ``branch_filter``.
         """
         query = self.db.query(OrderModel)
-        if status is not None:
-            query = query.filter(OrderModel.status == status.value)
+        if status:
+            query = query.filter(OrderModel.status.in_([s.value for s in status]))
         query = self._apply_branch_scope(query, branch_scope, branch_filter)
         total = query.count()
         orders = query.order_by(OrderModel.id.desc()).offset(offset).limit(limit).all()
