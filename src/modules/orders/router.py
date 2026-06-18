@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -50,8 +50,9 @@ _FORMAT_QUERY = Query(
 
 @router.get("/", response_model=PaginatedResponse[OrderResponse], dependencies=[_READ])
 def list_orders(
-    status: Optional[OrderStatus] = Query(
-        default=None, description="Filtra órdenes por estado"
+    status: Optional[List[OrderStatus]] = Query(
+        default=None,
+        description="Filtra órdenes por uno o varios estados (repetir el parámetro)",
     ),
     branch_id: Optional[int] = Query(
         default=None,

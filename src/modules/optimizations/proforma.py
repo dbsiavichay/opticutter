@@ -1,5 +1,6 @@
 import base64
 import io
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Union
@@ -23,7 +24,7 @@ from reportlab.platypus import (
 )
 
 from src.modules.optimizations.carrier import ProformaCarrier
-from src.modules.optimizations.labels import edge_banding_notation
+from src.modules.optimizations.labels import BAND_TYPE_LABEL, edge_banding_notation
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
 
@@ -34,6 +35,39 @@ BRAND_BLACK = colors.HexColor("#1D1D1B")  # logo / texto / reglas
 LIGHT_CORAL = colors.HexColor("#FCE9E6")  # fondo de la caja de totales
 ZEBRA_GREY = colors.HexColor("#F5F5F5")
 TEXT_GREY = colors.HexColor("#424242")
+
+
+@dataclass(frozen=True)
+class Palette:
+    """Colores temáticos de un PDF. Permite que la proforma vaya con marca y la
+    hoja de producción en blanco y negro reutilizando los mismos builders."""
+
+    accent: colors.Color  # cabecera de tabla, regla de sección, borde de totales
+    accent_fill: colors.Color  # fondo de la caja de totales / fila TOTAL
+    text: colors.Color  # títulos y reglas oscuras
+    text_grey: colors.Color  # texto secundario en celdas
+    zebra: colors.Color  # filas alternas
+    header_text: colors.Color  # texto sobre la cabecera de tabla
+
+
+# Proforma comercial: paleta de marca. Hoja de producción: monocromo para taller
+# (cabecera negra con texto blanco e impresión/fotocopia legible en B/N).
+BRAND_PALETTE = Palette(
+    accent=BRAND_CORAL,
+    accent_fill=LIGHT_CORAL,
+    text=BRAND_BLACK,
+    text_grey=TEXT_GREY,
+    zebra=ZEBRA_GREY,
+    header_text=colors.whitesmoke,
+)
+MONO_PALETTE = Palette(
+    accent=BRAND_BLACK,
+    accent_fill=colors.HexColor("#EAEAEA"),
+    text=BRAND_BLACK,
+    text_grey=colors.HexColor("#333333"),
+    zebra=colors.HexColor("#F2F2F2"),
+    header_text=colors.white,
+)
 
 PAGE_WIDTH, PAGE_HEIGHT = A4
 LEFT_MARGIN = RIGHT_MARGIN = 0.5 * inch
@@ -115,13 +149,40 @@ def _draw_page_decoration(canvas, doc) -> None:
     canvas.restoreState()
 
 
-def _new_doc(buffer: io.BytesIO) -> SimpleDocTemplate:
-    """Documento A4 con los márgenes estándar de los PDFs de Cutter."""
+def _draw_page_decoration_plain(canvas, doc) -> None:
+    """Pie mínimo para la hoja de producción: solo fecha de generación y página.
+
+    Sin marca de agua ni banda de pie (la hoja de taller va en blanco y negro).
+    """
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.grey)
+    canvas.drawString(
+        LEFT_MARGIN,
+        0.35 * inch,
+        f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+    )
+    canvas.drawRightString(
+        PAGE_WIDTH - RIGHT_MARGIN,
+        0.35 * inch,
+        f"Página {canvas.getPageNumber()}",
+    )
+    canvas.restoreState()
+
+
+def _new_doc(
+    buffer: io.BytesIO,
+    top: float = 0.5 * inch,
+    bottom: float = 0.6 * inch,
+) -> SimpleDocTemplate:
+    """Documento A4 de Cutter. ``top``/``bottom`` se ajustan para la hoja de
+    producción (más compacta); el margen horizontal se mantiene para no recalcular
+    el ancho de las tablas."""
     return SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        topMargin=0.5 * inch,
-        bottomMargin=0.6 * inch,
+        topMargin=top,
+        bottomMargin=bottom,
         leftMargin=LEFT_MARGIN,
         rightMargin=RIGHT_MARGIN,
     )
@@ -192,55 +253,63 @@ class ProformaService:
 
     @staticmethod
     def generate_production_sheet_pdf(carrier: ProformaCarrier) -> io.BytesIO:
-        """Hoja de producción para el taller: lista de corte y disposición, SIN precios."""
+        """Hoja de producción para el taller: en blanco y negro, sin membrete, lista
+        de corte y disposición SIN precios. Aprovecha al máximo el papel (márgenes y
+        espaciados compactos) y diferencia el tipo de canto (suave/duro)."""
         buffer = io.BytesIO()
-        doc = _new_doc(buffer)
+        doc = _new_doc(buffer, top=0.4 * inch, bottom=0.45 * inch)
+        pal = MONO_PALETTE
+        pad = 4
 
         styles = getSampleStyleSheet()
         heading_style = _heading_style(styles)
         cell_style = _cell_style(styles)
 
         story = []
-        story.extend(
-            ProformaService._build_header(carrier, styles, "HOJA DE PRODUCCIÓN")
+        story.extend(ProformaService._build_production_header(carrier, styles, pal))
+        story.append(Spacer(1, 0.12 * inch))
+
+        story.extend(_section("LISTA DE CORTE", heading_style, pal, space_after=4))
+        story.append(
+            ProformaService._build_requirements_table(carrier, cell_style, pal, pad)
         )
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.12 * inch))
 
-        story.extend(_section("CLIENTE", heading_style))
-        story.append(ProformaService._build_client_table(carrier))
-        story.append(Spacer(1, 0.25 * inch))
-
-        story.extend(_section("LISTA DE CORTE", heading_style))
-        story.append(ProformaService._build_requirements_table(carrier, cell_style))
-        story.append(Spacer(1, 0.25 * inch))
-
-        story.extend(_section("TABLEROS A UTILIZAR", heading_style))
-        story.append(ProformaService._build_materials_plain_table(carrier, cell_style))
-        story.append(Spacer(1, 0.2 * inch))
-        story.append(ProformaService._build_boards_total_table(carrier))
+        story.extend(_section("TABLEROS A UTILIZAR", heading_style, pal, space_after=4))
+        story.append(
+            ProformaService._build_materials_plain_table(carrier, cell_style, pal, pad)
+        )
+        story.append(Spacer(1, 0.1 * inch))
+        story.append(ProformaService._build_boards_total_table(carrier, pal))
 
         if carrier.edge_bandings_summary:
-            story.append(Spacer(1, 0.25 * inch))
-            story.extend(_section("TAPACANTOS A APLICAR", heading_style))
+            story.append(Spacer(1, 0.12 * inch))
+            story.extend(
+                _section("TAPACANTOS A APLICAR", heading_style, pal, space_after=4)
+            )
             story.append(
                 ProformaService._build_edge_bandings_table(
-                    carrier, cell_style, with_prices=False
+                    carrier, cell_style, with_prices=False, palette=pal, pad=pad
                 )
             )
 
-        story.append(Spacer(1, 0.25 * inch))
-        story.extend(_section("RESUMEN DE CORTE Y CANTO", heading_style))
-        story.append(ProformaService._build_cut_summary_table(carrier))
+        story.append(Spacer(1, 0.12 * inch))
+        story.extend(
+            _section("RESUMEN DE CORTE Y CANTO", heading_style, pal, space_after=4)
+        )
+        story.append(ProformaService._build_cut_summary_table(carrier, pal, pad))
 
         story.append(PageBreak())
-        story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
+        story.extend(
+            _section("DISPOSICIÓN DE CORTES", heading_style, pal, space_after=4)
+        )
         story.append(Spacer(1, 0.08 * inch))
-        story.extend(ProformaService._build_layout_pages(carrier))
+        story.extend(ProformaService._build_layout_pages(carrier, mono=True))
 
         doc.build(
             story,
-            onFirstPage=_draw_page_decoration,
-            onLaterPages=_draw_page_decoration,
+            onFirstPage=_draw_page_decoration_plain,
+            onLaterPages=_draw_page_decoration_plain,
         )
         buffer.seek(0)
         return buffer
@@ -376,6 +445,72 @@ class ProformaService:
         return table
 
     @staticmethod
+    def _build_production_header(
+        carrier: ProformaCarrier, styles, palette: Palette = MONO_PALETTE
+    ) -> List:
+        """Cabecera compacta de taller: título + N°/fecha/cliente, sin logo ni
+        membrete. El nombre del cliente va aquí (la hoja ya no lleva sección CLIENTE).
+        """
+        client = carrier.client
+        client_name = (
+            f"{getattr(client, 'first_name', '') or ''} "
+            f"{getattr(client, 'last_name', '') or ''}".strip()
+            or "N/A"
+        )
+
+        title_style = ParagraphStyle(
+            "ProdTitle",
+            parent=styles["Normal"],
+            fontSize=15,
+            leading=18,
+            textColor=palette.text,
+            fontName="Helvetica-Bold",
+            alignment=TA_LEFT,
+        )
+        meta_style = ParagraphStyle(
+            "ProdMeta",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=palette.text,
+            alignment=TA_RIGHT,
+        )
+
+        header = Table(
+            [
+                [
+                    Paragraph("HOJA DE PRODUCCIÓN", title_style),
+                    Paragraph(
+                        f"N° {carrier.reference}<br/>"
+                        f"Fecha: {datetime.now().strftime('%d/%m/%Y')}<br/>"
+                        f"Cliente: {client_name}",
+                        meta_style,
+                    ),
+                ]
+            ],
+            colWidths=[CONTENT_WIDTH * 0.5, CONTENT_WIDTH * 0.5],
+        )
+        header.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        rule = HRFlowable(
+            width="100%",
+            thickness=1.0,
+            color=palette.text,
+            spaceBefore=4,
+            spaceAfter=4,
+        )
+        return [header, rule]
+
+    @staticmethod
     def _build_client_table(carrier: ProformaCarrier) -> Table:
         client = carrier.client
         client_name = (
@@ -408,7 +543,12 @@ class ProformaService:
         return client_table
 
     @staticmethod
-    def _build_requirements_table(carrier: ProformaCarrier, cell_style) -> Table:
+    def _build_requirements_table(
+        carrier: ProformaCarrier,
+        cell_style,
+        palette: Palette = BRAND_PALETTE,
+        pad: int = 7,
+    ) -> Table:
         requirements = carrier.requirements
         req_data = [["#", "Alto", "Ancho", "Cant.", "Tablero", "Cantos", "Etiqueta"]]
         if isinstance(requirements, list):
@@ -438,32 +578,40 @@ class ProformaService:
             ],
             repeatRows=1,
         )
-        req_table.setStyle(_data_table_style(header_size=10, body_size=9))
+        req_table.setStyle(
+            _data_table_style(header_size=10, body_size=9, palette=palette, pad=pad)
+        )
         return req_table
 
     @staticmethod
     def _build_edge_bandings_table(
-        carrier: ProformaCarrier, cell_style, with_prices: bool = True
+        carrier: ProformaCarrier,
+        cell_style,
+        with_prices: bool = True,
+        palette: Palette = BRAND_PALETTE,
+        pad: int = 7,
     ) -> Table:
         """Resumen de tapacantos por tipo. Con precios (proforma) o sin ellos
-        (hoja de producción)."""
+        (hoja de producción), con una columna ``Tipo`` (Suave/Duro) para el taller."""
         summary = carrier.edge_bandings_summary
         if with_prices:
             header = [
                 "Código",
                 "Descripción",
+                "Tipo",
                 "Espesor",
                 "Metros",
                 "P. Unit.",
                 "Subtotal",
             ]
         else:
-            header = ["Código", "Descripción", "Espesor", "Metros"]
+            header = ["Código", "Descripción", "Tipo", "Espesor", "Metros"]
         eb_data = [header]
         for entry in summary:
             row = [
                 entry.get("product_code", "N/A"),
                 Paragraph(entry.get("product_name", "N/A"), cell_style),
+                BAND_TYPE_LABEL.get(entry.get("band_type"), "-"),
                 f"{(entry.get('thickness') or 0):.2f} mm",
                 f"{entry.get('billed_linear_m', 0)} m",
             ]
@@ -475,7 +623,8 @@ class ProformaService:
         if with_prices:
             col_widths = [
                 0.9 * inch,
-                CONTENT_WIDTH - 4.3 * inch,
+                CONTENT_WIDTH - 5.1 * inch,
+                0.8 * inch,  # Tipo
                 0.9 * inch,
                 0.8 * inch,
                 0.8 * inch,
@@ -484,7 +633,8 @@ class ProformaService:
         else:
             col_widths = [
                 1.4 * inch,  # Código (más ancho: códigos largos tipo TAP-SL-CSH-22)
-                CONTENT_WIDTH - 3.0 * inch,  # Descripción (flexible)
+                CONTENT_WIDTH - 3.8 * inch,  # Descripción (flexible)
+                0.8 * inch,  # Tipo (Suave/Duro)
                 0.8 * inch,  # Espesor
                 0.8 * inch,  # Metros
             ]
@@ -493,6 +643,8 @@ class ProformaService:
             _data_table_style(
                 header_size=9 if with_prices else 10,
                 body_size=8 if with_prices else 9,
+                palette=palette,
+                pad=pad,
             )
         )
         return eb_table
@@ -545,7 +697,12 @@ class ProformaService:
         return mat_table
 
     @staticmethod
-    def _build_materials_plain_table(carrier: ProformaCarrier, cell_style) -> Table:
+    def _build_materials_plain_table(
+        carrier: ProformaCarrier,
+        cell_style,
+        palette: Palette = BRAND_PALETTE,
+        pad: int = 7,
+    ) -> Table:
         """Tableros a usar SIN precios (hoja de producción): código, dimensiones, cant.
 
         Ocupa el ancho completo del contenido para alinear con la lista de corte."""
@@ -576,7 +733,9 @@ class ProformaService:
             ],
             repeatRows=1,
         )
-        mat_table.setStyle(_data_table_style(header_size=10, body_size=9))
+        mat_table.setStyle(
+            _data_table_style(header_size=10, body_size=9, palette=palette, pad=pad)
+        )
         return mat_table
 
     @staticmethod
@@ -595,14 +754,21 @@ class ProformaService:
         return _totals_table(summary_data)
 
     @staticmethod
-    def _build_boards_total_table(carrier: ProformaCarrier) -> Table:
+    def _build_boards_total_table(
+        carrier: ProformaCarrier, palette: Palette = BRAND_PALETTE
+    ) -> Table:
         """Total de tableros a cortar, sin costos (hoja de producción)."""
         return _totals_table(
-            [["Total de tableros a cortar:", str(carrier.total_boards_used)]]
+            [["Total de tableros a cortar:", str(carrier.total_boards_used)]],
+            palette=palette,
         )
 
     @staticmethod
-    def _build_cut_summary_table(carrier: ProformaCarrier) -> Table:
+    def _build_cut_summary_table(
+        carrier: ProformaCarrier,
+        palette: Palette = BRAND_PALETTE,
+        pad: int = 7,
+    ) -> Table:
         """Metros lineales de corte y canto por plancha + total general (taller).
 
         Una fila por patrón de corte (deduplicado) con los valores por plancha; la
@@ -642,16 +808,16 @@ class ProformaService:
             ],
             repeatRows=1,
         )
-        style = _data_table_style(header_size=10, body_size=9)
+        style = _data_table_style(header_size=10, body_size=9, palette=palette, pad=pad)
         # Resalta la fila TOTAL (última) como caja de totales.
-        style.add("BACKGROUND", (0, -1), (-1, -1), LIGHT_CORAL)
+        style.add("BACKGROUND", (0, -1), (-1, -1), palette.accent_fill)
         style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
-        style.add("TEXTCOLOR", (0, -1), (-1, -1), BRAND_BLACK)
+        style.add("TEXTCOLOR", (0, -1), (-1, -1), palette.text)
         table.setStyle(style)
         return table
 
     @staticmethod
-    def _build_layout_pages(carrier: ProformaCarrier) -> List:
+    def _build_layout_pages(carrier: ProformaCarrier, mono: bool = False) -> List:
         """Una imagen por patrón, cada una a página completa ocupando el máximo."""
         layouts = carrier.layouts
         if not (isinstance(layouts, list) and layouts):
@@ -672,7 +838,7 @@ class ProformaService:
                 flowables.append(PageBreak())
 
             img_buffer, (img_w, img_h) = VisualizationService.generate_layout_image(
-                group
+                group, mono=mono
             )
             draw_width = CONTENT_WIDTH
             draw_height = draw_width * (img_h / img_w)
@@ -738,28 +904,37 @@ def _cell_style(styles) -> ParagraphStyle:
     )
 
 
-def _section(title: str, heading_style) -> List:
+def _section(
+    title: str,
+    heading_style,
+    palette: Palette = BRAND_PALETTE,
+    space_after: int = 8,
+) -> List:
     """Título de sección con regla de color debajo."""
     return [
         Paragraph(title, heading_style),
         HRFlowable(
-            width="100%", thickness=1.2, color=BRAND_CORAL, spaceBefore=2, spaceAfter=8
+            width="100%",
+            thickness=1.2,
+            color=palette.accent,
+            spaceBefore=2,
+            spaceAfter=space_after,
         ),
     ]
 
 
-def _totals_table(rows: List[List[str]]) -> Table:
+def _totals_table(rows: List[List[str]], palette: Palette = BRAND_PALETTE) -> Table:
     """Caja resaltada de totales (clave a la izquierda, valor a la derecha)."""
     table = Table(rows, colWidths=[CONTENT_WIDTH - 2.0 * inch, 2.0 * inch])
     table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, -1), LIGHT_CORAL),
-                ("BOX", (0, 0), (-1, -1), 1, BRAND_CORAL),
+                ("BACKGROUND", (0, 0), (-1, -1), palette.accent_fill),
+                ("BOX", (0, 0), (-1, -1), 1, palette.accent),
                 ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#F5C9C3")),
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, -1), 11),
-                ("TEXTCOLOR", (0, 0), (-1, -1), BRAND_BLACK),
+                ("TEXTCOLOR", (0, 0), (-1, -1), palette.text),
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
                 ("TOPPADDING", (0, 0), (-1, -1), 8),
@@ -772,21 +947,26 @@ def _totals_table(rows: List[List[str]]) -> Table:
     return table
 
 
-def _data_table_style(header_size: int, body_size: int) -> TableStyle:
-    """Estilo común para tablas de datos con cabecera azul y filas zebra."""
+def _data_table_style(
+    header_size: int,
+    body_size: int,
+    palette: Palette = BRAND_PALETTE,
+    pad: int = 7,
+) -> TableStyle:
+    """Estilo común para tablas de datos: cabecera de acento + filas zebra."""
     return TableStyle(
         [
-            ("BACKGROUND", (0, 0), (-1, 0), BRAND_CORAL),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("BACKGROUND", (0, 0), (-1, 0), palette.accent),
+            ("TEXTCOLOR", (0, 0), (-1, 0), palette.header_text),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), header_size),
             ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
             ("FONTSIZE", (0, 1), (-1, -1), body_size),
-            ("TOPPADDING", (0, 0), (-1, -1), 7),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), pad),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), pad),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA_GREY]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, palette.zebra]),
         ]
     )

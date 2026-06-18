@@ -5,6 +5,9 @@ from typing import Iterable, Optional
 # Abreviatura del tipo de canto: Suave→CS, Duro→CD (valores canónicos de BandType).
 _BAND_TYPE_ABBR = {"Soft": "CS", "Hard": "CD"}
 
+# Etiqueta legible del tipo de canto para tablas/leyendas (valores canónicos de BandType).
+BAND_TYPE_LABEL = {"Soft": "Suave", "Hard": "Duro"}
+
 
 def edge_banding_notation(sides: Iterable[str], band_type: Optional[str] = None) -> str:
     """Notación de taller de los lados canteados: ``'2L1C CS'`` (largos/cortos + tipo).

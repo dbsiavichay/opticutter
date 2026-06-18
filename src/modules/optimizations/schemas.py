@@ -83,6 +83,9 @@ class EdgeBandingSummary(CamelModel):
     product_name: str
     thickness: float
     color: Optional[str] = None
+    band_type: Optional[str] = Field(
+        default=None, description="Canonical band type: 'Soft' / 'Hard'"
+    )
     net_linear_m: float = Field(
         ..., description="Net linear meters (sum of banded sides)"
     )
