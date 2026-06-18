@@ -116,7 +116,7 @@ def test_summary_revenue_and_rates_isolated_by_status(client, db_session):
     assert data["orderCount"] == 3
     assert data["realizedRevenue"] == 100.0  # solo completed
     assert data["averageTicket"] == 100.0  # 100 / 1 completada
-    assert data["pendingOrdersCount"] == 1  # confirmed (approved: 0)
+    assert data["pendingOrdersCount"] == 1  # confirmed
     assert data["cancellationRate"] == round(1 / 3, 4)  # 1 / 3
     assert data["activeClientsCount"] == 2  # clientes 1 y 2 distintos
 
@@ -288,16 +288,16 @@ def test_operations_efficiency_mirrors_summary(client, db_session):
 def test_operations_lifecycle_dwell_times(client, db_session):
     history = [
         _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
-        _hist("approved", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),
-        _hist("in_production", datetime(2026, 6, 15, 5, 0), from_status="approved"),
+        _hist("in_production", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),
+        _hist("cutting", datetime(2026, 6, 15, 5, 0), from_status="in_production"),
     ]
-    _seed_order(db_session, status="in_production", history=history)
+    _seed_order(db_session, status="cutting", history=history)
 
     data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
     cycle = {(d["fromStatus"], d["toStatus"]): d for d in data["lifecycle"]}
-    assert cycle[("confirmed", "approved")]["avgHours"] == 2.0
-    assert cycle[("confirmed", "approved")]["sampleCount"] == 1
-    assert cycle[("approved", "in_production")]["avgHours"] == 3.0
+    assert cycle[("confirmed", "in_production")]["avgHours"] == 2.0
+    assert cycle[("confirmed", "in_production")]["sampleCount"] == 1
+    assert cycle[("in_production", "cutting")]["avgHours"] == 3.0
 
 
 def test_operations_empty_range(client):

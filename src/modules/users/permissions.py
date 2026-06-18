@@ -1,8 +1,7 @@
 """Matriz de autorización por rol (spec de la fase de enforcement).
 
-Fuente de verdad de qué rol puede acceder a qué área. Hoy es documentación viva:
-ningún endpoint la consume todavía. En la fase de enforcement, cada ruta se
-protegerá con ``require_role(*RESOURCE_ROLES[clave])`` (ver ``dependencies.py``).
+Fuente de verdad de qué rol puede acceder a qué área. En la fase de enforcement, cada
+ruta se protege con ``require_role(*RESOURCE_ROLES[clave])`` (ver ``dependencies.py``).
 
 | Área                          | administrador | vendedor | operador |
 |-------------------------------|---------------|----------|----------|
@@ -17,8 +16,12 @@ protegerá con ``require_role(*RESOURCE_ROLES[clave])`` (ver ``dependencies.py``
 | preorders                     | sí            | sí       | no       |
 | orders:write (crear/cotizar)  | sí            | sí       | no       |
 | orders:read                   | sí            | sí       | sí       |
-| cutting_plan (ver + marcar)   | sí            | sí       | sí       |
+| orders:transition (cambiar estado) | sí       | sí       | sí*      |
+| cutting_plan (ver plan)       | sí            | sí       | sí       |
+| orders:cut (marcar piezas)    | sí            | no       | sí       |
 | analytics                     | sí            | no       | no       |
+
+* La validación por transición específica vive en TRANSITION_ROLES (orders/model.py).
 """
 
 from src.modules.users.enums import UserRole
@@ -41,6 +44,8 @@ RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     "preorders": (_ADMIN, _SELLER),
     "orders:write": (_ADMIN, _SELLER),
     "orders:read": (_ADMIN, _SELLER, _OPERATOR),
+    "orders:transition": (_ADMIN, _SELLER, _OPERATOR),
     "cutting_plan": (_ADMIN, _SELLER, _OPERATOR),
+    "orders:cut": (_ADMIN, _OPERATOR),
     "analytics": (_ADMIN,),
 }

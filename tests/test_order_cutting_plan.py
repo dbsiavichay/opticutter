@@ -62,9 +62,9 @@ def _create_order(client, db_session, quantity=3, width=600):
     return _mint(client, db_session, payload)
 
 
-def _to_production(client, order_id):
-    """Avanza la orden recién creada (confirmed) hasta in_production."""
-    for status in ("approved", "in_production"):
+def _to_cutting(client, order_id):
+    """Avanza la orden recién creada (confirmed) hasta cutting."""
+    for status in ("in_production", "cutting"):
         resp = client.patch(
             f"/api/v1/orders/{order_id}/status", json={"status": status}
         )
@@ -125,8 +125,8 @@ def test_cutting_plan_unknown_order_returns_404(client):
     assert resp.status_code == 404
 
 
-def test_mark_piece_requires_in_production(client, db_session):
-    """Antes de producción no hay nada que cortar: marcar da 422."""
+def test_mark_piece_requires_cutting_state(client, db_session):
+    """Solo en estado 'cutting' se pueden marcar piezas: antes da 422."""
     order = _create_order(client, db_session)
     piece_id = _get_plan(client, order["id"])["boards"][0]["pieces"][0]["id"]
 
@@ -135,12 +135,12 @@ def test_mark_piece_requires_in_production(client, db_session):
         json={"cut": True},
     )
     assert resp.status_code == 422
-    assert "producción" in resp.json()["errors"][0]["message"]
+    assert "corte" in resp.json()["errors"][0]["message"]
 
 
 def test_mark_and_unmark_piece_updates_progress(client, db_session):
     order = _create_order(client, db_session, quantity=3)
-    _to_production(client, order["id"])
+    _to_cutting(client, order["id"])
     piece_id = _get_plan(client, order["id"])["boards"][0]["pieces"][0]["id"]
     url = f"/api/v1/orders/{order['id']}/cutting-plan/pieces/{piece_id}"
 
@@ -167,7 +167,7 @@ def test_mark_piece_of_another_order_returns_404(client, db_session):
     b = _create_board(client)
     first = _mint(client, db_session, _order_payload(c["id"], b["id"], width=600))
     second = _mint(client, db_session, _order_payload(c["id"], b["id"], width=500))
-    _to_production(client, first["id"])
+    _to_cutting(client, first["id"])
     foreign_piece = _get_plan(client, second["id"])["boards"][0]["pieces"][0]["id"]
 
     resp = client.patch(
@@ -178,9 +178,9 @@ def test_mark_piece_of_another_order_returns_404(client, db_session):
 
 
 def test_transition_to_cut_blocked_until_all_pieces_marked(client, db_session):
-    """Gate de producción: in_production → cut exige el plan de corte completo."""
+    """Gate de corte: cutting → cut exige el plan de corte completo."""
     order = _create_order(client, db_session, quantity=3)
-    _to_production(client, order["id"])
+    _to_cutting(client, order["id"])
     pieces = _get_plan(client, order["id"])["boards"][0]["pieces"]
 
     # Con 1 de 3 cortadas, la transición se rechaza informando lo pendiente.

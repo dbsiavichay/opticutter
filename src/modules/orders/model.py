@@ -5,6 +5,7 @@ from typing import Optional
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.modules.users.enums import UserRole
 from src.shared.database import Base
 from src.shared.mixins import AuditMixin, TimestampMixin
 
@@ -17,8 +18,8 @@ class OrderStatus(str, Enum):
     """
 
     confirmed = "confirmed"
-    approved = "approved"
     in_production = "in_production"
+    cutting = "cutting"
     cut = "cut"
     completed = "completed"
     cancelled = "cancelled"
@@ -27,14 +28,24 @@ class OrderStatus(str, Enum):
 # Estados sin salida: la orden ya no se transforma.
 TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled}
 
-# Mapa de transiciones válidas de la máquina de estados (ver diseño §7.2).
+# Mapa de transiciones válidas de la máquina de estados.
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
-    OrderStatus.confirmed: {OrderStatus.approved, OrderStatus.cancelled},
-    OrderStatus.approved: {OrderStatus.in_production, OrderStatus.cancelled},
-    OrderStatus.in_production: {OrderStatus.cut},
+    OrderStatus.confirmed: {OrderStatus.in_production, OrderStatus.cancelled},
+    OrderStatus.in_production: {OrderStatus.cutting},
+    OrderStatus.cutting: {OrderStatus.cut, OrderStatus.in_production},
     OrderStatus.cut: {OrderStatus.completed},
     OrderStatus.completed: set(),
     OrderStatus.cancelled: set(),
+}
+
+# Qué roles pueden ejecutar cada transición (from, to) → roles permitidos.
+TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = {
+    (OrderStatus.confirmed, OrderStatus.in_production): (UserRole.ADMIN, UserRole.SELLER),
+    (OrderStatus.confirmed, OrderStatus.cancelled): (UserRole.ADMIN, UserRole.SELLER),
+    (OrderStatus.in_production, OrderStatus.cutting): (UserRole.ADMIN, UserRole.OPERATOR),
+    (OrderStatus.cutting, OrderStatus.in_production): (UserRole.ADMIN,),
+    (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
+    (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
 }
 
 
@@ -66,6 +77,13 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     notes: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Operador autoasignado: se rellena al transicionar a ``cutting``.
+    assigned_to_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    assigned_to_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
     branch: Mapped["BranchModel"] = relationship("BranchModel")  # noqa: F821
