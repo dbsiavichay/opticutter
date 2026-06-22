@@ -57,7 +57,8 @@ def list_orders(
     branch_id: Optional[int] = Query(
         default=None,
         alias="branchId",
-        description="Solo admin: estrecha el listado a una sucursal (vacío = todas)",
+        description="Solo roles globales (admin/vendedor): estrecha el listado a una "
+        "sucursal (vacío = todas)",
     ),
     paging: PageParams = Depends(),
     svc: OrderService = Depends(order_service),
@@ -65,7 +66,8 @@ def list_orders(
 ):
     """Lista órdenes con filtro por estado y paginación opcionales.
 
-    El staff solo ve las de su sucursal; el admin ve todas (o filtra con ``branchId``).
+    El operador solo ve las de su sucursal; los roles globales (admin/vendedor) ven
+    todas (o filtran con ``branchId``).
     """
     items, total = svc.list_orders(
         status=status,

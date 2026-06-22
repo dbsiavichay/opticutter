@@ -24,10 +24,20 @@ class OptimizationDraftService(
     model = OptimizationDraftModel
 
     def create_scoped(
-        self, data: DraftCreate, branch_scope: Optional[int] = None
+        self,
+        data: DraftCreate,
+        branch_scope: Optional[int] = None,
+        default_branch_id: Optional[int] = None,
     ) -> OptimizationDraftModel:
-        """Crea un borrador en la sucursal resuelta desde el scope (no del body)."""
-        branch_id = resolve_branch_for_create(self.db, branch_scope, data.branch_id)
+        """Crea un borrador en la sucursal resuelta desde el scope.
+
+        El operador lo fija en la suya; los roles globales (admin/vendedor) usan
+        ``data.branch_id`` o, si no viene, la ``default_branch_id`` (sucursal base del
+        creador — el vendedor la predetermina, el admin debe indicar ``branchId``).
+        """
+        branch_id = resolve_branch_for_create(
+            self.db, branch_scope, data.branch_id, default_branch_id
+        )
         draft = OptimizationDraftModel(
             **data.model_dump(exclude={"branch_id"}), branch_id=branch_id
         )

@@ -2,8 +2,9 @@
 
 El *branch scope* expresa qué filas puede ver/tocar un usuario:
 
-- ``None`` → administrador global: ve y opera **todas** las sucursales (sin filtro).
-- ``int``  → staff atado a esa sucursal: solo ve/opera la suya.
+- ``None`` → rol global (administrador o vendedor): ve y opera **todas** las
+  sucursales (sin filtro).
+- ``int``  → operador atado a esa sucursal: solo ve/opera la suya.
 
 Se resuelve una vez por request (``users.dependencies.get_branch_scope``) y se
 propaga a los servicios. Este mixin centraliza el filtro de listado y la verificación
@@ -38,9 +39,9 @@ class BranchScopedMixin:
     ) -> Query:
         """Aplica el aislamiento a un listado.
 
-        - staff (``branch_scope`` no None): bloqueado a su sucursal.
-        - admin (``branch_scope`` None): sin filtro, salvo que pida estrechar a una
-          sucursal concreta con ``branch_filter``.
+        - scoped (``branch_scope`` no None, p. ej. operador): bloqueado a su sucursal.
+        - global (``branch_scope`` None, admin/vendedor): sin filtro, salvo que pida
+          estrechar a una sucursal concreta con ``branch_filter``.
         """
         if branch_scope is not None:
             return query.filter(self.model.branch_id == branch_scope)

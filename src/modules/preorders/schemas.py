@@ -35,7 +35,8 @@ class PreOrderCreate(CamelModel):
     branch_id: Optional[int] = Field(
         default=None,
         description=(
-            "Target branch. Ignored for branch staff (forced to their own branch); "
+            "Target branch. Ignored for the operator (forced to their own branch); "
+            "optional for the seller (defaults to their base branch, overridable); "
             "required for a global admin."
         ),
     )
