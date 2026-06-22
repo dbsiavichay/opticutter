@@ -24,17 +24,28 @@ def branch_letterhead(db: Session, branch_id: Optional[int]) -> Optional[dict]:
 
 
 def resolve_branch_for_create(
-    db: Session, branch_scope: Optional[int], requested_branch_id: Optional[int]
+    db: Session,
+    branch_scope: Optional[int],
+    requested_branch_id: Optional[int],
+    default_branch_id: Optional[int] = None,
 ) -> int:
     """Resuelve y valida la sucursal destino de un alta (orden/pre-orden/borrador).
 
-    - staff (``branch_scope`` no None): siempre su propia sucursal (ignora lo pedido
-      en el body, para que no pueda crear en otra sucursal).
-    - admin (``branch_scope`` None): exige ``requested_branch_id`` explícito.
+    - scoped (``branch_scope`` no None, p. ej. operador): siempre su propia sucursal
+      (ignora lo pedido en el body, para que no pueda crear en otra sucursal).
+    - global (``branch_scope`` None: admin o vendedor): usa ``requested_branch_id`` si
+      viene; si no, cae en ``default_branch_id`` (la **sucursal base** del creador). El
+      admin no tiene sucursal base (``None``), así que debe indicar ``branchId``; el
+      vendedor predetermina la suya y puede sobrescribirla con ``branchId``.
 
     Verifica que la sucursal exista y esté activa.
     """
-    branch_id = branch_scope if branch_scope is not None else requested_branch_id
+    if branch_scope is not None:
+        branch_id: Optional[int] = branch_scope
+    elif requested_branch_id is not None:
+        branch_id = requested_branch_id
+    else:
+        branch_id = default_branch_id
     if branch_id is None:
         raise ValidationError(
             "Debes indicar la sucursal de destino (branchId).", field="branchId"

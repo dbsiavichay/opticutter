@@ -73,12 +73,14 @@ def get_branch_scope(
 ) -> Optional[int]:
     """Resuelve el alcance por sucursal del usuario autenticado.
 
-    ``None`` para el administrador (global: ve y opera todas las sucursales); el
-    ``branch_id`` asignado para el staff (vendedor/operador). Como ``get_current_user``
-    lee el usuario fresco de la BD en cada request, reasignar su sucursal surte efecto
-    al instante. Un staff sin sucursal asignada es un estado inválido (403).
+    ``None`` para los roles **globales** (administrador y vendedor): ven y operan todas
+    las sucursales. El ``branch_id`` asignado para el operador, atado a la suya. Como
+    ``get_current_user`` lee el usuario fresco de la BD en cada request, reasignar su
+    sucursal surte efecto al instante. Un operador sin sucursal asignada es un estado
+    inválido (403). Nota: el vendedor conserva su ``branch_id`` como **sucursal base**
+    (default al crear, ver ``resolve_branch_for_create``), aunque su lectura sea global.
     """
-    if current_user.role == UserRole.ADMIN.value:
+    if current_user.role in (UserRole.ADMIN.value, UserRole.SELLER.value):
         return None
     if current_user.branch_id is None:
         raise AuthorizationError(

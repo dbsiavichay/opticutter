@@ -85,16 +85,21 @@ class PreOrderService(BranchScopedMixin):
         data: PreOrderCreate,
         actor: Optional[Actor] = None,
         branch_scope: Optional[int] = None,
+        default_branch_id: Optional[int] = None,
     ) -> PreOrderModel:
         """Crea una pre-orden abierta (``draft``) con los inputs del optimizador.
 
-        La sucursal se resuelve desde ``branch_scope`` (staff → la suya; admin → la
-        indicada en ``data.branch_id``). El tope antiabuso se evalúa por sucursal.
+        La sucursal se resuelve desde ``branch_scope``: el operador la fija a la suya;
+        los roles globales (admin/vendedor) usan ``data.branch_id`` si viene, o si no la
+        ``default_branch_id`` (sucursal base del creador — el vendedor la predetermina,
+        el admin no tiene y debe indicar ``branchId``). El tope antiabuso es por sucursal.
         """
         actor = actor or system_actor()
         if self.db.get(ClientModel, data.client_id) is None:
             raise EntityNotFoundError("Client", data.client_id)
-        branch_id = resolve_branch_for_create(self.db, branch_scope, data.branch_id)
+        branch_id = resolve_branch_for_create(
+            self.db, branch_scope, data.branch_id, default_branch_id
+        )
         self._enforce_open_cap(data.client_id, branch_id)
 
         validity_days = self.settings_service.get_preorder_config()[

@@ -83,13 +83,17 @@ def create_preorder(
 ):
     """Crea una pre-orden (cotización mutable) con los inputs del optimizador.
 
-    El staff la crea en su sucursal; el admin debe indicar ``branchId``.
+    El operador la crea en su sucursal; el vendedor la predetermina en su sucursal base
+    (puede sobrescribirla con ``branchId``); el admin debe indicar ``branchId``.
     """
     return ok(
         _detail(
             svc,
             svc.create(
-                data, actor=staff_actor(current_user), branch_scope=branch_scope
+                data,
+                actor=staff_actor(current_user),
+                branch_scope=branch_scope,
+                default_branch_id=current_user.branch_id,
             ),
         )
     )
@@ -106,7 +110,8 @@ def list_preorders(
     branch_id: Optional[int] = Query(
         default=None,
         alias="branchId",
-        description="Solo admin: estrecha el listado a una sucursal (vacío = todas)",
+        description="Solo roles globales (admin/vendedor): estrecha el listado a una "
+        "sucursal (vacío = todas)",
     ),
     paging: PageParams = Depends(),
     svc: PreOrderService = Depends(preorder_service),
@@ -114,7 +119,8 @@ def list_preorders(
 ):
     """Lista pre-órdenes (resumen liviano) con filtros y paginación opcionales.
 
-    El staff solo ve las de su sucursal; el admin ve todas (o filtra con ``branchId``).
+    El operador solo ve las de su sucursal; los roles globales (admin/vendedor) ven
+    todas (o filtran con ``branchId``).
     """
     items, total = svc.list_preorders(
         status=status,
