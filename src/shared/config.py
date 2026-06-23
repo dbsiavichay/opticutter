@@ -100,6 +100,38 @@ class Config:
     PREORDER_VALIDITY_DAYS = env.int("PREORDER_VALIDITY_DAYS", 15)
     MAX_OPEN_PREORDERS_PER_CLIENT = env.int("MAX_OPEN_PREORDERS_PER_CLIENT", 5)
 
+    # Niveles de precio (descuento sobre el precio base "Precio Consumidor"). Solo
+    # siembran la columna `price_tiers` de la fila singleton de `settings` en su primera
+    # lectura; la fuente de verdad en runtime es la tabla `settings` (editable vía
+    # PATCH /settings/price-tiers). El descuento se aplica solo a tableros de catálogo y
+    # se congela en la orden (auditoría histórica aunque luego cambien las tarifas).
+    PRICE_TIERS = env.json(
+        "PRICE_TIERS",
+        [
+            {
+                "code": "consumidor",
+                "name": "Precio Consumidor",
+                "rate": 0.0,
+                "is_active": True,
+                "sort_order": 1,
+            },
+            {
+                "code": "carpintero",
+                "name": "Precio Carpintero",
+                "rate": 0.02,
+                "is_active": True,
+                "sort_order": 2,
+            },
+            {
+                "code": "efectivo",
+                "name": "Precio Efectivo",
+                "rate": 0.05,
+                "is_active": True,
+                "sort_order": 3,
+            },
+        ],
+    )
+
     # Base del frontend de Maderable: compone la URL del enlace de revisión que
     # abre el cliente (el origen debe estar también en CORS_ORIGINS). El dashboard
     # usa HashRouter, por eso la base termina en "/#" (ruta = {base}/review/{token}).

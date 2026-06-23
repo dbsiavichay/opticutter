@@ -8,6 +8,7 @@ from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
 from src.modules.optimizations.patterns import base_label
+from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
@@ -32,6 +33,7 @@ from src.modules.orders.schemas import (
     PieceCutResponse,
     PlacedPieceResponse,
 )
+from src.modules.settings.service import SettingsService
 from src.shared.audit import Actor, system_actor
 from src.shared.branch_scope import BranchScopedMixin
 from src.shared.database import get_db
@@ -55,6 +57,7 @@ class OrderService(BranchScopedMixin):
     def __init__(self, db: Session):
         self.db = db
         self.optimization_service = OptimizationService(db)
+        self.settings_service = SettingsService(db)
 
     def get_or_404(self, order_id: int) -> OrderModel:
         order = self.db.get(OrderModel, order_id)
@@ -112,15 +115,20 @@ class OrderService(BranchScopedMixin):
         # congelan tal cual el snapshot. Sus líneas/piezas quedan con ``product_id``
         # nulo y se identifican por ``product_code``/``product_name``.
 
+        # Nivel de precio: se valida y se congela su rate (auditoría histórica). El
+        # descuento entra en la dedupe porque dos órdenes idénticas en geometría pero
+        # de distinto nivel NO son la misma (el nivel no está en el hash).
+        tier = self.settings_service.resolve_price_tier(data.price_tier_code)
         existing = self._find_active_duplicate(
-            branch_id, data.client_id, optimization_hash
+            branch_id, data.client_id, optimization_hash, tier["code"]
         )
         if existing is not None:
             return existing
 
-        total_boards_cost = payload["total_boards_cost"]
-        total_edge_banding_cost = payload.get("total_edge_banding_cost", 0.0)
-        grand_total = round(total_boards_cost + total_edge_banding_cost, 2)
+        # Descuento a nivel documento (solo tableros de catálogo). Las líneas se
+        # congelan a precio de lista; el snapshot embebe `pricing` para autocontención.
+        pricing = build_pricing(payload, tier)
+        snapshot = {**payload, "pricing": pricing}
 
         # La orden nace 'confirmed' (la revisión previa del cliente, antes 'quoted',
         # vive ahora en la pre-orden, que mintea esta orden al confirmar).
@@ -129,11 +137,14 @@ class OrderService(BranchScopedMixin):
             client_id=data.client_id,
             branch_id=branch_id,
             status=data.status.value,
-            optimization_snapshot=payload,
+            optimization_snapshot=snapshot,
             optimization_hash=optimization_hash,
             currency="USD",
-            subtotal=grand_total,
-            total=grand_total,
+            subtotal=pricing["subtotal"],
+            total=pricing["total"],
+            price_tier_code=tier["code"],
+            discount_rate=tier["rate"],
+            discount_amount=pricing["discount_amount"],
             total_boards_used=payload["total_boards_used"],
             source=data.source,
             notes=data.notes,
@@ -425,17 +436,25 @@ class OrderService(BranchScopedMixin):
             client=order.client,
             lines=lines,
             subtotal=order.subtotal,
+            price_tier_code=order.price_tier_code,
+            discount_rate=order.discount_rate,
+            discount_amount=order.discount_amount,
             total=order.total,
             external_invoice_id=order.external_invoice_id,
         )
 
     def _find_active_duplicate(
-        self, branch_id: int, client_id: int, optimization_hash: str
+        self,
+        branch_id: int,
+        client_id: int,
+        optimization_hash: str,
+        price_tier_code: str,
     ) -> Optional[OrderModel]:
         """Orden no terminal de la misma sucursal+cliente con igual hash (idempotencia).
 
         Incluye la sucursal en la clave: el mismo cliente puede pedir lo mismo en dos
-        sucursales y son órdenes distintas.
+        sucursales y son órdenes distintas. Incluye el nivel de precio: el descuento no
+        forma parte del hash, así que el mismo corte a distinto nivel son dos órdenes.
         """
         terminal = [s.value for s in TERMINAL_STATUSES]
         return (
@@ -444,6 +463,7 @@ class OrderService(BranchScopedMixin):
                 OrderModel.branch_id == branch_id,
                 OrderModel.client_id == client_id,
                 OrderModel.optimization_hash == optimization_hash,
+                OrderModel.price_tier_code == price_tier_code,
                 OrderModel.status.not_in(terminal),
             )
             .first()

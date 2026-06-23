@@ -30,6 +30,11 @@ class PreOrderCreate(CamelModel):
         ..., min_length=1, description="Cut list to optimize"
     )
     client_id: int = Field(..., description="Client the quote is for")
+    price_tier_code: Optional[str] = Field(
+        default="consumidor",
+        max_length=32,
+        description="Nivel de precio: consumidor (0%) | carpintero (2%) | efectivo (5%)",
+    )
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
     branch_id: Optional[int] = Field(
@@ -48,6 +53,7 @@ class PreOrderUpdate(CamelModel):
     materials: Optional[List[MaterialInput]] = Field(default=None, min_length=1)
     requirements: Optional[List[Requirement]] = Field(default=None, min_length=1)
     client_id: Optional[int] = None
+    price_tier_code: Optional[str] = Field(default=None, max_length=32)
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default=None, max_length=32)
 
@@ -79,6 +85,9 @@ class PreOrderResponse(CamelModel):
     client: ClientResponse = Field(..., description="Client information")
     branch: BranchRefResponse = Field(..., description="Owning branch")
     status: PreOrderStatus
+    price_tier_code: str = Field(
+        default="consumidor", description="Selected price tier (discount level)"
+    )
     notes: Optional[str] = None
     client_note: Optional[str] = Field(
         default=None, description="Latest change request typed by the client"
@@ -191,8 +200,17 @@ class ReviewPreOrderResponse(CamelModel):
     )
     client_name: Optional[str] = None
     currency: str
-    subtotal: float
-    total: float
+    subtotal: float = Field(
+        ..., description="Suma a precio de lista (antes del descuento)"
+    )
+    price_tier_name: Optional[str] = Field(
+        default=None, description="Nombre del nivel de precio aplicado"
+    )
+    discount_rate: float = Field(
+        default=0.0, description="Descuento aplicado (0.02 = 2%)"
+    )
+    discount_amount: float = Field(default=0.0)
+    total: float = Field(..., description="Subtotal menos el descuento")
     total_boards_used: int
     created_at: datetime
     sent_at: Optional[datetime] = None

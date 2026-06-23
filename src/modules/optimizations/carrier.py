@@ -28,11 +28,20 @@ class ProformaCarrier:
     total_edge_banding_cost: float = 0.0
     total_cut_linear_m: float = 0.0
     total_edge_banding_linear_m: float = 0.0
+    # Descuento a nivel documento (nivel de precio). 0 = sin descuento (consumidor).
+    price_tier_name: Optional[str] = None
+    discount_rate: float = 0.0
+    discount_amount: float = 0.0
+
+    @property
+    def subtotal(self) -> float:
+        """Subtotal a precio de lista: tableros + tapacantos (antes del descuento)."""
+        return round(self.total_boards_cost + self.total_edge_banding_cost, 2)
 
     @property
     def total_cost(self) -> float:
-        """Costo total: tableros + tapacantos."""
-        return round(self.total_boards_cost + self.total_edge_banding_cost, 2)
+        """Costo total: subtotal a precio de lista menos el descuento del nivel."""
+        return round(self.subtotal - self.discount_amount, 2)
 
     @classmethod
     def from_payload(
@@ -55,6 +64,9 @@ class ProformaCarrier:
         company = company or {}
         if branch is not None:
             company = {**company, "branches": [branch]}
+        # Bloque de descuento (lo adjunta build_pricing antes de armar el carrier; un
+        # payload sin él = sin descuento, p. ej. snapshots previos a la feature).
+        pricing = payload.get("pricing") or {}
         return cls(
             reference=reference,
             client=client,
@@ -70,6 +82,9 @@ class ProformaCarrier:
             total_edge_banding_cost=payload.get("total_edge_banding_cost", 0.0),
             total_cut_linear_m=payload.get("total_cut_linear_m", 0.0),
             total_edge_banding_linear_m=payload.get("total_edge_banding_linear_m", 0.0),
+            price_tier_name=pricing.get("price_tier_name"),
+            discount_rate=pricing.get("discount_rate", 0.0),
+            discount_amount=pricing.get("discount_amount", 0.0),
         )
 
     @classmethod
@@ -90,4 +105,8 @@ class ProformaCarrier:
         )
         # La orden congela el conteo de tableros al confirmar.
         carrier.total_boards_used = order.total_boards_used
+        # El descuento congelado vive en columnas de la orden (fuente de verdad); el
+        # nombre del nivel viene del snapshot (from_payload ya lo leyó).
+        carrier.discount_rate = order.discount_rate
+        carrier.discount_amount = order.discount_amount
         return carrier

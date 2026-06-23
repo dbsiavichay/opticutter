@@ -95,6 +95,28 @@ class EdgeBandingSummary(CamelModel):
     total_cost: float
 
 
+class PricingSummary(CamelModel):
+    """Bloque de descuento a nivel documento (nivel de precio aplicado).
+
+    Las líneas se cobran a precio de lista ("Precio Consumidor"); ``discountAmount`` es
+    el único ajuste, calculado solo sobre los tableros de catálogo (``discountBase``).
+    """
+
+    price_tier_code: Optional[str] = Field(
+        default=None, description="Código del nivel de precio aplicado"
+    )
+    price_tier_name: Optional[str] = Field(default=None)
+    discount_rate: float = Field(
+        default=0.0, description="Descuento aplicado (0.02 = 2%)"
+    )
+    discount_base: float = Field(
+        default=0.0, description="Base del descuento: tableros de catálogo"
+    )
+    subtotal: float = Field(default=0.0, description="Suma a precio de lista")
+    discount_amount: float = Field(default=0.0)
+    total: float = Field(default=0.0, description="Subtotal - descuento")
+
+
 class CatalogMaterialInput(CamelModel):
     """Material del catálogo de productos (tablero)."""
 
@@ -196,6 +218,15 @@ class OptimizeRequest(CamelModel):
             "Optional client ID. The optimization is client-agnostic (the result "
             "and its hash do not depend on the client); only proformas and orders "
             "require a client, resolved at that point."
+        ),
+    )
+    price_tier_code: Optional[str] = Field(
+        default="consumidor",
+        max_length=32,
+        description=(
+            "Nivel de precio para la proforma: consumidor (0%) | carpintero (2%) | "
+            "efectivo (5%). No afecta la geometría ni el hash de la optimización; solo "
+            "el bloque `pricing` (descuento sobre tableros de catálogo)."
         ),
     )
 
@@ -346,4 +377,8 @@ class OptimizeResponse(CamelModel):
     )
     layout_groups: Optional[List[LayoutGroup]] = Field(
         default=None, description="Cutting layouts deduplicated by identical pattern"
+    )
+    pricing: Optional[PricingSummary] = Field(
+        default=None,
+        description="Discount block for the selected price tier (document-level)",
     )

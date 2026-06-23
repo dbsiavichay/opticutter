@@ -49,6 +49,27 @@ class PreOrderSettingsUpdate(CamelModel):
     max_open_preorders_per_client: Optional[int] = Field(None, ge=1)
 
 
+# --- Niveles de precio (descuento por tipo de cliente) ------------------------
+class PriceTier(CamelModel):
+    """Un nivel de precio: descuento (rate) sobre el precio base de los tableros.
+
+    ``code`` es la identidad estable que el cliente del API envía (``priceTierCode``);
+    ``rate`` es la fracción de descuento (0.02 = 2%). ``consumidor`` (0%) es la base.
+    """
+
+    code: str = Field(..., min_length=1, max_length=32)
+    name: str = Field(..., min_length=1, max_length=64)
+    rate: float = Field(..., ge=0, le=1, description="Descuento (0.02 = 2%)")
+    is_active: bool = Field(default=True)
+    sort_order: int = Field(default=0, ge=0)
+
+
+class PriceTiersUpdate(CamelModel):
+    """Reemplaza la lista completa de niveles de precio (solo admin)."""
+
+    price_tiers: List[PriceTier] = Field(..., min_length=1)
+
+
 # --- Datos de la empresa ------------------------------------------------------
 class Branch(CamelModel):
     """Sucursal mostrada en el membrete de la proforma."""

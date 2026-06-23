@@ -70,6 +70,11 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     materials: Mapped[list] = mapped_column(JSON)
     requirements: Mapped[list] = mapped_column(JSON)
 
+    # Nivel de precio seleccionado (descuento vivo; se congela al confirmar la orden).
+    price_tier_code: Mapped[str] = mapped_column(
+        String(32), default="consumidor", server_default="consumidor"
+    )
+
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     # Última solicitud de cambios del cliente (texto libre desde el enlace de

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from src.modules.branches.service import branch_letterhead, resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.optimizations.carrier import ProformaCarrier
+from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import OptimizeRequest, OptimizeResponse
 from src.modules.optimizations.service import OptimizationService
 from src.modules.preorders.model import (
@@ -101,6 +102,8 @@ class PreOrderService(BranchScopedMixin):
             self.db, branch_scope, data.branch_id, default_branch_id
         )
         self._enforce_open_cap(data.client_id, branch_id)
+        # Valida el nivel de precio (422 si no existe/está inactivo) y lo normaliza.
+        tier = self.settings_service.resolve_price_tier(data.price_tier_code)
 
         validity_days = self.settings_service.get_preorder_config()[
             "preorder_validity_days"
@@ -112,6 +115,7 @@ class PreOrderService(BranchScopedMixin):
             status=PreOrderStatus.draft.value,
             materials=[m.model_dump(mode="json") for m in data.materials],
             requirements=[r.model_dump(mode="json") for r in data.requirements],
+            price_tier_code=tier["code"],
             source=data.source,
             notes=data.notes,
             created_at=now,
@@ -150,6 +154,9 @@ class PreOrderService(BranchScopedMixin):
             preorder.requirements = [
                 r.model_dump(mode="json") for r in data.requirements
             ]
+        if data.price_tier_code is not None:
+            tier = self.settings_service.resolve_price_tier(data.price_tier_code)
+            preorder.price_tier_code = tier["code"]
         if "notes" in fields:
             preorder.notes = data.notes
         if "source" in fields:
@@ -183,16 +190,26 @@ class PreOrderService(BranchScopedMixin):
         self.db.commit()
 
     def build_request(self, preorder: PreOrderModel) -> OptimizeRequest:
-        """Reconstruye el ``OptimizeRequest`` desde los inputs guardados."""
+        """Reconstruye el ``OptimizeRequest`` desde los inputs guardados.
+
+        Lleva el nivel de precio para que ``optimize_response`` adjunte el bloque
+        ``pricing`` (no afecta la geometría ni el hash).
+        """
         return OptimizeRequest(
             materials=preorder.materials,
             requirements=preorder.requirements,
             client_id=preorder.client_id,
+            price_tier_code=preorder.price_tier_code,
         )
 
     def compute_payload(self, preorder: PreOrderModel) -> Tuple[dict, str]:
         """Payload del optimizador (cache-first) para la pre-orden."""
         return self.optimization_service.compute(self.build_request(preorder))
+
+    def build_pricing_for(self, preorder: PreOrderModel, payload: dict) -> dict:
+        """Bloque de descuento (vivo) del nivel de precio de la pre-orden."""
+        tier = self.settings_service.resolve_price_tier(preorder.price_tier_code)
+        return build_pricing(payload, tier)
 
     def build_optimize_response(self, preorder: PreOrderModel) -> OptimizeResponse:
         """Respuesta de optimización (con cliente) para el detalle interno."""
@@ -201,6 +218,7 @@ class PreOrderService(BranchScopedMixin):
     def build_carrier(self, preorder: PreOrderModel) -> ProformaCarrier:
         """Portador de proforma (PDF) recalculado para la pre-orden (cotización)."""
         payload, _ = self.compute_payload(preorder)
+        payload = {**payload, "pricing": self.build_pricing_for(preorder, payload)}
         return ProformaCarrier.from_payload(
             payload,
             preorder.client,
