@@ -102,6 +102,27 @@ def _draw_edge_strip(
     img.paste(strip, (x0, y0), strip)
 
 
+def _rotated_rect(
+    board_x: int,
+    board_y: int,
+    board_height: float,
+    scale: float,
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+) -> Tuple[int, int, int, int]:
+    """Mapea un rect del tablero (mm) a su rect en píxeles tras girar el tablero 90°
+    en sentido horario. El punto de tablero ``(bx, by)`` va a ``(H - by, bx)``, así que
+    el ancho/alto en mm se intercambian: el alto pasa a la extensión horizontal y el
+    ancho a la vertical. Devuelve ``(px, py, pw, ph)``."""
+    px = board_x + int((board_height - y - h) * scale)
+    py = board_y + int(x * scale)
+    pw = int(h * scale)
+    ph = int(w * scale)
+    return px, py, pw, ph
+
+
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
     """Carga una fuente TrueType escalable; cae al bitmap por defecto si no hay."""
     for path in _FONT_CANDIDATES:
@@ -166,9 +187,11 @@ class VisualizationService:
         margin = 60
         info_height = 150
 
+        # El tablero se dibuja girado 90° en sentido horario (landscape): el alto del
+        # tablero pasa a ser la extensión horizontal del lienzo y el ancho la vertical.
         scale = target_long / max(board_width, board_height)
-        scaled_board_width = int(board_width * scale)
-        scaled_board_height = int(board_height * scale)
+        scaled_board_width = int(board_height * scale)
+        scaled_board_height = int(board_width * scale)
 
         canvas_width = scaled_board_width + 2 * margin
         canvas_height = info_height + scaled_board_height + 2 * margin
@@ -239,6 +262,7 @@ class VisualizationService:
                 draw,
                 board_x,
                 board_y,
+                board_height,
                 scale,
                 piece,
                 dim_font,
@@ -248,10 +272,16 @@ class VisualizationService:
             )
 
         for remainder in layout.get("remainders", []):
-            rx = board_x + int(remainder["x"] * scale)
-            ry = board_y + int(remainder["y"] * scale)
-            rw = int(remainder["width"] * scale)
-            rh = int(remainder["height"] * scale)
+            rx, ry, rw, rh = _rotated_rect(
+                board_x,
+                board_y,
+                board_height,
+                scale,
+                remainder["x"],
+                remainder["y"],
+                remainder["width"],
+                remainder["height"],
+            )
             if rw > 5 and rh > 5:
                 draw.rectangle(
                     [rx, ry, rx + rw, ry + rh],
@@ -340,6 +370,7 @@ class VisualizationService:
         draw: ImageDraw.ImageDraw,
         board_x: int,
         board_y: int,
+        board_height: float,
         scale: float,
         piece: dict,
         dim_font: ImageFont.ImageFont,
@@ -347,12 +378,19 @@ class VisualizationService:
         theme: _DiagramTheme,
         mono: bool = False,
     ) -> None:
-        """Dibuja una pieza con el alto acotado a la izquierda, el ancho abajo y la
-        etiqueta al centro."""
-        px = board_x + int(piece["x"] * scale)
-        py = board_y + int(piece["y"] * scale)
-        pw = int(piece["width"] * scale)
-        ph = int(piece["height"] * scale)
+        """Dibuja una pieza (tablero girado 90° horario) con una cota acotada a la
+        izquierda, otra abajo y la etiqueta al centro. Tras el giro el alto en mm es la
+        extensión horizontal del rect y el ancho la vertical."""
+        px, py, pw, ph = _rotated_rect(
+            board_x,
+            board_y,
+            board_height,
+            scale,
+            piece["x"],
+            piece["y"],
+            piece["width"],
+            piece["height"],
+        )
 
         draw.rectangle(
             [px, py, px + pw, py + ph],
@@ -363,43 +401,47 @@ class VisualizationService:
 
         # Lados canteados: franja gruesa pegada al borde, por dentro de la pieza. En
         # monocromo el canto duro va rayado en diagonal y el suave (o desconocido)
-        # sólido. Se dibujan antes de las cotas para que los números queden encima.
+        # sólido. Se dibujan antes de las cotas para que los números queden encima. Al
+        # girar el tablero 90° horario los lados rotan: left→top, top→right,
+        # right→bottom, bottom→left.
         edges = piece.get("edges") or {}
         sides = set(edges.get("sides") or [])
         if sides:
             hatched = mono and edges.get("band_type") == "Hard"
             w = EDGE_BANDING_WIDTH
             color = theme.edge
-            if "top" in sides:
+            if "left" in sides:
                 _draw_edge_strip(img, draw, (px, py, px + pw, py + w), color, hatched)
-            if "bottom" in sides:
+            if "right" in sides:
                 _draw_edge_strip(
                     img, draw, (px, py + ph - w, px + pw, py + ph), color, hatched
                 )
-            if "left" in sides:
+            if "bottom" in sides:
                 _draw_edge_strip(img, draw, (px, py, px + w, py + ph), color, hatched)
-            if "right" in sides:
+            if "top" in sides:
                 _draw_edge_strip(
                     img, draw, (px + pw - w, py, px + pw, py + ph), color, hatched
                 )
 
         pad = 4
 
-        # Ancho (segunda medida) sobre el borde inferior, texto horizontal.
-        ancho = _text_image(str(int(piece["width"])), dim_font, theme.dim)
-        if ancho.width <= pw - 2 * pad and ancho.height <= ph - 2 * pad:
+        # Tras el giro, el alto (primera medida) es la extensión horizontal: va sobre el
+        # borde inferior con texto horizontal.
+        alto = _text_image(str(int(piece["height"])), dim_font, theme.dim)
+        if alto.width <= pw - 2 * pad and alto.height <= ph - 2 * pad:
             img.paste(
-                ancho,
-                (px + (pw - ancho.width) // 2, py + ph - ancho.height - pad),
-                ancho,
+                alto,
+                (px + (pw - alto.width) // 2, py + ph - alto.height - pad),
+                alto,
             )
 
-        # Alto (primera medida) sobre el borde izquierdo, texto vertical.
-        alto = _text_image(str(int(piece["height"])), dim_font, theme.dim).rotate(
+        # El ancho (segunda medida) es la extensión vertical: va sobre el borde izquierdo
+        # con texto vertical.
+        ancho = _text_image(str(int(piece["width"])), dim_font, theme.dim).rotate(
             90, expand=True
         )
-        if alto.height <= ph - 2 * pad and alto.width <= pw - 2 * pad:
-            img.paste(alto, (px + pad, py + (ph - alto.height) // 2), alto)
+        if ancho.height <= ph - 2 * pad and ancho.width <= pw - 2 * pad:
+            img.paste(ancho, (px + pad, py + (ph - ancho.height) // 2), ancho)
 
         # Texto centrado: la etiqueta de la pieza (etiqueta base, sin sufijo de
         # instancia y omitiendo las auto-generadas piece_N) y, debajo, la notación de
