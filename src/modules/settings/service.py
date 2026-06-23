@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -7,10 +9,12 @@ from src.modules.settings.schemas import (
     CompanySettingsUpdate,
     CuttingSettingsUpdate,
     PreOrderSettingsUpdate,
+    PriceTiersUpdate,
 )
 from src.shared.config import config
 from src.shared.context import get_current_user_id
 from src.shared.database import get_db
+from src.shared.exceptions import ValidationError
 
 # Los datos de empresa se exponen en la API como ``name/tagline/...`` pero se
 # guardan con prefijo ``company_`` en la fila singleton (que también lleva los
@@ -56,6 +60,7 @@ class SettingsService:
             edge_banding_waste_factor=config.EDGE_BANDING_WASTE_FACTOR,
             preorder_validity_days=config.PREORDER_VALIDITY_DAYS,
             max_open_preorders_per_client=config.MAX_OPEN_PREORDERS_PER_CLIENT,
+            price_tiers=config.PRICE_TIERS,
             company_name=config.COMPANY_NAME,
             company_tagline=config.COMPANY_TAGLINE,
             company_email=config.COMPANY_EMAIL,
@@ -109,6 +114,34 @@ class SettingsService:
             "preorder_validity_days": settings.preorder_validity_days,
             "max_open_preorders_per_client": settings.max_open_preorders_per_client,
         }
+
+    def get_price_tiers(self) -> list:
+        """Niveles de precio vigentes (tolera NULL/legacy cayendo al default de config)."""
+        settings = self.get_or_init()
+        return settings.price_tiers or config.PRICE_TIERS
+
+    def resolve_price_tier(self, code: Optional[str]) -> dict:
+        """Resuelve un nivel de precio activo por su ``code`` (default ``consumidor``).
+
+        Es el único punto de validación del ``priceTierCode`` que envía el cliente del
+        API: un code desconocido o inactivo es un 422 (no un default silencioso). Lo
+        consumen el optimizador, las pre-órdenes y las órdenes para aplicar/congelar el
+        descuento.
+        """
+        code = code or "consumidor"
+        for tier in self.get_price_tiers():
+            if tier.get("code") == code and tier.get("is_active", True):
+                return tier
+        raise ValidationError(f"Nivel de precio desconocido o inactivo: {code}")
+
+    def update_price_tiers(self, data: PriceTiersUpdate) -> SettingsModel:
+        """Reemplaza la lista completa de niveles de precio (solo admin)."""
+        settings = self.get_or_init()
+        settings.price_tiers = [t.model_dump(mode="json") for t in data.price_tiers]
+        self._stamp_updated_by(settings)
+        self.db.commit()
+        self.db.refresh(settings)
+        return settings
 
     def update_company(self, data: CompanySettingsUpdate) -> SettingsModel:
         """Aplica un PATCH parcial a los datos de la empresa."""

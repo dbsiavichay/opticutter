@@ -21,11 +21,13 @@ from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import base_label, group_layouts
+from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import (
     EdgeBandingSpec,
     EdgeSide,
     OptimizeRequest,
     OptimizeResponse,
+    PricingSummary,
     Requirement,
 )
 from src.modules.products.model import ProductModel, ProductType
@@ -74,6 +76,10 @@ class OptimizationService:
             client = self.db.get(ClientModel, request.client_id)
             if client is None:
                 raise EntityNotFoundError("Client", request.client_id)
+        # El descuento se aplica fuera de la caché de geometría: cada nivel reusa el
+        # mismo payload (cache-first) y solo difiere en el bloque `pricing`.
+        tier = self.settings_service.resolve_price_tier(request.price_tier_code)
+        pricing = build_pricing(payload, tier)
         return OptimizeResponse(
             id=None,
             client=client,
@@ -87,6 +93,7 @@ class OptimizationService:
             materials_summary=payload["materials_summary"],
             edge_bandings_summary=payload.get("edge_bandings_summary"),
             layout_groups=payload["layout_groups"],
+            pricing=PricingSummary(**pricing),
         )
 
     def get_cached_payload(self, optimization_hash: str) -> dict:
@@ -97,20 +104,26 @@ class OptimizationService:
         return payload
 
     def build_carrier_from_hash(
-        self, optimization_hash: str, client_id: int
+        self,
+        optimization_hash: str,
+        client_id: int,
+        price_tier_code: str = "consumidor",
     ) -> ProformaCarrier:
         """Portador de proforma para una optimización cacheada (por hash).
 
         La optimización es anónima; el cliente se aporta al renderizar (la proforma
-        necesita sus datos para el encabezado del documento).
+        necesita sus datos para el encabezado del documento). El nivel de precio no es
+        parte del hash, por lo que se aporta aquí para aplicar el descuento.
         """
         payload = self.get_cached_payload(optimization_hash)
         client = self.db.get(ClientModel, client_id)
         if client is None:
             raise EntityNotFoundError("Client", client_id)
         require_phone(client)
+        tier = self.settings_service.resolve_price_tier(price_tier_code)
+        priced_payload = {**payload, "pricing": build_pricing(payload, tier)}
         return ProformaCarrier.from_payload(
-            payload,
+            priced_payload,
             client,
             reference=f"OPT-{optimization_hash[:8]}",
             company=self.settings_service.get_company(),

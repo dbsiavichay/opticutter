@@ -740,17 +740,28 @@ class ProformaService:
 
     @staticmethod
     def _build_totals_table(carrier: ProformaCarrier) -> Table:
+        has_discount = bool(carrier.discount_amount and carrier.discount_amount > 0)
+        summary_data = []
         if carrier.edge_bandings_summary:
-            summary_data = [
-                ["Costo de tableros:", f"${carrier.total_boards_cost:.2f}"],
-                ["Costo de tapacantos:", f"${carrier.total_edge_banding_cost:.2f}"],
-                ["Costo total estimado:", f"${carrier.total_cost:.2f}"],
-            ]
+            summary_data.append(
+                ["Costo de tableros:", f"${carrier.total_boards_cost:.2f}"]
+            )
+            summary_data.append(
+                ["Costo de tapacantos:", f"${carrier.total_edge_banding_cost:.2f}"]
+            )
         else:
-            summary_data = [
-                ["Total de tableros utilizados:", str(carrier.total_boards_used)],
-                ["Costo total estimado:", f"${carrier.total_boards_cost:.2f}"],
-            ]
+            summary_data.append(
+                ["Total de tableros utilizados:", str(carrier.total_boards_used)]
+            )
+        # Una sola fila de descuento (nivel de precio), solo sobre tableros de catálogo.
+        if has_discount:
+            pct = carrier.discount_rate * 100
+            name = carrier.price_tier_name or "descuento"
+            summary_data.append(["Subtotal:", f"${carrier.subtotal:.2f}"])
+            summary_data.append(
+                [f"Descuento {name} (-{pct:g}%):", f"-${carrier.discount_amount:.2f}"]
+            )
+        summary_data.append(["Costo total estimado:", f"${carrier.total_cost:.2f}"])
         return _totals_table(summary_data)
 
     @staticmethod

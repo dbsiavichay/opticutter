@@ -34,6 +34,11 @@ class SettingsModel(TimestampMixin, AuditMixin, Base):
     preorder_validity_days: Mapped[int] = mapped_column(Integer)
     max_open_preorders_per_client: Mapped[int] = mapped_column(Integer)
 
+    # Niveles de precio: lista de tarifas {code, name, rate, is_active, sort_order}.
+    # El descuento (rate) se aplica sobre el precio base de los tableros de catálogo.
+    # Nullable/legacy se tolera leyendo config.PRICE_TIERS por defecto.
+    price_tiers: Mapped[list] = mapped_column(JSON, default=list)
+
     # Datos de la empresa (membrete de la proforma)
     company_name: Mapped[str] = mapped_column(String(128))
     company_tagline: Mapped[str] = mapped_column(String(256))

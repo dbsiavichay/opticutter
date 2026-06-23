@@ -40,9 +40,15 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
 
 # Qué roles pueden ejecutar cada transición (from, to) → roles permitidos.
 TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = {
-    (OrderStatus.confirmed, OrderStatus.in_production): (UserRole.ADMIN, UserRole.SELLER),
+    (OrderStatus.confirmed, OrderStatus.in_production): (
+        UserRole.ADMIN,
+        UserRole.SELLER,
+    ),
     (OrderStatus.confirmed, OrderStatus.cancelled): (UserRole.ADMIN, UserRole.SELLER),
-    (OrderStatus.in_production, OrderStatus.cutting): (UserRole.ADMIN, UserRole.OPERATOR),
+    (OrderStatus.in_production, OrderStatus.cutting): (
+        UserRole.ADMIN,
+        UserRole.OPERATOR,
+    ),
     (OrderStatus.cutting, OrderStatus.in_production): (UserRole.ADMIN,),
     (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
     (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
@@ -66,8 +72,18 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     optimization_hash: Mapped[str] = mapped_column(String(64))
 
     currency: Mapped[str] = mapped_column(String(8), default="USD")
+    # subtotal = suma a precio de lista (tableros + tapacantos); total = subtotal menos
+    # el descuento del nivel de precio congelado (price_tier_code/discount_rate). El
+    # rate se congela aquí para preservar el histórico aunque luego cambien las tarifas.
     subtotal: Mapped[float] = mapped_column(Float)
     total: Mapped[float] = mapped_column(Float)
+    price_tier_code: Mapped[str] = mapped_column(
+        String(32), default="consumidor", server_default="consumidor"
+    )
+    discount_rate: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    discount_amount: Mapped[float] = mapped_column(
+        Float, default=0.0, server_default="0"
+    )
     total_boards_used: Mapped[int] = mapped_column(Integer)
 
     external_invoice_id: Mapped[Optional[str]] = mapped_column(

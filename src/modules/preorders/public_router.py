@@ -47,16 +47,17 @@ def _client_meta(request: Request) -> dict:
 
 
 def _to_review_response(
-    preorder: PreOrderModel, payload: dict
+    preorder: PreOrderModel, payload: dict, pricing: dict
 ) -> ReviewPreOrderResponse:
-    """Proyección sanitizada de la pre-orden + su optimización recalculada."""
+    """Proyección sanitizada de la pre-orden + su optimización recalculada.
+
+    Las líneas se muestran a precio de lista; el descuento del nivel de precio es un
+    único ajuste a nivel documento (``pricing``).
+    """
     client = preorder.client
     client_name = (
         " ".join(part for part in [client.first_name, client.last_name] if part) or None
     )
-    total_boards_cost = payload.get("total_boards_cost", 0.0)
-    total_edge_banding_cost = payload.get("total_edge_banding_cost", 0.0)
-    total = round(total_boards_cost + total_edge_banding_cost, 2)
     lines = [
         ReviewLineResponse(
             product_code=m.get("product_code"),
@@ -94,8 +95,11 @@ def _to_review_response(
         client_note=preorder.client_note,
         client_name=client_name,
         currency="USD",
-        subtotal=total,
-        total=total,
+        subtotal=pricing["subtotal"],
+        price_tier_name=pricing.get("price_tier_name"),
+        discount_rate=pricing.get("discount_rate", 0.0),
+        discount_amount=pricing.get("discount_amount", 0.0),
+        total=pricing["total"],
         total_boards_used=payload.get("total_boards_used", 0),
         created_at=preorder.created_at,
         sent_at=preorder.sent_at,
@@ -113,7 +117,8 @@ def get_review(
     """Detalle sanitizado de la cotización asociada al token (precios vivos)."""
     preorder = svc.get_review(token)
     payload, _ = svc.preorders.compute_payload(preorder)
-    return ok(_to_review_response(preorder, payload))
+    pricing = svc.preorders.build_pricing_for(preorder, payload)
+    return ok(_to_review_response(preorder, payload, pricing))
 
 
 @router.post("/{token}/confirm", response_model=DataResponse[ReviewPreOrderResponse])
@@ -127,7 +132,8 @@ def confirm_review(
     note = data.note if data else None
     preorder = svc.confirm(token, note=note, meta=_client_meta(request))
     payload, _ = svc.preorders.compute_payload(preorder)
-    return ok(_to_review_response(preorder, payload))
+    pricing = svc.preorders.build_pricing_for(preorder, payload)
+    return ok(_to_review_response(preorder, payload, pricing))
 
 
 @router.post("/{token}/reject", response_model=DataResponse[ReviewPreOrderResponse])
@@ -141,7 +147,8 @@ def reject_review(
     note = data.note if data else None
     preorder = svc.reject(token, note=note, meta=_client_meta(request))
     payload, _ = svc.preorders.compute_payload(preorder)
-    return ok(_to_review_response(preorder, payload))
+    pricing = svc.preorders.build_pricing_for(preorder, payload)
+    return ok(_to_review_response(preorder, payload, pricing))
 
 
 @router.post(
@@ -156,7 +163,8 @@ def request_changes_review(
     note = data.note if data else None
     preorder = svc.request_changes(token, note=note)
     payload, _ = svc.preorders.compute_payload(preorder)
-    return ok(_to_review_response(preorder, payload))
+    pricing = svc.preorders.build_pricing_for(preorder, payload)
+    return ok(_to_review_response(preorder, payload, pricing))
 
 
 # Exento de la envoltura JSON: transporte de archivo PDF (igual que en preorders).

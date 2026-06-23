@@ -31,6 +31,11 @@ class OrderCreate(CamelModel):
         default=None,
         description="Owning branch (inherited from the pre-order on confirmation)",
     )
+    price_tier_code: Optional[str] = Field(
+        default="consumidor",
+        max_length=32,
+        description="Nivel de precio a congelar: consumidor (0%)|carpintero (2%)|efectivo (5%)",
+    )
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
     status: Literal[OrderStatus.confirmed] = Field(
@@ -79,8 +84,15 @@ class OrderExportResponse(CamelModel):
     currency: str
     client: ClientResponse
     lines: List[OrderExportLine]
-    subtotal: float
-    total: float
+    subtotal: float = Field(
+        ..., description="Suma a precio de lista (antes del descuento)"
+    )
+    price_tier_code: Optional[str] = None
+    discount_rate: float = Field(
+        default=0.0, description="Descuento congelado (0.02 = 2%)"
+    )
+    discount_amount: float = Field(default=0.0)
+    total: float = Field(..., description="Subtotal menos el descuento")
     external_invoice_id: Optional[str] = None
 
 
@@ -140,8 +152,15 @@ class OrderResponse(CamelModel):
     branch: BranchRefResponse = Field(..., description="Owning branch")
     status: OrderStatus
     currency: str
-    subtotal: float
-    total: float
+    subtotal: float = Field(
+        ..., description="Suma a precio de lista (antes del descuento)"
+    )
+    price_tier_code: str = Field(default="consumidor")
+    discount_rate: float = Field(
+        default=0.0, description="Descuento congelado (0.02 = 2%)"
+    )
+    discount_amount: float = Field(default=0.0)
+    total: float = Field(..., description="Subtotal menos el descuento")
     total_boards_used: int
     optimization_hash: str
     external_invoice_id: Optional[str] = None
@@ -150,7 +169,8 @@ class OrderResponse(CamelModel):
     created_at: datetime
     confirmed_at: Optional[datetime] = None
     assigned_to_id: Optional[int] = Field(
-        default=None, description="Operator who self-assigned the order (set on cutting)"
+        default=None,
+        description="Operator who self-assigned the order (set on cutting)",
     )
     assigned_at: Optional[datetime] = Field(
         default=None, description="When the operator took the order"

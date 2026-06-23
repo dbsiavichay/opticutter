@@ -32,6 +32,11 @@ def get_proforma(
     client_id: int = Query(
         ..., alias="clientId", description="Cliente para el encabezado de la proforma"
     ),
+    price_tier_code: str = Query(
+        default="consumidor",
+        alias="priceTierCode",
+        description="Nivel de precio a aplicar (consumidor/carpintero/efectivo)",
+    ),
     format: str = Query(
         default="pdf",
         description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
@@ -40,6 +45,6 @@ def get_proforma(
     svc: OptimizationService = Depends(optimization_service),
 ):
     """Genera la proforma PDF de una optimización cacheada (por hash)."""
-    carrier = svc.build_carrier_from_hash(optimization_hash, client_id)
+    carrier = svc.build_carrier_from_hash(optimization_hash, client_id, price_tier_code)
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
     return pdf_response(pdf_buffer, f"proforma_{optimization_hash[:8]}.pdf", format)

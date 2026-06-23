@@ -15,6 +15,7 @@ from src.modules.preorders.public_router import router as preorders_public_route
 from src.modules.preorders.router import router as preorders_router
 from src.modules.products.router import router as products_router
 from src.modules.settings.router import router as settings_router
+from src.modules.settings.router import tiers_router as settings_tiers_router
 from src.modules.system.router import router as system_router
 from src.modules.users.auth_router import router as auth_router
 from src.modules.users.router import router as users_router
@@ -79,6 +80,7 @@ app.include_router(preorders_router, prefix="/api/v1")
 app.include_router(preorders_public_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(settings_tiers_router, prefix="/api/v1")
 
 
 @app.get("/")
