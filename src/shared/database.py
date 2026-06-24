@@ -8,12 +8,7 @@ class Base(DeclarativeBase):
     """Clase base para todos los modelos ORM."""
 
 
-# ``check_same_thread`` solo aplica a SQLite; otros motores no lo aceptan.
-_connect_args = (
-    {"check_same_thread": False} if config.DATABASE_URL.startswith("sqlite") else {}
-)
-
-engine = create_engine(config.DATABASE_URL, connect_args=_connect_args)
+engine = create_engine(config.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

@@ -38,15 +38,7 @@ class Config:
         ],
     )
 
-    # DATABASE_URL es obligatorio en producción; con default en otros entornos.
-    DATABASE_URL = (
-        env("DATABASE_URL")
-        if ENVIRONMENT == "production"
-        else env(
-            "DATABASE_URL",
-            "sqlite:///./cutter_local.db" if ENVIRONMENT == "local" else "",
-        )
-    )
+    DATABASE_URL = env("DATABASE_URL")
 
     REDIS_URL = env(
         "REDIS_URL",
