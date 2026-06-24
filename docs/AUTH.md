@@ -11,7 +11,11 @@ matriz de permisos.
 |----------------------|----------------------------------------------|
 | `administrador`      | Acceso total (gestión, config, analítica).   |
 | `vendedor`           | Comercial: catálogo (lectura), clientes, optimizador, pre-órdenes, órdenes. |
-| `operador`           | Taller: lectura de órdenes y plan de corte.  |
+| `operador`           | Taller (corte): lectura de órdenes, plan de corte y marcado de piezas. |
+| `canteador`          | Taller (canteado): su cola de canteado e inicio/fin del tapacanto; **no** ve el detalle de la orden. |
+
+`operador` y `canteador` son roles de taller atados a una sucursal; `administrador` y
+`vendedor` son globales.
 
 El login es por `email` (único). La contraseña se guarda solo como hash bcrypt.
 
@@ -62,19 +66,25 @@ Todos los errores comparten la envoltura `{ errors: [{ code, message, field? }],
 Fuente de verdad: `src/modules/users/permissions.py` (`RESOURCE_ROLES`). Cada ruta
 se protege con `Depends(require_permission("<clave>"))`.
 
-| Área (`clave`)        | administrador | vendedor | operador | Endpoints |
-|-----------------------|:---:|:---:|:---:|---|
-| `users:manage`        | ✅ | ❌ | ❌ | `/users/*` |
-| `settings:manage`     | ✅ | ❌ | ❌ | `/settings/*` |
-| `analytics`           | ✅ | ❌ | ❌ | `/analytics/*` |
-| `products:read`       | ✅ | ✅ | ❌ | `GET /products/*` |
-| `products:write`      | ✅ | ❌ | ❌ | `POST/PUT/DELETE /products/*` |
-| `clients:manage`      | ✅ | ✅ | ❌ | `/clients/*` |
-| `optimizer`           | ✅ | ✅ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
-| `preorders`           | ✅ | ✅ | ❌ | `/preorders/*` (interno) |
-| `orders:read`         | ✅ | ✅ | ✅ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/proforma` |
-| `orders:write`        | ✅ | ✅ | ❌ | `PATCH /orders/{id}/status`, `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
-| `cutting_plan`        | ✅ | ✅ | ✅ | `GET/PATCH /orders/{id}/cutting-plan*`, `GET /orders/{id}/production-sheet` |
+| Área (`clave`)        | administrador | vendedor | operador | canteador | Endpoints |
+|-----------------------|:---:|:---:|:---:|:---:|---|
+| `users:manage`        | ✅ | ❌ | ❌ | ❌ | `/users/*` |
+| `settings:manage`     | ✅ | ❌ | ❌ | ❌ | `/settings/*` |
+| `analytics`           | ✅ | ❌ | ❌ | ❌ | `/analytics/*` |
+| `products:read`       | ✅ | ✅ | ❌ | ❌ | `GET /products/*` |
+| `products:write`      | ✅ | ❌ | ❌ | ❌ | `POST/PUT/DELETE /products/*` |
+| `clients:manage`      | ✅ | ✅ | ❌ | ❌ | `/clients/*` |
+| `optimizer`           | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
+| `preorders`           | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (interno) |
+| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/proforma` |
+| `orders:write`        | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
+| `orders:transition`   | ✅ | ✅ | ✅* | ❌ | `PATCH /orders/{id}/status` (filtra por transición en `TRANSITION_ROLES`) |
+| `cutting_plan`        | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |
+| `orders:cut`          | ✅ | ❌ | ✅ | ❌ | `PATCH /orders/{id}/cutting-plan/pieces/{id}` |
+| `orders:band`         | ✅ | ❌ | ❌ | ✅ | `GET /orders/banding-queue`, `PATCH /orders/{id}/banding` |
+
+\* `orders:transition` es la puerta gruesa; qué rol puede cada transición concreta
+vive en `TRANSITION_ROLES` (`src/modules/orders/model.py`).
 
 ## Endpoints públicos (sin token)
 

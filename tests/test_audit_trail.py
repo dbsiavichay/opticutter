@@ -75,13 +75,11 @@ def test_order_status_transition_records_staff_actor(client, db_session):
     order = _mint_order(db_session, _order_payload(c["id"], b["id"]))
     admin = _admin(db_session)
 
-    resp = client.patch(
-        f"/api/v1/orders/{order.id}/status", json={"status": "in_production"}
-    )
+    resp = client.patch(f"/api/v1/orders/{order.id}/status", json={"status": "queued"})
     assert resp.status_code == 200
 
     last = resp.json()["data"]["history"][-1]
-    assert last["toStatus"] == "in_production"
+    assert last["toStatus"] == "queued"
     assert last["actor"] == "staff"
     assert last["actorUserId"] == admin.id
     assert last["actorLabel"] == _ADMIN_NAME
@@ -92,7 +90,7 @@ def test_mark_piece_cut_records_cut_by(client, db_session):
     b = _create_board(client)
     order = _mint_order(db_session, _order_payload(c["id"], b["id"]))
     admin = _admin(db_session)
-    for status in ("in_production", "cutting"):
+    for status in ("queued", "cutting"):
         client.patch(f"/api/v1/orders/{order.id}/status", json={"status": status})
 
     plan = client.get(f"/api/v1/orders/{order.id}/cutting-plan").json()["data"]

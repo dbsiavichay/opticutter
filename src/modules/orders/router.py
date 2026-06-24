@@ -7,6 +7,9 @@ from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.schemas import (
+    BandingQueueItem,
+    BandingStatusResponse,
+    BandingUpdate,
     CuttingPlanResponse,
     OrderExportResponse,
     OrderInvoiceUpdate,
@@ -40,6 +43,7 @@ _WRITE = Depends(require_permission("orders:write"))
 _TRANSITION = Depends(require_permission("orders:transition"))
 _CUTTING = Depends(require_permission("cutting_plan"))
 _CUT = Depends(require_permission("orders:cut"))
+_BAND = Depends(require_permission("orders:band"))
 
 _FORMAT_QUERY = Query(
     default="pdf",
@@ -80,6 +84,22 @@ def list_orders(
 
 
 @router.get(
+    "/banding-queue",
+    response_model=DataResponse[List[BandingQueueItem]],
+    dependencies=[_BAND],
+)
+def get_banding_queue(
+    svc: OrderService = Depends(order_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Cola de canteado del canteador: órdenes con canteado pendiente (su sucursal).
+
+    Declarada antes de ``/{order_id}`` para que la ruta paramétrica no la capture.
+    """
+    return ok(svc.list_banding_queue(branch_scope=branch_scope))
+
+
+@router.get(
     "/{order_id}", response_model=DataResponse[OrderResponse], dependencies=[_READ]
 )
 def get_order(
@@ -114,6 +134,32 @@ def update_order_status(
     )
 
 
+@router.patch(
+    "/{order_id}/banding",
+    response_model=DataResponse[BandingStatusResponse],
+)
+def update_order_banding(
+    order_id: int,
+    data: BandingUpdate,
+    svc: OrderService = Depends(order_service),
+    current_user: UserModel = Depends(require_permission("orders:band")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Registra inicio/fin del canteado (pista paralela al corte).
+
+    El canteador avanza ``in_progress`` (inicia) → ``done`` (termina) sin tocar el
+    estado de corte; corre mientras la orden está en ``cutting``/``cut``.
+    """
+    return ok(
+        svc.transition_banding(
+            order_id,
+            data.status,
+            actor=staff_actor(current_user),
+            branch_scope=branch_scope,
+        )
+    )
+
+
 @router.get(
     "/{order_id}/cutting-plan",
     response_model=DataResponse[CuttingPlanResponse],
@@ -142,7 +188,7 @@ def mark_piece_cut(
 ):
     """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.
 
-    Solo con la orden ``in_production``. Idempotente: re-marcar no cambia nada.
+    Solo con la orden en ``cutting``. Idempotente: re-marcar no cambia nada.
     """
     return ok(
         svc.mark_piece_cut(

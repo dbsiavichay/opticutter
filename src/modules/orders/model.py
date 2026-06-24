@@ -11,28 +11,54 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class OrderStatus(str, Enum):
-    """Estados del proceso productivo de una orden.
+    """Estados del proceso de CORTE de una orden.
 
     La revisión previa del cliente (cotización mutable) vive en la pre-orden; una
-    orden nace ya ``confirmed`` y desde ahí sólo avanza por producción.
+    orden nace ya ``confirmed`` y desde ahí sólo avanza por producción. ``queued``
+    es la cola de taller: la orden está lista pero el corte aún no empieza (entrar
+    a ``cutting`` marca el inicio del corte; ``cut`` su fin).
+
+    El CANTEADO corre en una pista paralela e independiente (``BandingStatus``): el
+    canteador puede ir canteando piezas que el operador libera, sin esperar a que
+    todo el corte termine.
     """
 
     confirmed = "confirmed"
-    in_production = "in_production"
+    queued = "queued"
     cutting = "cutting"
     cut = "cut"
     completed = "completed"
     cancelled = "cancelled"
 
 
+class BandingStatus(str, Enum):
+    """Estado de la pista paralela de CANTEADO (tapacantos).
+
+    Dimensión ortogonal a ``OrderStatus``: avanza por su cuenta mientras el corte
+    sigue su curso. ``not_applicable`` = la orden no lleva tapacantos (nada que
+    cantear). El canteador la mueve ``pending → in_progress → done``.
+    """
+
+    not_applicable = "not_applicable"
+    pending = "pending"
+    in_progress = "in_progress"
+    done = "done"
+
+
+# Estados de canteado que aún bloquean el cierre de la orden (queda canteado por hacer).
+BANDING_PENDING_STATUSES = {BandingStatus.pending, BandingStatus.in_progress}
+
+# Estados de corte en los que el canteado puede registrarse (ya hay piezas liberadas).
+BANDING_MUTABLE_ORDER_STATUSES = {OrderStatus.cutting, OrderStatus.cut}
+
 # Estados sin salida: la orden ya no se transforma.
 TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled}
 
 # Mapa de transiciones válidas de la máquina de estados.
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
-    OrderStatus.confirmed: {OrderStatus.in_production, OrderStatus.cancelled},
-    OrderStatus.in_production: {OrderStatus.cutting},
-    OrderStatus.cutting: {OrderStatus.cut, OrderStatus.in_production},
+    OrderStatus.confirmed: {OrderStatus.queued, OrderStatus.cancelled},
+    OrderStatus.queued: {OrderStatus.cutting},
+    OrderStatus.cutting: {OrderStatus.cut, OrderStatus.queued},
     OrderStatus.cut: {OrderStatus.completed},
     OrderStatus.completed: set(),
     OrderStatus.cancelled: set(),
@@ -40,19 +66,29 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
 
 # Qué roles pueden ejecutar cada transición (from, to) → roles permitidos.
 TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = {
-    (OrderStatus.confirmed, OrderStatus.in_production): (
+    (OrderStatus.confirmed, OrderStatus.queued): (
         UserRole.ADMIN,
         UserRole.SELLER,
     ),
     (OrderStatus.confirmed, OrderStatus.cancelled): (UserRole.ADMIN, UserRole.SELLER),
-    (OrderStatus.in_production, OrderStatus.cutting): (
+    (OrderStatus.queued, OrderStatus.cutting): (
         UserRole.ADMIN,
         UserRole.OPERATOR,
     ),
-    (OrderStatus.cutting, OrderStatus.in_production): (UserRole.ADMIN,),
+    (OrderStatus.cutting, OrderStatus.queued): (UserRole.ADMIN,),
     (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
     (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
 }
+
+# Transiciones válidas de la pista de canteado (forward-only; re-aplicar = idempotente).
+BANDING_TRANSITIONS: dict[BandingStatus, set[BandingStatus]] = {
+    BandingStatus.pending: {BandingStatus.in_progress},
+    BandingStatus.in_progress: {BandingStatus.done},
+    BandingStatus.done: set(),
+}
+
+# Qué roles pueden mover la pista de canteado.
+BANDING_TRANSITION_ROLES: tuple[UserRole, ...] = (UserRole.ADMIN, UserRole.BANDER)
 
 
 class OrderModel(TimestampMixin, AuditMixin, Base):
@@ -100,6 +136,32 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     )
     assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     assigned_to_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # Pista de CANTEADO (paralela al corte): el canteador marca inicio/fin. Se fija
+    # a ``pending`` al crear si la orden lleva tapacantos, si no ``not_applicable``.
+    banding_status: Mapped[str] = mapped_column(
+        String(16),
+        default=BandingStatus.not_applicable.value,
+        server_default=BandingStatus.not_applicable.value,
+    )
+    banding_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    banding_started_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    banding_started_by_label: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
+    banding_finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    banding_finished_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    banding_finished_by_label: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
 
     client: Mapped["ClientModel"] = relationship("ClientModel")  # noqa: F821
     branch: Mapped["BranchModel"] = relationship("BranchModel")  # noqa: F821

@@ -19,7 +19,7 @@ LOST_STATUSES = {OrderStatus.cancelled}
 # Pipeline comprometido: vinculado pero aún no completado.
 BOOKED_STATUSES = {
     OrderStatus.confirmed,
-    OrderStatus.in_production,
+    OrderStatus.queued,
     OrderStatus.cutting,
     OrderStatus.cut,
 }
@@ -30,7 +30,7 @@ PENDING_STATUSES = {OrderStatus.confirmed}
 # Etiquetas legibles por estado para los desgloses (eje del embudo).
 STATUS_LABELS = {
     OrderStatus.confirmed: "Confirmada",
-    OrderStatus.in_production: "En producción",
+    OrderStatus.queued: "En cola",
     OrderStatus.cutting: "En corte",
     OrderStatus.cut: "Cortada",
     OrderStatus.completed: "Completada",

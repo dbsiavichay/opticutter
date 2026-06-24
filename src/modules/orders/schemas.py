@@ -11,7 +11,7 @@ from src.modules.optimizations.schemas import (
     Remainder,
     Requirement,
 )
-from src.modules.orders.model import OrderStatus
+from src.modules.orders.model import BandingStatus, OrderStatus
 from src.shared.schemas import CamelModel
 
 
@@ -178,6 +178,24 @@ class OrderResponse(CamelModel):
     assigned_to_label: Optional[str] = Field(
         default=None, description="Frozen operator name at assignment time"
     )
+    banding_status: BandingStatus = Field(
+        default=BandingStatus.not_applicable,
+        description="Parallel edge-banding track (not_applicable if no edge banding)",
+    )
+    banding_started_at: Optional[datetime] = None
+    banding_started_by: Optional[int] = Field(
+        default=None, description="User id who started banding (null while pending)"
+    )
+    banding_started_by_label: Optional[str] = Field(
+        default=None, description="Frozen name of who started banding"
+    )
+    banding_finished_at: Optional[datetime] = None
+    banding_finished_by: Optional[int] = Field(
+        default=None, description="User id who finished banding"
+    )
+    banding_finished_by_label: Optional[str] = Field(
+        default=None, description="Frozen name of who finished banding"
+    )
     lines: List[OrderLineResponse] = Field(default_factory=list)
     pieces: List[OrderPieceResponse] = Field(default_factory=list)
     history: List[OrderStatusHistoryResponse] = Field(default_factory=list)
@@ -260,3 +278,32 @@ class PieceCutResponse(CamelModel):
     piece: PlacedPieceResponse
     progress: CuttingProgress = Field(..., description="Order-level progress")
     board_progress: CuttingProgress = Field(..., description="Affected board progress")
+
+
+class BandingUpdate(CamelModel):
+    """Transición de la pista de canteado solicitada por el canteador."""
+
+    status: BandingStatus = Field(
+        ..., description="Target banding status: in_progress (start) | done (finish)"
+    )
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class BandingStatusResponse(CamelModel):
+    """Vista mínima de canteado para el canteador (sin precios ni detalle de la orden)."""
+
+    order_id: int
+    order_code: Optional[str] = None
+    banding_status: BandingStatus
+    banding_started_at: Optional[datetime] = None
+    banding_finished_at: Optional[datetime] = None
+
+
+class BandingQueueItem(CamelModel):
+    """Ítem de la cola de canteado: lo mínimo para que el canteador identifique la orden."""
+
+    order_id: int
+    order_code: Optional[str] = None
+    status: OrderStatus = Field(..., description="Cutting-track status of the order")
+    banding_status: BandingStatus
+    created_at: datetime

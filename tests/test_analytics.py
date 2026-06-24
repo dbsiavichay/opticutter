@@ -288,16 +288,16 @@ def test_operations_efficiency_mirrors_summary(client, db_session):
 def test_operations_lifecycle_dwell_times(client, db_session):
     history = [
         _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
-        _hist("in_production", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),
-        _hist("cutting", datetime(2026, 6, 15, 5, 0), from_status="in_production"),
+        _hist("queued", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),
+        _hist("cutting", datetime(2026, 6, 15, 5, 0), from_status="queued"),
     ]
     _seed_order(db_session, status="cutting", history=history)
 
     data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
     cycle = {(d["fromStatus"], d["toStatus"]): d for d in data["lifecycle"]}
-    assert cycle[("confirmed", "in_production")]["avgHours"] == 2.0
-    assert cycle[("confirmed", "in_production")]["sampleCount"] == 1
-    assert cycle[("in_production", "cutting")]["avgHours"] == 3.0
+    assert cycle[("confirmed", "queued")]["avgHours"] == 2.0
+    assert cycle[("confirmed", "queued")]["sampleCount"] == 1
+    assert cycle[("queued", "cutting")]["avgHours"] == 3.0
 
 
 def test_operations_empty_range(client):

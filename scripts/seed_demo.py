@@ -3,18 +3,21 @@
 Genera un conjunto de datos completo y realista para poblar el dashboard / hacer QA:
 
 - **Sucursales**: tomadas de ``COMPANY_BRANCHES`` del entorno (.env): Sucúa y Macas.
-- **Usuarios**: 1 administrador global + 1 vendedor y 1 operador por sucursal
-  (``admin@empresa.com``, ``vendedor<slug>@empresa.com``, ``operador<slug>@empresa.com``).
+- **Usuarios**: 1 administrador global + 1 vendedor, 1 operador y 1 canteador por sucursal
+  (``admin@empresa.com``, ``vendedor<slug>@empresa.com``, ``operador<slug>@empresa.com``,
+  ``canteador<slug>@empresa.com``).
 - **Clientes**: 5, todos con celular (requisito para emitir proforma/pedido).
-- **Tableros**: reusa el catálogo si existe; si no, crea unos tableros demo (insumo
-  del optimizador).
+- **Tableros y tapacantos**: reusa el catálogo si existe; si no, crea tableros + tapacantos
+  demo coordinados (insumo del optimizador + pista de canteado).
 - **Pre-órdenes**: una en CADA estado por sucursal (draft, sent, changes_requested,
   confirmed, rejected, expired, cancelled), recorriendo el flujo real (enlace de
   revisión + acciones del cliente) donde aplica.
-- **Órdenes**: una en CADA estado por sucursal (confirmed, in_production, cutting,
+- **Órdenes**: una en CADA estado por sucursal (confirmed, queued, cutting,
   cut, completed, cancelled), avanzando la máquina de estados con los actores y
   roles correctos (el operador se autoasigna en ``cutting``, se marcan todas las
-  piezas cortadas antes de cerrar el corte, etc.).
+  piezas cortadas antes de cerrar el corte, etc.). Las órdenes de taller
+  (cutting/cut/completed) incluyen tapacantos y demuestran la pista de canteado
+  con el canteador de cada sucursal.
 
 Idempotente para los cimientos (sucursales/usuarios/clientes/tableros: get-or-create).
 Las pre-órdenes/órdenes solo se generan si aún no existen datos de demo (marcados con
@@ -47,7 +50,7 @@ from datetime import datetime, timedelta  # noqa: E402
 
 from src.modules.branches.model import BranchModel  # noqa: E402
 from src.modules.clients.model import ClientModel  # noqa: E402
-from src.modules.orders.model import OrderModel, OrderStatus  # noqa: E402
+from src.modules.orders.model import BandingStatus, OrderModel, OrderStatus  # noqa: E402
 from src.modules.orders.schemas import OrderCreate  # noqa: E402
 from src.modules.orders.service import OrderService  # noqa: E402
 from src.modules.preorders.model import (  # noqa: E402
@@ -88,6 +91,13 @@ DEMO_BOARDS = [
     ("DEMO-MDP-ROB-18", "Tablero Demo Roble 18mm", 2440, 1830, 18, 64.00),
 ]
 
+# Tapacantos demo coordinados con los dos primeros tableros (código TAP-* + diseño):
+# (code, name, thickness_mm, width_mm, band_type, precio_por_m).
+DEMO_EDGE_BANDINGS = [
+    ("TAP-MDP-BLN-19", "Tapacanto Demo Blanco 19mm", 0.45, 19, "Soft", 0.35),
+    ("TAP-MDP-NGR-19", "Tapacanto Demo Negro 19mm", 0.45, 19, "Soft", 0.35),
+]
+
 # Estados a sembrar por sucursal.
 PREORDER_STATUSES = [
     PreOrderStatus.draft,
@@ -100,7 +110,7 @@ PREORDER_STATUSES = [
 ]
 ORDER_STATUSES = [
     OrderStatus.confirmed,
-    OrderStatus.in_production,
+    OrderStatus.queued,
     OrderStatus.cutting,
     OrderStatus.cut,
     OrderStatus.completed,
@@ -157,6 +167,49 @@ def build_inputs(board: ProductModel) -> tuple[list[dict], list[dict]]:
     return materials, make_cutlist(key)
 
 
+def make_cutlist_with_banding(material_key: str, edge_band_id: int) -> list[dict]:
+    """Lista de corte con tapacantos en las piezas principales."""
+    i = next(_seq)
+    banding = {"product_id": edge_band_id, "sides": ["top", "bottom", "left", "right"]}
+    return [
+        {
+            "priority": 1,
+            "height": 600,
+            "width": 400,
+            "quantity": 2,
+            "material_key": material_key,
+            "label": f"Puerta {i}",
+            "edge_banding": banding,
+        },
+        {
+            "priority": 0,
+            "height": 350,
+            "width": 300,
+            "quantity": 3,
+            "material_key": material_key,
+            "label": f"Estante {i}",
+            "edge_banding": {"product_id": edge_band_id, "sides": ["top", "bottom"]},
+        },
+        {
+            "priority": 0,
+            "height": 700,
+            "width": 250,
+            "quantity": 2,
+            "material_key": material_key,
+            "label": f"Lateral {i}",
+        },
+    ]
+
+
+def build_inputs_with_banding(
+    board: ProductModel, edge_band: ProductModel
+) -> tuple[list[dict], list[dict]]:
+    """Materiales + lista de corte con tapacantos en algunas piezas."""
+    key = "b1"
+    materials = [{"key": key, "source": "catalog", "product_id": board.id}]
+    return materials, make_cutlist_with_banding(key, edge_band.id)
+
+
 # --------------------------------------------------------------------------- #
 # Cimientos (idempotentes)                                                     #
 # --------------------------------------------------------------------------- #
@@ -206,7 +259,7 @@ def ensure_user(db, email, full_name, role, branch_id) -> UserModel:
 
 
 def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
-    """Admin global + vendedor y operador por sucursal. Devuelve staff por sucursal."""
+    """Admin global + vendedor, operador y canteador por sucursal. Devuelve staff por sucursal."""
     ensure_user(
         db, "admin@empresa.com", "Administrador General", UserRole.ADMIN.value, None
     )
@@ -227,7 +280,18 @@ def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
             UserRole.OPERATOR.value,
             branch.id,
         )
-        staff[branch.id] = {"seller": seller, "operator": operator}
+        bander = ensure_user(
+            db,
+            f"canteador{slug}@empresa.com",
+            f"Canteador {branch.name}",
+            UserRole.BANDER.value,
+            branch.id,
+        )
+        staff[branch.id] = {
+            "seller": seller,
+            "operator": operator,
+            "bander": bander,
+        }
     return staff
 
 
@@ -290,6 +354,49 @@ def ensure_boards(db) -> list[ProductModel]:
         print(f"  + Tablero {code} ({name})")
     db.flush()
     return boards
+
+
+def ensure_edge_bandings(db) -> list[ProductModel]:
+    """Reusa tapacantos demo existentes; si no hay, crea los del catálogo demo."""
+    existing = (
+        db.query(ProductModel)
+        .filter(
+            ProductModel.type == ProductType.EDGE_BANDING.value,
+            ProductModel.code.in_([c for c, *_ in DEMO_EDGE_BANDINGS]),
+        )
+        .order_by(ProductModel.id)
+        .all()
+    )
+    if len(existing) == len(DEMO_EDGE_BANDINGS):
+        print(f"  = Usando {len(existing)} tapacanto(s) demo existentes")
+        return existing
+
+    edge_bands = []
+    for code, name, thickness, width, band_type, price in DEMO_EDGE_BANDINGS:
+        band = db.query(ProductModel).filter(ProductModel.code == code).first()
+        if band is None:
+            band = ProductModel(
+                type=ProductType.EDGE_BANDING.value,
+                code=code,
+                name=name,
+                description=name,
+                price=price,
+                is_active=True,
+                attributes={
+                    "thickness": thickness,
+                    "width": width,
+                    "bandType": band_type,
+                    "color": None,
+                    "length": None,
+                },
+            )
+            db.add(band)
+            print(f"  + Tapacanto {code} ({name})")
+        else:
+            print(f"  = Tapacanto {code} ya existía")
+        edge_bands.append(band)
+    db.flush()
+    return edge_bands
 
 
 # --------------------------------------------------------------------------- #
@@ -368,8 +475,14 @@ def _mark_all_pieces_cut(svc: OrderService, order_id: int, actor):
             svc.mark_piece_cut(order_id, piece.id, cut=True, actor=actor)
 
 
-def drive_order_to(svc, order, target, seller_actor, operator_actor):
-    """Avanza la orden por la máquina de estados hasta ``target``."""
+def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_actor=None):
+    """Avanza la orden por la máquina de estados hasta ``target``.
+
+    Si ``bander_actor`` se da, también avanza la pista de canteado según el estado
+    objetivo: ``cutting`` → in_progress; ``cut``/``completed`` → done.
+    """
+    has_banding = bander_actor is not None
+
     if target == OrderStatus.confirmed:
         return
     if target == OrderStatus.cancelled:
@@ -380,11 +493,11 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor):
 
     svc.transition(
         order.id,
-        OrderStatus.in_production,
+        OrderStatus.queued,
         actor=seller_actor,
-        note="Enviada a producción",
+        note="Enviada a la cola de producción",
     )
-    if target == OrderStatus.in_production:
+    if target == OrderStatus.queued:
         return
 
     # El operador se autoasigna al tomar el corte.
@@ -395,9 +508,19 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor):
         note="Operador toma el corte",
     )
     if target == OrderStatus.cutting:
+        if has_banding:
+            svc.transition_banding(
+                order.id, BandingStatus.in_progress, actor=bander_actor
+            )
         return
 
+    # Para cerrar el corte: marcar todas las piezas y finalizar el canteado primero.
     _mark_all_pieces_cut(svc, order.id, operator_actor)
+    if has_banding:
+        svc.transition_banding(
+            order.id, BandingStatus.in_progress, actor=bander_actor
+        )
+        svc.transition_banding(order.id, BandingStatus.done, actor=bander_actor)
     svc.transition(
         order.id, OrderStatus.cut, actor=operator_actor, note="Corte finalizado"
     )
@@ -409,13 +532,26 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor):
     )
 
 
-def seed_order(db, status, branch, client, seller, operator, board):
-    """Crea una orden y la lleva al ``status`` objetivo por la máquina de estados."""
+def seed_order(
+    db, status, branch, client, seller, operator, board, bander=None, edge_band=None
+):
+    """Crea una orden y la lleva al ``status`` objetivo por la máquina de estados.
+
+    Si ``bander`` y ``edge_band`` se proporcionan, la orden incluye tapacantos y
+    la pista de canteado se avanza según el estado objetivo.
+    """
     svc = OrderService(db)
     seller_actor = staff_actor(seller)
     operator_actor = staff_actor(operator)
+    bander_actor = staff_actor(bander) if bander and edge_band else None
 
-    materials, requirements = build_inputs(board)
+    if bander_actor:
+        materials, requirements = build_inputs_with_banding(board, edge_band)
+        notes = f"Orden demo con tapacantos en estado {status.value}"
+    else:
+        materials, requirements = build_inputs(board)
+        notes = f"Orden demo en estado {status.value}"
+
     order = svc.create(
         OrderCreate(
             materials=materials,
@@ -423,20 +559,28 @@ def seed_order(db, status, branch, client, seller, operator, board):
             client_id=client.id,
             branch_id=branch.id,
             source=SEED_SOURCE,
-            notes=f"Orden demo en estado {status.value}",
+            notes=notes,
         ),
         actor=seller_actor,
     )
-    drive_order_to(svc, order, status, seller_actor, operator_actor)
+    drive_order_to(svc, order, status, seller_actor, operator_actor, bander_actor)
     db.refresh(order)
     return order
 
 
-def seed_transactional(db, branches, clients, staff, boards):
-    """Una pre-orden y una orden en cada estado, por sucursal."""
+def seed_transactional(db, branches, clients, staff, boards, edge_bands):
+    """Una pre-orden y una orden en cada estado, por sucursal.
+
+    Las órdenes en estados de taller (cutting/cut/completed) se crean con tapacantos
+    para demostrar la pista de canteado con el canteador de la sucursal.
+    """
+    # Estados que deben incluir tapacantos para demostrar el flujo de canteado.
+    BANDING_STATUSES = {OrderStatus.cutting, OrderStatus.cut, OrderStatus.completed}
+
     for branch in branches:
         seller = staff[branch.id]["seller"]
         operator = staff[branch.id]["operator"]
+        bander = staff[branch.id]["bander"]
         print(f"\n  Sucursal {branch.name}:")
 
         for i, status in enumerate(PREORDER_STATUSES):
@@ -448,8 +592,21 @@ def seed_transactional(db, branches, clients, staff, boards):
         for i, status in enumerate(ORDER_STATUSES):
             client = clients[(i + 2) % len(clients)]
             board = boards[i % len(boards)]
-            order = seed_order(db, status, branch, client, seller, operator, board)
-            print(f"    + Orden {order.code} [{order.status}]")
+            use_banding = status in BANDING_STATUSES and edge_bands
+            edge_band = edge_bands[i % len(edge_bands)] if use_banding else None
+            order = seed_order(
+                db,
+                status,
+                branch,
+                client,
+                seller,
+                operator,
+                board,
+                bander=bander if use_banding else None,
+                edge_band=edge_band,
+            )
+            banding_note = f" (canteado: {order.banding_status})" if use_banding else ""
+            print(f"    + Orden {order.code} [{order.status}]{banding_note}")
 
 
 def reset_demo(db):
@@ -486,8 +643,9 @@ def main():
         staff = ensure_users(db, branches)
         print("Clientes:")
         clients = ensure_clients(db)
-        print("Tableros:")
+        print("Tableros y tapacantos:")
         boards = ensure_boards(db)
+        edge_bands = ensure_edge_bandings(db)
         db.commit()
 
         existing_demo = (
@@ -500,11 +658,13 @@ def main():
             )
         else:
             print("\nPre-órdenes y órdenes (una por estado, por sucursal):")
-            seed_transactional(db, branches, clients, staff, boards)
+            seed_transactional(db, branches, clients, staff, boards, edge_bands)
             db.commit()
 
         print("\n✅ Seed completado.")
-        print("   Usuarios: admin@empresa.com + vendedor/operador por sucursal")
+        print(
+            "   Usuarios: admin@empresa.com + vendedor/operador/canteador por sucursal"
+        )
         print(f"   Contraseña de todos los usuarios: {SEED_PASSWORD}")
     except Exception as e:
         db.rollback()
