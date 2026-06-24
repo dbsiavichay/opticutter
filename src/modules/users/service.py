@@ -29,13 +29,15 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         """Concilia rol y sucursal: admin global (None); staff exige una válida.
 
         El administrador ve y opera todas las sucursales, así que su ``branch_id``
-        se fuerza a ``None``. El vendedor/operador debe tener una sucursal existente.
+        se fuerza a ``None``. Vendedor/operador/canteador deben tener una sucursal
+        existente.
         """
         if role_value == UserRole.ADMIN.value:
             return None
         if branch_id is None:
             raise ValidationError(
-                "El vendedor/operador requiere una sucursal asignada (branchId).",
+                "El vendedor, operador o canteador requiere una sucursal "
+                "asignada (branchId).",
                 field="branchId",
             )
         if self.db.get(BranchModel, branch_id) is None:

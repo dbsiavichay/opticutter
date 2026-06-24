@@ -156,9 +156,9 @@ def test_status_transitions_valid_and_invalid(client, db_session):
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
-    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "in_production"})
+    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "queued"})
     assert ok.status_code == 200
-    assert ok.json()["data"]["status"] == "in_production"
+    assert ok.json()["data"]["status"] == "queued"
 
     ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "cutting"})
     assert ok2.status_code == 200
@@ -190,9 +190,9 @@ def test_list_orders_filter_by_status(client, db_session):
     _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
 
     # Enviar la primera a producción.
-    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "in_production"})
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued"})
 
-    in_prod = client.get("/api/v1/orders/", params={"status": "in_production"}).json()
+    in_prod = client.get("/api/v1/orders/", params={"status": "queued"}).json()
     assert [o["id"] for o in in_prod["data"]] == [o1["id"]]
     assert in_prod["meta"]["pagination"]["total"] == 1
 
@@ -208,10 +208,10 @@ def test_list_orders_filter_by_multiple_statuses(client, db_session):
     o2 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
     o3 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=400))
 
-    # o1: confirmed → in_production → cutting; o2: queda confirmed; o3: in_production.
-    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "in_production"})
+    # o1: confirmed → queued → cutting; o2: queda confirmed; o3: queued.
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued"})
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "cutting"})
-    client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "in_production"})
+    client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "queued"})
 
     # Repetir el parámetro filtra por varios estados a la vez.
     resp = client.get(

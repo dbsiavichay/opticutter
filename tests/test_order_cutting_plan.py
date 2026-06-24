@@ -64,7 +64,7 @@ def _create_order(client, db_session, quantity=3, width=600):
 
 def _to_cutting(client, order_id):
     """Avanza la orden recién creada (confirmed) hasta cutting."""
-    for status in ("in_production", "cutting"):
+    for status in ("queued", "cutting"):
         resp = client.patch(
             f"/api/v1/orders/{order_id}/status", json={"status": status}
         )

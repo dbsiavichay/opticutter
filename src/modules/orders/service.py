@@ -12,9 +12,14 @@ from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
 from src.modules.orders.model import (
+    BANDING_MUTABLE_ORDER_STATUSES,
+    BANDING_PENDING_STATUSES,
+    BANDING_TRANSITION_ROLES,
+    BANDING_TRANSITIONS,
     TERMINAL_STATUSES,
     TRANSITION_ROLES,
     TRANSITIONS,
+    BandingStatus,
     OrderBoardModel,
     OrderLineModel,
     OrderModel,
@@ -24,6 +29,8 @@ from src.modules.orders.model import (
     OrderStatusHistoryModel,
 )
 from src.modules.orders.schemas import (
+    BandingQueueItem,
+    BandingStatusResponse,
     CuttingPlanResponse,
     CuttingProgress,
     OrderBoardResponse,
@@ -132,11 +139,18 @@ class OrderService(BranchScopedMixin):
 
         # La orden nace 'confirmed' (la revisión previa del cliente, antes 'quoted',
         # vive ahora en la pre-orden, que mintea esta orden al confirmar).
+        # Pista de canteado: arranca 'pending' si la orden lleva tapacantos (algo que
+        # cantear), si no 'not_applicable' (no participa del gate de cierre).
+        has_banding = bool(payload.get("edge_bandings_summary"))
+        banding_status = (
+            BandingStatus.pending if has_banding else BandingStatus.not_applicable
+        )
         now = datetime.utcnow()
         order = OrderModel(
             client_id=data.client_id,
             branch_id=branch_id,
             status=data.status.value,
+            banding_status=banding_status.value,
             optimization_snapshot=snapshot,
             optimization_hash=optimization_hash,
             currency="USD",
@@ -257,14 +271,22 @@ class OrderService(BranchScopedMixin):
             if pending:
                 raise BusinessRuleError(f"Faltan {pending} pieza(s) por cortar")
 
+        # Gate de cierre: si la orden lleva tapacantos, el canteado debe estar
+        # terminado antes de completarla (las órdenes sin canteado pasan directo).
+        if (
+            to_status == OrderStatus.completed
+            and BandingStatus(order.banding_status) in BANDING_PENDING_STATUSES
+        ):
+            raise BusinessRuleError("Falta terminar el canteado")
+
         self._apply_transition(order, to_status, actor=actor, note=note)
 
-        # Asignación al transicionar a ``cutting``; limpieza al regresar a ``in_production``.
+        # Asignación al transicionar a ``cutting``; limpieza al regresar a ``queued``.
         if to_status == OrderStatus.cutting:
             order.assigned_to_id = actor.user_id
             order.assigned_at = datetime.utcnow()
             order.assigned_to_label = actor.label
-        elif to_status == OrderStatus.in_production and current == OrderStatus.cutting:
+        elif to_status == OrderStatus.queued and current == OrderStatus.cutting:
             order.assigned_to_id = None
             order.assigned_at = None
             order.assigned_to_label = None
@@ -315,9 +337,9 @@ class OrderService(BranchScopedMixin):
     ) -> PieceCutResponse:
         """Marca (o desmarca) una pieza colocada como cortada, idempotente.
 
-        Solo con la orden ``in_production``: antes no hay nada que cortar y
-        después el corte ya quedó cerrado por la transición. ``actor`` registra
-        quién la cortó (FK + etiqueta), en sincronía con ``cut_at``.
+        Solo con la orden en ``cutting``: antes no hay nada que cortar y después el
+        corte ya quedó cerrado por la transición. ``actor`` registra quién la cortó
+        (FK + etiqueta), en sincronía con ``cut_at``.
         """
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
@@ -344,6 +366,88 @@ class OrderService(BranchScopedMixin):
             piece=_piece_response(piece),
             progress=_progress(all_pieces),
             board_progress=_progress(piece.board.pieces),
+        )
+
+    def list_banding_queue(
+        self, branch_scope: Optional[int] = None
+    ) -> List[BandingQueueItem]:
+        """Cola de canteado: órdenes con canteado pendiente y corte ya iniciado.
+
+        Vista mínima para el canteador (sin precios ni detalle): solo las órdenes en
+        ``cutting``/``cut`` cuyo canteado aún no terminó. Aislada por sucursal.
+        """
+        query = self.db.query(OrderModel).filter(
+            OrderModel.status.in_([s.value for s in BANDING_MUTABLE_ORDER_STATUSES]),
+            OrderModel.banding_status.in_([s.value for s in BANDING_PENDING_STATUSES]),
+        )
+        query = self._apply_branch_scope(query, branch_scope, None)
+        orders = query.order_by(OrderModel.id.desc()).all()
+        return [
+            BandingQueueItem(
+                order_id=o.id,
+                order_code=o.code,
+                status=OrderStatus(o.status),
+                banding_status=BandingStatus(o.banding_status),
+                created_at=o.created_at,
+            )
+            for o in orders
+        ]
+
+    def transition_banding(
+        self,
+        order_id: int,
+        to_status: BandingStatus,
+        actor: Optional[Actor] = None,
+        branch_scope: Optional[int] = None,
+    ) -> BandingStatusResponse:
+        """Avanza la pista de canteado (``in_progress``/``done``), idempotente.
+
+        Pista paralela e independiente del corte: solo exige que la orden ya esté en
+        ``cutting``/``cut`` (hay piezas liberadas que cantear). Forward-only; re-aplicar
+        el estado actual no cambia nada. Sella inicio/fin con timestamp + actor.
+        """
+        actor = actor or system_actor()
+        order = self.get_scoped_or_404(order_id, branch_scope)
+
+        if actor.role is not None and actor.role not in (
+            r.value for r in BANDING_TRANSITION_ROLES
+        ):
+            raise AuthorizationError("Tu rol no puede registrar el canteado")
+
+        current = BandingStatus(order.banding_status)
+        if current == BandingStatus.not_applicable:
+            raise BusinessRuleError("Esta orden no lleva tapacantos")
+        if OrderStatus(order.status) not in BANDING_MUTABLE_ORDER_STATUSES:
+            raise BusinessRuleError(
+                "El canteado solo se registra con la orden en corte o cortada"
+            )
+
+        # Idempotente: re-aplicar el estado actual es un no-op (no re-sella timestamps).
+        if to_status != current:
+            if to_status not in BANDING_TRANSITIONS.get(current, set()):
+                raise BusinessRuleError(
+                    f"Transición de canteado inválida de '{current.value}' a "
+                    f"'{to_status.value}'"
+                )
+            now = datetime.utcnow()
+            if to_status == BandingStatus.in_progress:
+                order.banding_started_at = now
+                order.banding_started_by = actor.user_id
+                order.banding_started_by_label = actor.label
+            elif to_status == BandingStatus.done:
+                order.banding_finished_at = now
+                order.banding_finished_by = actor.user_id
+                order.banding_finished_by_label = actor.label
+            order.banding_status = to_status.value
+            self.db.commit()
+            self.db.refresh(order)
+
+        return BandingStatusResponse(
+            order_id=order.id,
+            order_code=order.code,
+            banding_status=BandingStatus(order.banding_status),
+            banding_started_at=order.banding_started_at,
+            banding_finished_at=order.banding_finished_at,
         )
 
     def _ensure_cutting_plan(self, order: OrderModel) -> None:
