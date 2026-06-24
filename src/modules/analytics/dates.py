@@ -1,8 +1,8 @@
-"""Rango de fechas y bucketing temporal, portables entre SQLite y Postgres.
+"""Rango de fechas y bucketing temporal.
 
 ``DateRange`` es una dependencia inyectable (como ``PageParams``) que parsea y valida
-los query params ``from``/``to``. El bucketing se hace en Python (no en SQL) para tener
-un único camino: SQLite no tiene ``date_trunc`` y Postgres no tiene ``strftime``.
+los query params ``from``/``to``. El bucketing se hace en Python (no en SQL) para
+mantener la lógica en el dominio sin dependencias de funciones específicas del dialecto.
 
 Todos los timestamps del dominio son naive UTC (``datetime.utcnow()``); aquí se tratan
 como tales, sin conversión de zona.

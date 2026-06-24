@@ -25,8 +25,8 @@ logs: ## Muestra los logs de la aplicación
 tests: ## Ejecuta las pruebas
 	docker compose run --no-deps --rm api pytest -q
 
-tests-local: ## Ejecuta las pruebas localmente
-	pytest -q
+tests-local: ## Ejecuta las pruebas localmente (requiere PostgreSQL en localhost:5433)
+	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db pytest -q
 
 lint-fix: ## Corrige errores de formato y lint
 	source .venv/bin/activate && ruff check --fix . && ruff format .
@@ -48,8 +48,8 @@ shell: ## Abre una shell en el contenedor
 redis-cli: ## Abre redis-cli dentro del contenedor de Redis
 	docker exec -it redis redis-cli
 
-run-local: ## Ejecuta la aplicación localmente
-	ENVIRONMENT=local python main.py
+run-local: ## Ejecuta la aplicación localmente (requiere PostgreSQL en localhost:5433)
+	ENVIRONMENT=local DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db python main.py
 
 seed-local: ## Siembra tableros y tapacantos en PostgreSQL local (puerto 5433)
 	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db .venv/bin/python scripts/seed_boards.py

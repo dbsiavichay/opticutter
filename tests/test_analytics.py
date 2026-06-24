@@ -1,12 +1,12 @@
 """Tests del módulo analytics: summary, timeseries, breakdown de estados y operaciones.
 
 Se siembra directo por ``db_session`` para fijar estados, ``created_at`` e historial con
-precisión (la máquina de estados no deja alcanzar todos los casos limpio). El ``client``
-y el ``db_session`` comparten la misma SQLite en memoria por el override de ``get_db``.
+precisión (la máquina de estados no deja alcanzar todos los casos limpio).
 """
 
 from datetime import datetime
 
+from src.modules.clients.model import ClientModel
 from src.modules.orders.model import (
     OrderLineModel,
     OrderModel,
@@ -17,9 +17,9 @@ _BASE = datetime(2026, 6, 15, 12, 0, 0)
 _RANGE = {"from": "2026-06-01", "to": "2026-06-30"}
 
 
-def _board_line(efficiency, area, *, product_id=1, qty=2, price=45.5):
+def _board_line(efficiency, area, *, qty=2, price=45.5):
     return OrderLineModel(
-        product_id=product_id,
+        product_id=None,
         quantity=qty,
         unit_price_snapshot=price,
         line_total=qty * price,
@@ -28,10 +28,10 @@ def _board_line(efficiency, area, *, product_id=1, qty=2, price=45.5):
     )
 
 
-def _edge_line(linear_m, *, product_id=42, price=1.5):
+def _edge_line(linear_m, *, price=1.5):
     """Línea de tapacanto: sin área/eficiencia (no debe contaminar la ponderación)."""
     return OrderLineModel(
-        product_id=product_id,
+        product_id=None,
         quantity=int(linear_m),
         unit_price_snapshot=price,
         line_total=linear_m * price,
@@ -75,6 +75,15 @@ def _seed_order(
     return order
 
 
+def _seed_clients(db, n=1):
+    """Siembra n clientes con identifiers únicos; el primero obtiene id=1, etc."""
+    clients = [ClientModel(identifier=f"TEST{i:07d}") for i in range(1, n + 1)]
+    for c in clients:
+        db.add(c)
+    db.commit()
+    return clients
+
+
 def _hist(to_status, created_at, from_status=None):
     return OrderStatusHistoryModel(
         from_status=from_status,
@@ -107,6 +116,7 @@ def test_summary_empty_range_returns_zeros_not_nulls(client):
 
 
 def test_summary_revenue_and_rates_isolated_by_status(client, db_session):
+    _seed_clients(db_session, 2)
     _seed_order(db_session, client_id=1, status="completed", total=100.0)
     _seed_order(db_session, client_id=2, status="confirmed", total=200.0)
     _seed_order(db_session, client_id=1, status="cancelled", total=50.0)
@@ -124,6 +134,7 @@ def test_summary_revenue_and_rates_isolated_by_status(client, db_session):
 def test_summary_efficiency_is_area_weighted_and_ignores_edge_banding(
     client, db_session
 ):
+    _seed_clients(db_session)
     _seed_order(
         db_session,
         status="completed",
@@ -158,6 +169,7 @@ def test_invalid_range_returns_422_with_envelope(client):
 
 # ------------------------------------------------------------- date filtering
 def test_date_filter_is_half_open(client, db_session):
+    _seed_clients(db_session)
     _seed_order(db_session, total=100.0, created_at=datetime(2026, 6, 1, 0, 0, 0))
     _seed_order(db_session, total=50.0, created_at=datetime(2026, 6, 10, 23, 0, 0))
     _seed_order(db_session, total=999.0, created_at=datetime(2026, 5, 31, 23, 0, 0))
@@ -172,6 +184,7 @@ def test_date_filter_is_half_open(client, db_session):
 
 # ------------------------------------------------------------------ timeseries
 def test_timeseries_daily_dense_axis_with_zero_gaps(client, db_session):
+    _seed_clients(db_session)
     _seed_order(
         db_session, total=100.0, boards=2, created_at=datetime(2026, 6, 1, 9, 0)
     )
@@ -190,6 +203,7 @@ def test_timeseries_daily_dense_axis_with_zero_gaps(client, db_session):
 
 
 def test_timeseries_monthly_buckets(client, db_session):
+    _seed_clients(db_session)
     _seed_order(db_session, total=100.0, created_at=datetime(2026, 6, 20, 9, 0))
 
     data = client.get(
@@ -202,6 +216,7 @@ def test_timeseries_monthly_buckets(client, db_session):
 
 
 def test_timeseries_monthly_crosses_year_boundary(client, db_session):
+    _seed_clients(db_session)
     _seed_order(db_session, total=100.0, created_at=datetime(2026, 1, 10, 9, 0))
 
     data = client.get(
@@ -214,6 +229,7 @@ def test_timeseries_monthly_crosses_year_boundary(client, db_session):
 
 
 def test_timeseries_weekly_buckets(client, db_session):
+    _seed_clients(db_session)
     # 2026-06-01 es lunes; las semanas ISO arrancan en 06-01 y 06-08.
     _seed_order(db_session, total=100.0, created_at=datetime(2026, 6, 3, 9, 0))
     _seed_order(db_session, total=50.0, created_at=datetime(2026, 6, 10, 9, 0))
@@ -228,6 +244,7 @@ def test_timeseries_weekly_buckets(client, db_session):
 
 
 def test_timeseries_new_clients_counts_first_order_only(client, db_session):
+    _seed_clients(db_session, 3)
     # Cliente 1: primer pedido el 06-01, segundo el 06-02 (no recuenta).
     _seed_order(db_session, client_id=1, created_at=datetime(2026, 6, 1, 9, 0))
     _seed_order(db_session, client_id=1, created_at=datetime(2026, 6, 2, 9, 0))
@@ -247,6 +264,7 @@ def test_timeseries_new_clients_counts_first_order_only(client, db_session):
 
 # ------------------------------------------------------------- breakdown/status
 def test_breakdown_status_densifies_all_states(client, db_session):
+    _seed_clients(db_session)
     _seed_order(db_session, status="completed", total=100.0)
     _seed_order(db_session, status="completed", total=200.0)
     _seed_order(db_session, status="cancelled", total=50.0)
@@ -276,6 +294,7 @@ def test_breakdown_status_empty_range(client):
 
 # ------------------------------------------------------------------ operations
 def test_operations_efficiency_mirrors_summary(client, db_session):
+    _seed_clients(db_session)
     _seed_order(db_session, status="completed", lines=[_board_line(90.0, 10.0)])
     _seed_order(db_session, status="completed", lines=[_board_line(70.0, 30.0)])
 
@@ -286,6 +305,7 @@ def test_operations_efficiency_mirrors_summary(client, db_session):
 
 
 def test_operations_lifecycle_dwell_times(client, db_session):
+    _seed_clients(db_session)
     history = [
         _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
         _hist("queued", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),

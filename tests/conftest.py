@@ -1,10 +1,11 @@
-"""Fixtures compartidas: app con una base de datos SQLite aislada por test."""
+"""Fixtures compartidas: app con una base de datos PostgreSQL aislada por test."""
+
+import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 # Importar los modelos puebla ``Base.metadata`` antes de ``create_all``.
 import src.modules.branches.model  # noqa: F401,E402
@@ -32,6 +33,35 @@ _CONFTEST_ADMIN_PWD = "conftest-admin-pwd"
 # Las suites la referencian al crear órdenes/pre-órdenes/borradores/usuarios staff.
 DEFAULT_BRANCH_ID = 1
 
+_TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    os.getenv("DATABASE_URL", "postgresql://cutter:cutter@localhost:5433/cutter_db"),
+)
+
+_test_engine = create_engine(_TEST_DATABASE_URL)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _create_schema():
+    """Crea el schema una vez por sesión de pytest (idempotente)."""
+    Base.metadata.create_all(_test_engine)
+
+
+@pytest.fixture
+def db_session():
+    """Sesión PostgreSQL aislada por test: TRUNCATE al inicio + seed de sucursal."""
+    table_names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    with _test_engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
+
+    session = Session(_test_engine)
+    session.add(BranchModel(code="MATRIZ", name="Casa Matriz", is_active=True))
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+
 
 class _InMemoryRedis:
     """Doble en memoria de Redis: parea ``get``/``set`` sobre strings JSON."""
@@ -57,29 +87,6 @@ def isolated_cache():
         yield
     finally:
         cache._client, cache._initialized = original_client, original_initialized
-
-
-@pytest.fixture
-def db_session():
-    """Sesión sobre una base SQLite en memoria, recreada en cada test."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = TestingSession()
-    # Siembra la sucursal por defecto (id=1): el aislamiento multi-sucursal exige
-    # que órdenes/pre-órdenes/borradores y el staff cuelguen de una sucursal.
-    session.add(BranchModel(code="MATRIZ", name="Casa Matriz", is_active=True))
-    session.commit()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
 
 
 @pytest.fixture
