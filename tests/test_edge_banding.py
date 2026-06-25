@@ -190,6 +190,62 @@ def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
     assert placed["edges"]["sides"] == ["top", "bottom"]
 
 
+def test_same_label_pieces_keep_their_own_edge_banding(client):
+    """Regresión: varias piezas con la MISMA etiqueta y ``quantity=1`` pero cantos
+    distintos NO se colapsan. Antes el canto se indexaba por etiqueta, así que todas
+    heredaban el último spec (los 4 lados) y el metraje por plancha salía inflado;
+    ahora cada pieza colocada conserva sus propios lados gracias al id único."""
+    c = _create_client(client)
+    b = _create_board(client)
+    eb = _create_edge_banding(client, price=2.0)
+
+    # Mismo label "Puerta", ancho distinto por pieza (identidad geométrica) y cantos
+    # distintos; canRotate=False para que el lado geométrico == nominal.
+    sides_by_width = {
+        300: {"left"},
+        301: {"left", "right"},
+        302: {"top"},
+        303: {"top", "bottom", "left", "right"},
+    }
+    requirements = [
+        {
+            "priority": 0,
+            "height": 500,
+            "width": w,
+            "quantity": 1,
+            "materialKey": "b1",
+            "label": "Puerta",
+            "canRotate": False,
+            "edgeBanding": {"productId": eb["id"], "sides": list(sides)},
+        }
+        for w, sides in sides_by_width.items()
+    ]
+    resp = client.post(
+        "/api/v1/optimize/",
+        json={
+            "clientId": c["id"],
+            "materials": _materials(b["id"]),
+            "requirements": requirements,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    # Cada pieza colocada conserva SUS lados, no los 4 del último requerimiento.
+    placed = data["layouts"][0]["placedPieces"]
+    assert len(placed) == len(sides_by_width)
+    got = {p["originalWidth"]: set(p["edges"]["sides"]) for p in placed}
+    assert got == sides_by_width
+
+    # El metraje por plancha coincide con el neto del resumen (no inflado ×nº piezas).
+    # net por pieza: 500 + 1000 + 302 + (303+303+500+500) = 3408 mm = 3.41 m.
+    net_summary = data["edgeBandingsSummary"][0]["netLinearM"]
+    assert net_summary == pytest.approx(3.41)
+    stats = data["layouts"][0]["statistics"]
+    assert stats["edgeBandingLinearM"] == pytest.approx(net_summary)
+    assert data["totalEdgeBandingLinearM"] == pytest.approx(net_summary)
+
+
 def test_optimize_uses_height_for_left_right_sides(client):
     """left/right miden el alto; top/bottom el ancho."""
     c = _create_client(client)
