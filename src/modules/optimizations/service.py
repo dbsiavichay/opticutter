@@ -1,7 +1,7 @@
 import hashlib
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Dict, List, Tuple
 
 from fastapi import Depends
@@ -20,7 +20,7 @@ from src.modules.clients.service import require_phone
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
-from src.modules.optimizations.patterns import base_label, group_layouts
+from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import (
     EdgeBandingSpec,
@@ -176,17 +176,15 @@ class OptimizationService:
         if cached is not None:
             return cached, optimization_hash
 
-        results = [
-            (
-                reqs,
-                self._optimize(
-                    pieces=reqs,
-                    material=resolved[key],
-                    cutting_params=cutting_params,
-                )[0],
-            )
-            for key, reqs in requirements_by_key.items()
-        ]
+        results = []
+        for key, reqs in requirements_by_key.items():
+            pieces, edge_map, net_map = self._build_pieces(reqs)
+            layouts = self._optimize(
+                pieces=pieces,
+                material=resolved[key],
+                cutting_params=cutting_params,
+            )[0]
+            results.append((edge_map, net_map, layouts))
 
         payload = self._build_result_payload(
             request, results, resolved, eb_products, waste_factor
@@ -274,13 +272,19 @@ class OptimizationService:
 
     def _optimize(
         self,
-        pieces: List[Requirement],
+        pieces: List[Piece],
         material: ResolvedMaterial,
         cutting_params: CuttingParameters,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
     ) -> Tuple[List[CuttingLayout], List[Piece]]:
-        """Optimiza el layout de corte para un material resuelto (cualquier origen)."""
+        """Optimiza el layout de corte para un material resuelto (cualquier origen).
+
+        Recibe las piezas de dominio ya expandidas y con id único (ver
+        ``_build_pieces``): cada instancia física llega con ``quantity=1`` para que el
+        optimizador conserve el id tal cual y la atribución de canto por pieza no
+        dependa de etiquetas ambiguas.
+        """
         if not pieces:
             raise ValidationError("La lista de piezas no puede estar vacía")
 
@@ -292,22 +296,6 @@ class OptimizationService:
             cost_per_unit=material.cost_per_unit,
         )
 
-        piece_objects = []
-        for i, p in enumerate(pieces):
-            try:
-                piece_objects.append(
-                    Piece(
-                        id=p.label or f"piece_{i+1}",
-                        width=p.width,
-                        height=p.height,
-                        quantity=p.quantity,
-                        can_rotate=p.can_rotate,
-                        priority=p.priority,
-                    )
-                )
-            except ValueError as e:
-                raise ValidationError(f"Pieza {i} tiene valores inválidos: {e}")
-
         optimizer = MultiSheetGuillotineOptimizer(
             material_template=domain_material,
             cutting_params=cutting_params,
@@ -315,34 +303,57 @@ class OptimizationService:
             max_sheets=max_sheets,
             min_rect_size=min_rect_size,
         )
-        return optimizer.optimize(piece_objects)
+        return optimizer.optimize(pieces)
 
-    def _edge_map_for(self, reqs: List[Requirement]) -> Dict[str, EdgeBandingSpec]:
-        """Mapa ``id asignado -> EdgeBandingSpec`` (mismo id que arma ``_optimize``)."""
-        edge_map: Dict[str, EdgeBandingSpec] = {}
-        for i, p in enumerate(reqs):
-            if p.edge_banding is not None:
-                edge_map[p.label or f"piece_{i+1}"] = p.edge_banding
-        return edge_map
+    def _build_pieces(
+        self, reqs: List[Requirement]
+    ) -> Tuple[List[Piece], Dict[str, EdgeBandingSpec], Dict[str, float]]:
+        """Expande los requerimientos a piezas de dominio con id único por instancia.
 
-    def _net_mm_per_label(self, reqs: List[Requirement]) -> Dict[str, float]:
-        """Metraje neto de canto (mm) por etiqueta de pieza (una instancia).
-
-        Misma fórmula que ``_build_edge_bandings_summary`` (``width`` para
-        ``top/bottom``, ``height`` para ``left/right``), independiente de la rotación.
-        La clave es ``label`` o ``piece_{i+1}`` (== ``base_label`` del id colocado),
-        para agregar el canto por plancha desde las piezas realmente colocadas.
+        El id de pieza es la identidad con la que se atribuye el canto y el metraje a
+        cada pieza colocada, así que **debe** ser único: dos requerimientos distintos
+        con la misma etiqueta (p. ej. varias "Puerta" con cantos diferentes) ya no se
+        colapsan en una sola entrada. Se sufija ``#N`` cuando una etiqueta base tiene
+        más de una instancia física en el grupo —sea por ``quantity > 1`` o por
+        etiquetas repetidas—, unificando ambos casos en una sola regla (antes el
+        optimizador solo sufijaba el caso ``quantity > 1``). Devuelve
+        ``(pieces, edge_map, net_map)`` con los mapas indexados por ese id único; el
+        metraje neto es por instancia (``width`` para ``top/bottom``, ``height`` para
+        ``left/right``, independiente de la rotación), sin multiplicar por cantidad.
         """
-        net: Dict[str, float] = {}
+        base = [p.label or f"piece_{i+1}" for i, p in enumerate(reqs)]
+        totals: Counter = Counter()
+        for label, p in zip(base, reqs):
+            totals[label] += p.quantity
+
+        seen: Counter = Counter()
+        pieces: List[Piece] = []
+        edge_map: Dict[str, EdgeBandingSpec] = {}
+        net_map: Dict[str, float] = {}
         for i, p in enumerate(reqs):
-            spec = p.edge_banding
-            if spec is None:
-                continue
-            net[p.label or f"piece_{i+1}"] = sum(
-                p.width if side in (EdgeSide.top, EdgeSide.bottom) else p.height
-                for side in spec.sides
-            )
-        return net
+            for _ in range(p.quantity):
+                seen[base[i]] += 1
+                uid = f"{base[i]}#{seen[base[i]]}" if totals[base[i]] > 1 else base[i]
+                try:
+                    pieces.append(
+                        Piece(
+                            id=uid,
+                            width=p.width,
+                            height=p.height,
+                            quantity=1,
+                            can_rotate=p.can_rotate,
+                            priority=p.priority,
+                        )
+                    )
+                except ValueError as e:
+                    raise ValidationError(f"Pieza {i} tiene valores inválidos: {e}")
+                if p.edge_banding is not None:
+                    edge_map[uid] = p.edge_banding
+                    net_map[uid] = sum(
+                        p.width if side in (EdgeSide.top, EdgeSide.bottom) else p.height
+                        for side in p.edge_banding.sides
+                    )
+        return pieces, edge_map, net_map
 
     def _geometric_edges(
         self, spec: EdgeBandingSpec, eb_products: Dict[int, ProductModel], rotated: bool
@@ -380,9 +391,13 @@ class OptimizationService:
         edge_map: Dict[str, EdgeBandingSpec],
         eb_products: Dict[int, ProductModel],
     ) -> None:
-        """Añade ``edges`` (lados geométricos canteados) a cada pieza colocada."""
+        """Añade ``edges`` (lados geométricos canteados) a cada pieza colocada.
+
+        El ``edge_map`` se indexa por el id único de pieza (ver ``_build_pieces``), así
+        que la búsqueda es por el ``piece_id`` exacto de la pieza colocada.
+        """
         for placed in layout_dict.get("placed_pieces", []):
-            spec = edge_map.get(base_label(str(placed.get("piece_id", ""))))
+            spec = edge_map.get(str(placed.get("piece_id", "")))
             if spec is None:
                 continue
             placed["edges"] = self._geometric_edges(
@@ -519,7 +534,9 @@ class OptimizationService:
     def _build_result_payload(
         self,
         request: OptimizeRequest,
-        results: List[Tuple[List[Requirement], List[CuttingLayout]]],
+        results: List[
+            Tuple[Dict[str, EdgeBandingSpec], Dict[str, float], List[CuttingLayout]]
+        ],
         resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
         waste_factor: float,
@@ -527,10 +544,11 @@ class OptimizationService:
         """Arma el payload cacheable/serializable del resultado de optimización.
 
         Mismas claves que consumen ``proforma`` y el snapshot de las órdenes.
-        ``results`` agrupa por tablero como ``(requerimientos, layouts)`` para
-        enriquecer cada pieza colocada con sus lados canteados sin colisión de ids.
+        ``results`` agrupa por material como ``(edge_map, net_map, layouts)`` (mapas
+        indexados por el id único de pieza de ``_build_pieces``) para enriquecer cada
+        pieza colocada con sus lados canteados y su metraje sin colisión de ids.
         """
-        all_layouts = [layout for _, layouts in results for layout in layouts]
+        all_layouts = [layout for _, _, layouts in results for layout in layouts]
         total_boards_used = len(all_layouts)
         total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
 
@@ -541,16 +559,14 @@ class OptimizationService:
         layout_dicts: List[dict] = []
         total_cut_linear_m = 0.0
         total_edge_banding_linear_m = 0.0
-        for reqs, layouts in results:
-            edge_map = self._edge_map_for(reqs)
-            net_mm_per_label = self._net_mm_per_label(reqs)
+        for edge_map, net_map, layouts in results:
             for layout in layouts:
                 layout_dict = layout.to_dict()
                 if edge_map:
                     self._enrich_layout_pieces(layout_dict, edge_map, eb_products)
                 cut_linear_m = round(layout.cut_length / 1000.0, 2)
                 eb_mm = sum(
-                    net_mm_per_label.get(base_label(str(p.get("piece_id", ""))), 0.0)
+                    net_map.get(str(p.get("piece_id", "")), 0.0)
                     for p in layout_dict.get("placed_pieces", [])
                 )
                 eb_linear_m = round(eb_mm / 1000.0, 2)
