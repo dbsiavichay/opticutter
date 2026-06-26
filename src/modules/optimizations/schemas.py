@@ -58,15 +58,25 @@ class EdgeSide(str, Enum):
 
 
 class EdgeBandingSpec(CamelModel):
-    """Tapacanto a aplicar en una pieza: un producto y los lados a tapar."""
+    """Tapacanto a aplicar en una pieza: los lados a tapar y, opcionalmente, el producto.
 
-    product_id: int = Field(
-        ..., description="Edge banding product ID (type=edge_banding)"
-    )
+    En el optimizador basta con ``sides`` para calcular la longitud de canto (metros
+    lineales) —que es lo que importa para cortes y metraje—. El ``productId`` (precio
+    + tipo suave/duro + color para el diagrama) se asigna recién al cotizar; por eso es
+    opcional aquí.
+    """
+
     sides: List[EdgeSide] = Field(
         ...,
         min_length=1,
         description="Nominal sides to band (top/bottom=ancho, left/right=alto)",
+    )
+    product_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Edge banding product ID (type=edge_banding). Optional: omit at optimize "
+            "time (geometry only); assigned when quoting to price the banding."
+        ),
     )
 
     @field_validator("sides")
@@ -78,10 +88,12 @@ class EdgeBandingSpec(CamelModel):
 
 
 class EdgeBandingSummary(CamelModel):
-    product_id: int
-    product_code: str
-    product_name: str
-    thickness: float
+    # product_* y thickness quedan opcionales: una pieza canteada sin producto asignado
+    # (solo lados, en el optimizador) aporta su metraje pero sin identidad ni precio.
+    product_id: Optional[int] = None
+    product_code: Optional[str] = None
+    product_name: Optional[str] = None
+    thickness: Optional[float] = None
     color: Optional[str] = None
     band_type: Optional[str] = Field(
         default=None, description="Canonical band type: 'Soft' / 'Hard'"

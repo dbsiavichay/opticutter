@@ -236,23 +236,29 @@ def export_order(
 
 # Exentos de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
 # variante base64 son "el archivo, transportado", no recursos JSON de dominio.
-@router.get("/{order_id}/proforma", dependencies=[_READ])
-def get_order_proforma(
+@router.get("/{order_id}/document", dependencies=[_READ])
+def get_order_document(
     order_id: int,
     format: str = _FORMAT_QUERY,
     svc: OrderService = Depends(order_service),
     settings_svc: SettingsService = Depends(settings_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Proforma comercial (con precios congelados) renderizada desde el snapshot."""
+    """Orden de pedido (documento con compromiso, precios congelados) del snapshot.
+
+    No es una proforma (cotización no vinculante): es el documento del pedido ya
+    confirmado, por eso el encabezado dice "ORDEN DE PEDIDO".
+    """
     order = svc.get_scoped_or_404(order_id, branch_scope)
     carrier = ProformaCarrier.from_order(
         order,
         company=settings_svc.get_company(),
         branch=branch_letterhead(svc.db, order.branch_id),
     )
-    pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
-    return pdf_response(pdf_buffer, f"proforma_{order.code or order.id}.pdf", format)
+    pdf_buffer = ProformaService.generate_proforma_pdf(carrier, title="ORDEN DE PEDIDO")
+    return pdf_response(
+        pdf_buffer, f"orden_pedido_{order.code or order.id}.pdf", format
+    )
 
 
 @router.get("/{order_id}/production-sheet", dependencies=[_CUTTING])

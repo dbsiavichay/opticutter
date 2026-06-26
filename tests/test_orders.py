@@ -227,19 +227,19 @@ def test_get_order_404(client):
     assert client.get("/api/v1/orders/999999").status_code == 404
 
 
-def test_order_proforma_pdf_and_base64(client, db_session):
+def test_order_document_pdf_and_base64(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
-    pdf = client.get(f"/api/v1/orders/{oid}/proforma")
+    pdf = client.get(f"/api/v1/orders/{oid}/document")
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
     # PDF/base64 exentos de la envoltura (transporte de archivo).
-    b64 = client.get(f"/api/v1/orders/{oid}/proforma", params={"format": "base64"})
+    b64 = client.get(f"/api/v1/orders/{oid}/document", params={"format": "base64"})
     assert b64.status_code == 200
     body = b64.json()
     assert body["format"] == "base64"
@@ -259,7 +259,7 @@ def test_order_production_sheet_pdf(client, db_session):
 
 
 def test_order_documents_404(client):
-    assert client.get("/api/v1/orders/999999/proforma").status_code == 404
+    assert client.get("/api/v1/orders/999999/document").status_code == 404
     assert client.get("/api/v1/orders/999999/production-sheet").status_code == 404
 
 
@@ -444,15 +444,15 @@ def test_create_mixed_catalog_and_offcut_order(client, db_session):
     assert piece_product_ids == {b["id"], None}
 
 
-def test_non_catalog_order_renders_proforma_and_production_sheet(client, db_session):
-    """Proforma y hoja de producción se renderizan del snapshot, sin catálogo."""
+def test_non_catalog_order_renders_document_and_production_sheet(client, db_session):
+    """Orden de pedido y hoja de producción se renderizan del snapshot, sin catálogo."""
     c = _create_client(client)
     order = _create_order(client, db_session, _manual_material_payload(c["id"]))
 
-    proforma = client.get(f"/api/v1/orders/{order['id']}/proforma")
-    assert proforma.status_code == 200
-    assert proforma.headers["content-type"] == "application/pdf"
-    assert len(proforma.content) > 1000
+    document = client.get(f"/api/v1/orders/{order['id']}/document")
+    assert document.status_code == 200
+    assert document.headers["content-type"] == "application/pdf"
+    assert len(document.content) > 1000
 
     sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
     assert sheet.status_code == 200

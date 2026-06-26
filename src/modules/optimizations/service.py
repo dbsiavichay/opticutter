@@ -2,7 +2,7 @@ import hashlib
 import json
 import math
 from collections import Counter, defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -16,8 +16,6 @@ from src.cutting import (
     SplitRule,
 )
 from src.modules.clients.model import ClientModel
-from src.modules.clients.service import require_phone
-from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import group_layouts
@@ -96,42 +94,6 @@ class OptimizationService:
             pricing=PricingSummary(**pricing),
         )
 
-    def get_cached_payload(self, optimization_hash: str) -> dict:
-        """Recupera el payload cacheado por hash o lanza 404 si expiró/no existe."""
-        payload = cache.get_json(optimization_hash)
-        if payload is None:
-            raise EntityNotFoundError("Optimization", optimization_hash)
-        return payload
-
-    def build_carrier_from_hash(
-        self,
-        optimization_hash: str,
-        client_id: int,
-        price_tier_code: str = "consumidor",
-    ) -> ProformaCarrier:
-        """Portador de proforma para una optimización cacheada (por hash).
-
-        La optimización es anónima; el cliente se aporta al renderizar (la proforma
-        necesita sus datos para el encabezado del documento). El nivel de precio no es
-        parte del hash, por lo que se aporta aquí para aplicar el descuento.
-        """
-        payload = self.get_cached_payload(optimization_hash)
-        client = self.db.get(ClientModel, client_id)
-        if client is None:
-            raise EntityNotFoundError("Client", client_id)
-        require_phone(client)
-        tier = self.settings_service.resolve_price_tier(price_tier_code)
-        priced_payload = {**payload, "pricing": build_pricing(payload, tier)}
-        return ProformaCarrier.from_payload(
-            priced_payload,
-            client,
-            reference=f"OPT-{optimization_hash[:8]}",
-            company=self.settings_service.get_company(),
-            validity_days=self.settings_service.get_preorder_config()[
-                "preorder_validity_days"
-            ],
-        )
-
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
         """Calcula (o recupera de caché) el resultado de la optimización.
 
@@ -205,7 +167,9 @@ class OptimizationService:
             if req.edge_banding is None:
                 continue
             pid = req.edge_banding.product_id
-            if pid in eb_products:
+            # Canto solo-geometría (sin producto): aporta metraje pero no se resuelve
+            # ni se cobra hasta que se asigne un producto al cotizar.
+            if pid is None or pid in eb_products:
                 continue
             product = self.product_service.get(pid)
             if product is None:
@@ -418,7 +382,7 @@ class OptimizationService:
         al metro entero que se cobra.
         """
         waste = waste_factor
-        net_mm: Dict[int, float] = defaultdict(float)
+        net_mm: Dict[Optional[int], float] = defaultdict(float)
         for req in requirements:
             spec = req.edge_banding
             if spec is None:
@@ -432,25 +396,28 @@ class OptimizationService:
         summary: List[dict] = []
         total_cost = 0.0
         for pid, mm in net_mm.items():
-            product = eb_products[pid]
-            attrs = product.attributes or {}
+            # ``pid is None`` = canto solo-geometría: se reporta el metraje pero sin
+            # identidad de producto ni precio (queda pendiente de asignar al cotizar).
+            product = eb_products.get(pid)
+            attrs = (product.attributes if product else None) or {}
+            price = product.price if product else 0.0
             net_m = mm / 1000.0
             with_waste = net_m * (1 + waste)
             billed = math.ceil(with_waste)
-            cost = round(billed * product.price, 2)
+            cost = round(billed * price, 2)
             total_cost += cost
             summary.append(
                 {
                     "product_id": pid,
-                    "product_code": product.code,
-                    "product_name": product.name,
+                    "product_code": product.code if product else None,
+                    "product_name": product.name if product else None,
                     "thickness": attrs.get("thickness"),
                     "color": attrs.get("color"),
                     "band_type": attrs.get("bandType"),
                     "net_linear_m": round(net_m, 2),
                     "linear_m": round(with_waste, 2),
                     "billed_linear_m": billed,
-                    "price_per_m": product.price,
+                    "price_per_m": price,
                     "total_cost": cost,
                 }
             )

@@ -107,7 +107,8 @@ que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
 - **App local**: `make run-local` (`ENVIRONMENT=local python main.py`); SQLite por defecto.
 - **Tests**: `make tests-local` (o `.venv/bin/python -m pytest`). La suite cubre el dominio
   del optimizador, el CRUD genérico vía clients/products (incluyendo conflictos 409 y 404),
-  el flujo completo de optimización + proforma, y los endpoints del sistema.
+  el flujo de optimización (geometría) y los documentos comerciales (proforma de
+  cotización / orden de pedido), y los endpoints del sistema.
 - **Lint**: `make lint-check-local` (ruff).
 - **Migraciones**: `alembic upgrade head`; `alembic revision --autogenerate` no debe generar
   diffs cuando los modelos coinciden con el esquema.

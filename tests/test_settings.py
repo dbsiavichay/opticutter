@@ -177,19 +177,20 @@ def test_patch_company_persists(client):
 
 
 def test_company_settings_render_in_proforma(client):
-    """La proforma usa los datos de empresa vigentes en BD (membrete en vivo)."""
+    """La proforma de la cotización usa los datos de empresa vigentes (membrete vivo).
+
+    El optimizador ya no emite documento: la proforma vive en la cotización (precios
+    vivos) y en la orden. Aquí se ejercita vía la pre-orden.
+    """
     created_client = _create_client(client)
     board = _create_board(client)
-    optimization = client.post(
-        "/api/v1/optimize/", json=_optimize_payload(created_client["id"], board["id"])
+    preorder = client.post(
+        "/api/v1/preorders/", json=_optimize_payload(created_client["id"], board["id"])
     ).json()["data"]
 
     client.patch("/api/v1/settings/company", json={"phone": "0999999999"})
 
-    proforma = client.get(
-        f"/api/v1/optimize/{optimization['optimizationHash']}/proforma",
-        params={"clientId": created_client["id"]},
-    )
+    proforma = client.get(f"/api/v1/preorders/{preorder['id']}/proforma")
     assert proforma.status_code == 200
     assert proforma.headers["content-type"] == "application/pdf"
     assert len(proforma.content) > 1000
