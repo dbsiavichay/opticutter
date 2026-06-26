@@ -190,6 +190,49 @@ def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
     assert placed["edges"]["sides"] == ["top", "bottom"]
 
 
+def test_optimize_edge_banding_without_product_reports_length_only(client):
+    """Canto solo-geometría: ``edgeBanding`` con lados pero SIN ``productId`` calcula la
+    longitud de canto (lo que importa en el optimizador) sin resolver ni cobrar un
+    producto; este se asigna recién al cotizar."""
+    c = _create_client(client)
+    b = _create_board(client)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json={
+            "clientId": c["id"],
+            "materials": _materials(b["id"]),
+            "requirements": [
+                {
+                    "priority": 0,
+                    "height": 500,
+                    "width": 1000,
+                    "quantity": 1,
+                    "materialKey": "b1",
+                    "canRotate": True,
+                    "edgeBanding": {"sides": ["top", "bottom"]},
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    # La longitud sí se computa: top+bottom con width=1000 → 2.0 m neto.
+    assert data["totalEdgeBandingLinearM"] == pytest.approx(2.0)
+    # Sin producto: no hay costo de canto y el resumen va sin identidad ni precio.
+    assert data["totalEdgeBandingCost"] == 0.0
+    entry = data["edgeBandingsSummary"][0]
+    assert entry["productId"] is None
+    assert entry["productCode"] is None
+    assert entry["pricePerM"] == 0.0
+    assert entry["netLinearM"] == pytest.approx(2.0)
+    # El canto se propaga a la pieza colocada (para el diagrama) sin producto.
+    # ``edges`` es un dict crudo (no modelo Pydantic): sus claves van en snake_case.
+    placed = data["layouts"][0]["placedPieces"][0]
+    assert placed["edges"]["sides"] == ["top", "bottom"]
+    assert placed["edges"]["product_id"] is None
+
+
 def test_same_label_pieces_keep_their_own_edge_banding(client):
     """Regresión: varias piezas con la MISMA etiqueta y ``quantity=1`` pero cantos
     distintos NO se colapsan. Antes el canto se indexaba por etiqueta, así que todas
@@ -505,7 +548,7 @@ def test_order_charges_edge_banding(client, db_session):
     assert {"MEL18", "TAP22"} <= codes
 
 
-def test_order_proforma_with_edge_banding_renders(client, db_session):
+def test_order_document_with_edge_banding_renders(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client)
@@ -520,9 +563,9 @@ def test_order_proforma_with_edge_banding_renders(client, db_session):
         },
     )
 
-    proforma = client.get(f"/api/v1/orders/{order['id']}/proforma")
-    assert proforma.status_code == 200
-    assert len(proforma.content) > 1000
+    document = client.get(f"/api/v1/orders/{order['id']}/document")
+    assert document.status_code == 200
+    assert len(document.content) > 1000
 
     sheet = client.get(f"/api/v1/orders/{order['id']}/production-sheet")
     assert sheet.status_code == 200

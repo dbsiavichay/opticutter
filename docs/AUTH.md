@@ -76,7 +76,7 @@ se protege con `Depends(require_permission("<clave>"))`.
 | `clients:manage`      | ✅ | ✅ | ❌ | ❌ | `/clients/*` |
 | `optimizer`           | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
 | `preorders`           | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (interno) |
-| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/proforma` |
+| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document` |
 | `orders:write`        | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
 | `orders:transition`   | ✅ | ✅ | ✅* | ❌ | `PATCH /orders/{id}/status` (filtra por transición en `TRANSITION_ROLES`) |
 | `cutting_plan`        | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |

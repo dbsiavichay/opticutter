@@ -1,10 +1,10 @@
-"""Tests del módulo optimizations: flujo completo optimize + proforma."""
+"""Tests del módulo optimizations: flujo de optimize (geometría + costos)."""
 
 import pytest
 
 from src.modules.optimizations.schemas import OptimizeRequest
 from src.modules.optimizations.service import OptimizationService
-from src.shared.exceptions import EntityNotFoundError, ValidationError
+from src.shared.exceptions import ValidationError
 
 
 def _create_client(client):
@@ -176,67 +176,6 @@ def test_optimize_non_board_product_is_rejected(client):
     assert "no es un tablero" in resp.json()["errors"][0]["message"].lower()
 
 
-def test_proforma_pdf_and_base64(client):
-    created_client = _create_client(client)
-    created_board = _create_board(client)
-    optimization = client.post(
-        "/api/v1/optimize/",
-        json=_optimize_payload(created_client["id"], created_board["id"]),
-    ).json()["data"]
-    opt_hash = optimization["optimizationHash"]
-
-    pdf = client.get(
-        f"/api/v1/optimize/{opt_hash}/proforma",
-        params={"clientId": created_client["id"]},
-    )
-    assert pdf.status_code == 200
-    assert pdf.headers["content-type"] == "application/pdf"
-    assert len(pdf.content) > 1000
-
-    # La proforma PDF/base64 queda exenta de la envoltura (transporte de archivo).
-    b64 = client.get(
-        f"/api/v1/optimize/{opt_hash}/proforma",
-        params={"clientId": created_client["id"], "format": "base64"},
-    )
-    assert b64.status_code == 200
-    body = b64.json()
-    assert body["format"] == "base64"
-    assert body["mimeType"] == "application/pdf"
-    assert len(body["content"]) > 0
-
-
-def test_proforma_missing_optimization_returns_404(client):
-    """Un hash que no está en caché (expiró o nunca existió) responde 404."""
-    resp = client.get(f"/api/v1/optimize/{'0' * 64}/proforma", params={"clientId": 1})
-    assert resp.status_code == 404
-
-
-def test_proforma_requires_client_id(client):
-    """La proforma exige ``clientId`` (la optimización es anónima)."""
-    assert client.get(f"/api/v1/optimize/{'0' * 64}/proforma").status_code == 422
-
-
-def test_proforma_blocked_without_client_phone(client):
-    """Regla de negocio: sin celular registrado no se genera la proforma (422)."""
-    created_board = _create_board(client)
-    no_phone = client.post(
-        "/api/v1/clients/",
-        json={"identifier": "0990000000", "firstName": "Sin", "lastName": "Tel"},
-    ).json()["data"]
-    optimization = client.post(
-        "/api/v1/optimize/",
-        json=_optimize_payload(no_phone["id"], created_board["id"]),
-    ).json()["data"]
-    opt_hash = optimization["optimizationHash"]
-
-    resp = client.get(
-        f"/api/v1/optimize/{opt_hash}/proforma",
-        params={"clientId": no_phone["id"]},
-    )
-    assert resp.status_code == 422
-    assert "celular" in resp.json()["errors"][0]["message"].lower()
-
-
 def test_optimize_without_client_is_anonymous(client):
     """``POST /optimize`` sin ``clientId`` responde 200 con ``client`` nulo y el
     mismo hash que con cliente (el cómputo es agnóstico del cliente)."""
@@ -289,11 +228,6 @@ def test_service_rejects_empty_requirements(db_session):
     request = OptimizeRequest.model_construct(requirements=[], client_id=1)
     with pytest.raises(ValidationError):
         OptimizationService(db_session).compute(request)
-
-
-def test_service_cached_payload_404(db_session):
-    with pytest.raises(EntityNotFoundError):
-        OptimizationService(db_session).get_cached_payload("nope")
 
 
 def test_optimize_deduplicates_identical_patterns(client):

@@ -190,8 +190,15 @@ def _new_doc(
 
 class ProformaService:
     @staticmethod
-    def generate_proforma_pdf(carrier: ProformaCarrier) -> io.BytesIO:
-        """Proforma comercial: requerimientos, materiales con precios y disposición."""
+    def generate_proforma_pdf(
+        carrier: ProformaCarrier, title: str = "PROFORMA"
+    ) -> io.BytesIO:
+        """Documento comercial: requerimientos, materiales con precios y disposición.
+
+        El mismo render sirve a la cotización (``title="PROFORMA"``, no vinculante) y a
+        la orden confirmada (``title="ORDEN DE PEDIDO"``, con compromiso); solo cambia
+        el rótulo del encabezado.
+        """
         buffer = io.BytesIO()
         doc = _new_doc(buffer)
 
@@ -200,7 +207,7 @@ class ProformaService:
         cell_style = _cell_style(styles)
 
         story = []
-        story.extend(ProformaService._build_header(carrier, styles, "PROFORMA"))
+        story.extend(ProformaService._build_header(carrier, styles, title))
         story.append(Spacer(1, 0.25 * inch))
 
         story.extend(_section("INFORMACIÓN DEL CLIENTE", heading_style))
