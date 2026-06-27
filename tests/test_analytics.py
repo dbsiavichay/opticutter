@@ -274,7 +274,7 @@ def test_breakdown_status_densifies_all_states(client, db_session):
     ]
 
     assert data["dimension"] == "status"
-    assert len(data["items"]) == 6  # todos los OrderStatus
+    assert len(data["items"]) == 7  # todos los OrderStatus
     by_key = {it["key"]: it for it in data["items"]}
     assert by_key["completed"]["orderCount"] == 2
     assert by_key["completed"]["revenue"] == 300.0
@@ -288,7 +288,7 @@ def test_breakdown_status_empty_range(client):
     data = client.get("/api/v1/analytics/breakdown/status", params=_RANGE).json()[
         "data"
     ]
-    assert len(data["items"]) == 6
+    assert len(data["items"]) == 7
     assert all(it["orderCount"] == 0 and it["revenue"] == 0 for it in data["items"])
 
 

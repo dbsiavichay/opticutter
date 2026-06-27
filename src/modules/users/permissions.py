@@ -16,13 +16,15 @@ ruta se protege con ``require_role(*RESOURCE_ROLES[clave])`` (ver ``dependencies
 | preorders                     | sí            | sí       | no       | no        |
 | orders:write (crear/cotizar)  | sí            | sí       | no       | no        |
 | orders:read                   | sí            | sí       | sí       | no        |
-| orders:transition (cambiar estado) | sí       | sí       | sí*      | no        |
+| orders:transition (cambiar estado) | sí       | sí       | sí*      | sí*       |
 | cutting_plan (ver plan)       | sí            | sí       | sí       | no        |
 | orders:cut (marcar piezas)    | sí            | no       | sí       | no        |
 | orders:band (canteado)        | sí            | no       | no       | sí        |
 | analytics                     | sí            | no       | no       | no        |
 
 * La validación por transición específica vive en TRANSITION_ROLES (orders/model.py).
+  El canteador entra a ``orders:transition`` solo para registrar el despacho
+  (``completed → despachado``); el resto de transiciones le quedan vedadas ahí.
 
 El canteador no ve el detalle de la orden (sin ``orders:read``): solo su cola de
 canteado y los endpoints de inicio/fin (``orders:band``).
@@ -49,7 +51,7 @@ RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     "preorders": (_ADMIN, _SELLER),
     "orders:write": (_ADMIN, _SELLER),
     "orders:read": (_ADMIN, _SELLER, _OPERATOR),
-    "orders:transition": (_ADMIN, _SELLER, _OPERATOR),
+    "orders:transition": (_ADMIN, _SELLER, _OPERATOR, _BANDER),
     "cutting_plan": (_ADMIN, _SELLER, _OPERATOR),
     "orders:cut": (_ADMIN, _OPERATOR),
     "orders:band": (_ADMIN, _BANDER),

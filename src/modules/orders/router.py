@@ -278,3 +278,23 @@ def get_order_production_sheet(
     )
     pdf_buffer = ProformaService.generate_production_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"produccion_{order.code or order.id}.pdf", format)
+
+
+@router.get("/{order_id}/dispatch-sheet", dependencies=[_READ])
+def get_order_dispatch_sheet(
+    order_id: int,
+    format: str = _FORMAT_QUERY,
+    svc: OrderService = Depends(order_service),
+    settings_svc: SettingsService = Depends(settings_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Hoja de despacho (entrega al cliente): piezas SIN precios, descargo de
+    responsabilidad y firmas. Muestra la fecha/responsable de despacho del snapshot."""
+    order = svc.get_scoped_or_404(order_id, branch_scope)
+    carrier = ProformaCarrier.from_order(
+        order,
+        company=settings_svc.get_company(),
+        branch=branch_letterhead(svc.db, order.branch_id),
+    )
+    pdf_buffer = ProformaService.generate_dispatch_sheet_pdf(carrier)
+    return pdf_response(pdf_buffer, f"despacho_{order.code or order.id}.pdf", format)

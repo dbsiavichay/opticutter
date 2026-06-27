@@ -7,7 +7,7 @@ from typing import List, Union
 
 from fastapi.responses import StreamingResponse
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -79,6 +79,19 @@ WATERMARK_PATH = ASSETS_DIR / "watermark.jpg"
 ICON_WHATSAPP = ASSETS_DIR / "whatsapp.jpg"
 ICON_EMAIL = ASSETS_DIR / "email.jpg"
 ICON_ADDRESS = ASSETS_DIR / "address.jpg"
+
+# Descargo de responsabilidad de la hoja de despacho: con su firma el cliente
+# acepta la mercadería conforme y libera a la empresa de reclamos posteriores.
+DISPATCH_DISCLAIMER = (
+    "Con la firma de este documento, el cliente declara haber recibido y revisado a "
+    "entera conformidad las piezas detalladas, verificando cantidades, medidas, color "
+    "y el estado de la superficie y los cantos. La empresa queda liberada de toda "
+    "responsabilidad por reclamos posteriores a la entrega (faltantes, diferencias de "
+    "medida, rayones, despostillados o daños). Los cortes se ejecutan según las medidas "
+    "proporcionadas por el cliente; la empresa no se responsabiliza por errores en "
+    "dichas medidas. La mercadería viaja por cuenta y riesgo del cliente una vez "
+    "retirada de nuestras instalaciones."
+)
 
 
 def _scaled_image(path: Path, width: float) -> Image:
@@ -320,6 +333,125 @@ class ProformaService:
         )
         buffer.seek(0)
         return buffer
+
+    @staticmethod
+    def generate_dispatch_sheet_pdf(carrier: ProformaCarrier) -> io.BytesIO:
+        """Hoja de despacho (entrega al cliente): membrete de marca, datos del
+        cliente, detalle de piezas SIN precios, conteo de tableros, nota de descargo
+        de responsabilidad y bloque de firmas (entrega y recibí conforme)."""
+        buffer = io.BytesIO()
+        doc = _new_doc(buffer)
+
+        styles = getSampleStyleSheet()
+        heading_style = _heading_style(styles)
+        cell_style = _cell_style(styles)
+
+        story = []
+        story.extend(ProformaService._build_header(carrier, styles, "HOJA DE DESPACHO"))
+        story.append(Spacer(1, 0.25 * inch))
+
+        story.extend(_section("INFORMACIÓN DEL CLIENTE", heading_style))
+        story.append(ProformaService._build_client_table(carrier))
+        # Fecha de despacho y responsable de la entrega (congelados en la orden; si
+        # aún no se ha despachado caen a "ahora" / "—").
+        dispatch_date = carrier.dispatch_date or datetime.now()
+        story.append(
+            Paragraph(
+                f"<b>Fecha de despacho:</b> {dispatch_date.strftime('%d/%m/%Y')}"
+                f" &nbsp;&nbsp; <b>Despachado por:</b> "
+                f"{carrier.dispatched_by_label or '—'}",
+                ParagraphStyle(
+                    "DispatchMeta",
+                    parent=styles["Normal"],
+                    fontSize=9,
+                    textColor=TEXT_GREY,
+                    alignment=TA_LEFT,
+                    spaceBefore=6,
+                ),
+            )
+        )
+        story.append(Spacer(1, 0.25 * inch))
+
+        story.extend(_section("DETALLE DE PIEZAS", heading_style))
+        story.append(ProformaService._build_requirements_table(carrier, cell_style))
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(ProformaService._build_boards_total_table(carrier))
+        story.append(Spacer(1, 0.25 * inch))
+
+        story.extend(_section("DESCARGO DE RESPONSABILIDAD", heading_style))
+        story.append(
+            Paragraph(
+                DISPATCH_DISCLAIMER,
+                ParagraphStyle(
+                    "Disclaimer",
+                    parent=styles["Normal"],
+                    fontSize=8,
+                    leading=11,
+                    textColor=colors.grey,
+                    alignment=TA_JUSTIFY,
+                ),
+            )
+        )
+
+        story.append(Spacer(1, 0.5 * inch))
+        story.append(ProformaService._build_signature_block(styles))
+
+        doc.build(
+            story,
+            onFirstPage=_draw_page_decoration,
+            onLaterPages=_draw_page_decoration,
+        )
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def _build_signature_block(styles) -> Table:
+        """Dos líneas de firma lado a lado: quien entrega y quien recibe (recibí
+        conforme). El espacio para firmar lo da el Spacer previo; la línea va sobre
+        cada rótulo."""
+        label_style = ParagraphStyle(
+            "SignLabel",
+            parent=styles["Normal"],
+            fontSize=9,
+            textColor=BRAND_BLACK,
+            alignment=TA_CENTER,
+            fontName="Helvetica-Bold",
+        )
+        sub_style = ParagraphStyle(
+            "SignSub",
+            parent=styles["Normal"],
+            fontSize=8,
+            textColor=TEXT_GREY,
+            alignment=TA_CENTER,
+            leading=11,
+        )
+        left = [
+            Paragraph("Entregado por", label_style),
+            Paragraph("Nombre / Firma", sub_style),
+        ]
+        right = [
+            Paragraph("Recibí conforme — Cliente", label_style),
+            Paragraph("Nombre / C.I. / Firma / Fecha", sub_style),
+        ]
+        table = Table(
+            [[left, "", right]],
+            colWidths=[
+                CONTENT_WIDTH * 0.42,
+                CONTENT_WIDTH * 0.16,
+                CONTENT_WIDTH * 0.42,
+            ],
+        )
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LINEABOVE", (0, 0), (0, 0), 0.75, BRAND_BLACK),
+                    ("LINEABOVE", (2, 0), (2, 0), 0.75, BRAND_BLACK),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        return table
 
     @staticmethod
     def _build_header(carrier: ProformaCarrier, styles, title: str) -> List:
