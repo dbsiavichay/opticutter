@@ -10,8 +10,8 @@ from typing import Iterable
 
 from src.modules.orders.model import OrderStatus
 
-# Ingreso ganado: la orden llegó a su fin productivo.
-REALIZED_STATUSES = {OrderStatus.completed}
+# Ingreso ganado: la orden llegó a su fin productivo (completada o ya despachada).
+REALIZED_STATUSES = {OrderStatus.completed, OrderStatus.dispatched}
 
 # Ingreso perdido: no se cobrará nunca.
 LOST_STATUSES = {OrderStatus.cancelled}
@@ -34,6 +34,7 @@ STATUS_LABELS = {
     OrderStatus.cutting: "En corte",
     OrderStatus.cut: "Cortada",
     OrderStatus.completed: "Completada",
+    OrderStatus.dispatched: "Despachada",
     OrderStatus.cancelled: "Cancelada",
 }
 

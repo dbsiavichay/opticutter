@@ -178,6 +178,15 @@ class OrderResponse(CamelModel):
     assigned_to_label: Optional[str] = Field(
         default=None, description="Frozen operator name at assignment time"
     )
+    dispatched_at: Optional[datetime] = Field(
+        default=None, description="When the order was dispatched (handed to client)"
+    )
+    dispatched_by: Optional[int] = Field(
+        default=None, description="User id who registered the dispatch"
+    )
+    dispatched_by_label: Optional[str] = Field(
+        default=None, description="Frozen name of who dispatched the order"
+    )
     banding_status: BandingStatus = Field(
         default=BandingStatus.not_applicable,
         description="Parallel edge-banding track (not_applicable if no edge banding)",

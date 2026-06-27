@@ -76,15 +76,17 @@ se protege con `Depends(require_permission("<clave>"))`.
 | `clients:manage`      | ✅ | ✅ | ❌ | ❌ | `/clients/*` |
 | `optimizer`           | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
 | `preorders`           | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (interno) |
-| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document` |
+| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document`, `GET /orders/{id}/dispatch-sheet` |
 | `orders:write`        | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
-| `orders:transition`   | ✅ | ✅ | ✅* | ❌ | `PATCH /orders/{id}/status` (filtra por transición en `TRANSITION_ROLES`) |
+| `orders:transition`   | ✅ | ✅ | ✅* | ✅* | `PATCH /orders/{id}/status` (filtra por transición en `TRANSITION_ROLES`) |
 | `cutting_plan`        | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |
 | `orders:cut`          | ✅ | ❌ | ✅ | ❌ | `PATCH /orders/{id}/cutting-plan/pieces/{id}` |
 | `orders:band`         | ✅ | ❌ | ❌ | ✅ | `GET /orders/banding-queue`, `PATCH /orders/{id}/banding` |
 
 \* `orders:transition` es la puerta gruesa; qué rol puede cada transición concreta
-vive en `TRANSITION_ROLES` (`src/modules/orders/model.py`).
+vive en `TRANSITION_ROLES` (`src/modules/orders/model.py`). El `canteador` entra a este
+permiso **solo** para registrar el despacho (`completed → despachado`, la única
+transición abierta a cualquier rol); el resto de transiciones le siguen vedadas.
 
 ## Endpoints públicos (sin token)
 

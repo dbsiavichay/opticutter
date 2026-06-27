@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Optional
 
 
@@ -32,6 +33,10 @@ class ProformaCarrier:
     price_tier_name: Optional[str] = None
     discount_rate: float = 0.0
     discount_amount: float = 0.0
+    # Datos de despacho (solo la hoja de despacho los usa; ``None`` los omite). Los
+    # fija ``from_order`` desde la orden; el camino de optimización efímera no.
+    dispatch_date: Optional[datetime] = None
+    dispatched_by_label: Optional[str] = None
 
     @property
     def subtotal(self) -> float:
@@ -109,4 +114,7 @@ class ProformaCarrier:
         # nombre del nivel viene del snapshot (from_payload ya lo leyó).
         carrier.discount_rate = order.discount_rate
         carrier.discount_amount = order.discount_amount
+        # Despacho congelado (lo muestra la hoja de despacho; ``None`` antes de despachar).
+        carrier.dispatch_date = order.dispatched_at
+        carrier.dispatched_by_label = order.dispatched_by_label
         return carrier

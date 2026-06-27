@@ -291,6 +291,12 @@ class OrderService(BranchScopedMixin):
             order.assigned_at = None
             order.assigned_to_label = None
 
+        # Despacho: congela fecha y quién entregó (lo muestra la hoja de despacho).
+        if to_status == OrderStatus.dispatched:
+            order.dispatched_at = datetime.utcnow()
+            order.dispatched_by = actor.user_id
+            order.dispatched_by_label = actor.label
+
         self.db.commit()
         self.db.refresh(order)
         return order

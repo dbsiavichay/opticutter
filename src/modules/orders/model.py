@@ -28,6 +28,7 @@ class OrderStatus(str, Enum):
     cutting = "cutting"
     cut = "cut"
     completed = "completed"
+    dispatched = "despachado"
     cancelled = "cancelled"
 
 
@@ -51,8 +52,15 @@ BANDING_PENDING_STATUSES = {BandingStatus.pending, BandingStatus.in_progress}
 # Estados de corte en los que el canteado puede registrarse (ya hay piezas liberadas).
 BANDING_MUTABLE_ORDER_STATUSES = {OrderStatus.cutting, OrderStatus.cut}
 
-# Estados sin salida: la orden ya no se transforma.
-TERMINAL_STATUSES = {OrderStatus.completed, OrderStatus.cancelled}
+# Estados sin salida: la orden ya no se transforma. ``dispatched`` (mercadería
+# entregada al cliente) es el cierre real del ciclo; ``completed`` deja de ser
+# terminal en el grafo (avanza a ``dispatched``) pero sigue contando como "no
+# activa" para el control de duplicados/cap de pendientes.
+TERMINAL_STATUSES = {
+    OrderStatus.completed,
+    OrderStatus.dispatched,
+    OrderStatus.cancelled,
+}
 
 # Mapa de transiciones válidas de la máquina de estados.
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
@@ -60,7 +68,8 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.queued: {OrderStatus.cutting},
     OrderStatus.cutting: {OrderStatus.cut, OrderStatus.queued},
     OrderStatus.cut: {OrderStatus.completed},
-    OrderStatus.completed: set(),
+    OrderStatus.completed: {OrderStatus.dispatched},
+    OrderStatus.dispatched: set(),
     OrderStatus.cancelled: set(),
 }
 
@@ -78,6 +87,14 @@ TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = 
     (OrderStatus.cutting, OrderStatus.queued): (UserRole.ADMIN,),
     (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
     (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
+    # El despacho (entrega física) lo puede registrar cualquier rol: quien entregue
+    # la mercadería. Se lista a todos explícitamente en vez de omitir la entrada.
+    (OrderStatus.completed, OrderStatus.dispatched): (
+        UserRole.ADMIN,
+        UserRole.SELLER,
+        UserRole.OPERATOR,
+        UserRole.BANDER,
+    ),
 }
 
 # Transiciones válidas de la pista de canteado (forward-only; re-aplicar = idempotente).
@@ -136,6 +153,16 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     )
     assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     assigned_to_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # Despacho (entrega física al cliente): se congela al transicionar a
+    # ``dispatched``. La hoja de despacho muestra esta fecha y quién entregó.
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    dispatched_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    dispatched_by_label: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
 
     # Pista de CANTEADO (paralela al corte): el canteador marca inicio/fin. Se fija
     # a ``pending`` al crear si la orden lleva tapacantos, si no ``not_applicable``.
