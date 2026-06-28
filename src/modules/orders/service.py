@@ -115,6 +115,7 @@ class OrderService(BranchScopedMixin):
             materials=data.materials,
             requirements=data.requirements,
             client_id=data.client_id,
+            strategy=data.strategy,
         )
         payload, optimization_hash = self.optimization_service.compute(opt_request)
 

@@ -128,6 +128,35 @@ def test_optimize_returns_optimization_hash(client):
     assert isinstance(optimization_hash, str) and len(optimization_hash) == 64
 
 
+def test_optimize_strategy_changes_hash_and_is_echoed(client):
+    """La heurística `strategy` afecta el hash (cache key distinta) y se refleja.
+
+    Omitirla equivale a `default`; pasar `longOffcuts` produce otro hash para que
+    no colisione en caché con el acomodo por defecto.
+    """
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    base = _optimize_payload(created_client["id"], created_board["id"])
+    default_resp = client.post("/api/v1/optimize/", json=base).json()["data"]
+
+    explicit_default = client.post(
+        "/api/v1/optimize/", json={**base, "strategy": "default"}
+    ).json()["data"]
+
+    long_off = client.post(
+        "/api/v1/optimize/", json={**base, "strategy": "longOffcuts"}
+    ).json()["data"]
+
+    # Echo de la estrategia aplicada.
+    assert default_resp["strategy"] == "default"
+    assert long_off["strategy"] == "longOffcuts"
+    # Omitir == default explícito (mismo hash de caché).
+    assert explicit_default["optimizationHash"] == default_resp["optimizationHash"]
+    # Otra estrategia => otro hash (no colisiona la caché).
+    assert long_off["optimizationHash"] != default_resp["optimizationHash"]
+
+
 def test_optimize_computes_total_boards_cost(client):
     """El costo total debe ser nº de tableros usados * precio del tablero."""
     created_client = _create_client(client)

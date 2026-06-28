@@ -8,6 +8,7 @@ from src.cutting import (
     GuillotineOptimizer,
     Material,
     MultiSheetGuillotineOptimizer,
+    PackingStrategy,
     Piece,
     Rectangle,
     SplitRule,
@@ -221,3 +222,97 @@ def test_multisheet_layouts_track_cut_length():
     for layout in layouts:
         assert layout.cut_length == pytest.approx(sum(c.length for c in layout.cuts))
         assert layout.cut_length > 0
+
+
+# --- Estrategias de empaquetado (PackingStrategy) ------------------------
+
+
+def _example_setup():
+    """Tablero retrato (alto 2440 > ancho 1830) + 8 piezas del ejemplo real."""
+    material = Material(id="board", width=1830, height=2440, thickness=15)
+    params = CuttingParameters(
+        kerf=5, top_trim=10, bottom_trim=10, left_trim=10, right_trim=10
+    )
+    widths = [300, 500, 302, 303, 304, 305, 306, 307]
+    pieces = [
+        Piece(id=f"P{i + 1}", width=w, height=500, quantity=1, can_rotate=False)
+        for i, w in enumerate(widths)
+    ]
+    return material, params, pieces
+
+
+def test_strategy_derives_split_rule_when_not_passed():
+    """Sin ``split_rule`` explícito, la estrategia define la regla de split."""
+    material = Material(id="m", width=1830, height=2440, thickness=15)
+    default = MultiSheetGuillotineOptimizer(material_template=material)
+    long_off = MultiSheetGuillotineOptimizer(
+        material_template=material, strategy=PackingStrategy.LONG_OFFCUTS
+    )
+    assert default.strategy == PackingStrategy.MAX_EFFICIENCY
+    assert default.split_rule == SplitRule.SHORTER_LEFTOVER_AXIS
+    assert long_off.split_rule == SplitRule.LONGER_AXIS
+    # Un ``split_rule`` explícito gana sobre el derivado de la estrategia.
+    override = GuillotineOptimizer(
+        material=material,
+        split_rule=SplitRule.MAXIMIZE_AREA,
+        strategy=PackingStrategy.LONG_OFFCUTS,
+    )
+    assert override.split_rule == SplitRule.MAXIMIZE_AREA
+
+
+def test_default_strategy_preserves_best_area_fit_layout():
+    """El default (MAX_EFFICIENCY) conserva el comportamiento histórico (BAF)."""
+    material, params, pieces = _example_setup()
+    optimizer = MultiSheetGuillotineOptimizer(
+        material_template=material, cutting_params=params
+    )
+    layouts, remaining = optimizer.optimize(pieces)
+
+    assert remaining == []
+    layout = layouts[0]
+    biggest = max(layout.remainders, key=lambda r: r.area)
+    # Retazo mayor del ejemplo real con BAF: 1502 (ancho) x 1915 (alto).
+    assert biggest.width == pytest.approx(1502)
+    assert biggest.height == pytest.approx(1915)
+    # BAF dispersa las piezas a lo ancho (llegan más allá de la mitad derecha).
+    assert max(p.x + p.width for p in layout.placed_pieces) > 1700
+
+
+def test_long_offcuts_leaves_full_height_strip_against_one_side():
+    """``LONG_OFFCUTS`` pega las piezas a la izquierda y deja una tira de alto completo."""
+    material, params, pieces = _example_setup()
+    optimizer = MultiSheetGuillotineOptimizer(
+        material_template=material,
+        cutting_params=params,
+        strategy=PackingStrategy.LONG_OFFCUTS,
+    )
+    layouts, remaining = optimizer.optimize(pieces)
+
+    assert remaining == []
+    layout = layouts[0]
+    usable_height = material.height - params.top_trim - params.bottom_trim  # 2420
+
+    # El retazo dominante es una franja que recorre el alto usable completo.
+    biggest = max(layout.remainders, key=lambda r: r.area)
+    assert biggest.height == pytest.approx(usable_height)
+    # Está apegada a un costado: las piezas no la invaden (todas a su izquierda).
+    assert all(p.x + p.width <= biggest.x + 1e-6 for p in layout.placed_pieces)
+    # Las piezas quedan compactadas contra el lado izquierdo del tablero.
+    assert max(p.x + p.width for p in layout.placed_pieces) < material.width / 2
+
+
+def test_long_offcuts_differs_from_default_layout():
+    """Las dos estrategias producen acomodos distintos para la misma entrada."""
+    material, params, pieces = _example_setup()
+    default = MultiSheetGuillotineOptimizer(
+        material_template=material, cutting_params=params
+    ).optimize(pieces)[0][0]
+    long_off = MultiSheetGuillotineOptimizer(
+        material_template=material,
+        cutting_params=params,
+        strategy=PackingStrategy.LONG_OFFCUTS,
+    ).optimize(pieces)[0][0]
+
+    default_xs = sorted((p.piece.id, p.x, p.y) for p in default.placed_pieces)
+    long_xs = sorted((p.piece.id, p.x, p.y) for p in long_off.placed_pieces)
+    assert default_xs != long_xs

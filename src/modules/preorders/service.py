@@ -116,6 +116,7 @@ class PreOrderService(BranchScopedMixin):
             materials=[m.model_dump(mode="json") for m in data.materials],
             requirements=[r.model_dump(mode="json") for r in data.requirements],
             price_tier_code=tier["code"],
+            strategy=data.strategy.value,
             source=data.source,
             notes=data.notes,
             created_at=now,
@@ -157,6 +158,8 @@ class PreOrderService(BranchScopedMixin):
         if data.price_tier_code is not None:
             tier = self.settings_service.resolve_price_tier(data.price_tier_code)
             preorder.price_tier_code = tier["code"]
+        if data.strategy is not None:
+            preorder.strategy = data.strategy.value
         if "notes" in fields:
             preorder.notes = data.notes
         if "source" in fields:
@@ -193,13 +196,15 @@ class PreOrderService(BranchScopedMixin):
         """Reconstruye el ``OptimizeRequest`` desde los inputs guardados.
 
         Lleva el nivel de precio para que ``optimize_response`` adjunte el bloque
-        ``pricing`` (no afecta la geometría ni el hash).
+        ``pricing`` (no afecta la geometría ni el hash) y la ``strategy`` guardada
+        para reproducir el mismo acomodo (sí afecta la geometría y el hash).
         """
         return OptimizeRequest(
             materials=preorder.materials,
             requirements=preorder.requirements,
             client_id=preorder.client_id,
             price_tier_code=preorder.price_tier_code,
+            strategy=preorder.strategy,
         )
 
     def compute_payload(self, preorder: PreOrderModel) -> Tuple[dict, str]:

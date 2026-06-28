@@ -75,6 +75,13 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
         String(32), default="consumidor", server_default="consumidor"
     )
 
+    # Heurística de acomodo elegida (afecta la geometría del recálculo): se conserva
+    # para reproducir el mismo resultado en cada lectura y heredarla la orden al
+    # confirmar. Ver OptimizationStrategy (default | longOffcuts).
+    strategy: Mapped[str] = mapped_column(
+        String(32), default="default", server_default="default"
+    )
+
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     # Última solicitud de cambios del cliente (texto libre desde el enlace de

@@ -132,3 +132,33 @@ def test_preorder_proforma_pdf(client):
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
+
+
+def test_preorder_persists_strategy_and_recomputes_with_it(client):
+    """La estrategia se guarda y el recálculo (cache-first) la usa en cada lectura."""
+    c, b = _setup(client)
+    data = _create_preorder(client, c, b, strategy="longOffcuts").json()["data"]
+    assert data["strategy"] == "longOffcuts"
+    assert data["optimization"]["strategy"] == "longOffcuts"
+
+    # Re-leer la pre-orden vuelve a recalcular y conserva la estrategia.
+    reread = client.get(f"/api/v1/preorders/{data['id']}").json()["data"]
+    assert reread["strategy"] == "longOffcuts"
+    assert reread["optimization"]["strategy"] == "longOffcuts"
+
+    # Omitir la estrategia cae al comportamiento por defecto.
+    other = _create_preorder(client, c, b, width=500).json()["data"]
+    assert other["strategy"] == "default"
+    assert other["optimization"]["strategy"] == "default"
+
+
+def test_update_preorder_changes_strategy(client):
+    c, b = _setup(client)
+    pre = _create_preorder(client, c, b).json()["data"]
+    assert pre["strategy"] == "default"
+
+    upd = client.put(f"/api/v1/preorders/{pre['id']}", json={"strategy": "longOffcuts"})
+    assert upd.status_code == 200
+    data = upd.json()["data"]
+    assert data["strategy"] == "longOffcuts"
+    assert data["optimization"]["strategy"] == "longOffcuts"

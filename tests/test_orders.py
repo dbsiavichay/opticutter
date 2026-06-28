@@ -44,8 +44,10 @@ def _create_board(client, code="MEL18"):
 _BRANCH = 1
 
 
-def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
-    return {
+def _order_payload(
+    client_id, product_id, height=400, width=600, quantity=2, strategy=None
+):
+    payload = {
         "clientId": client_id,
         "branchId": _BRANCH,
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
@@ -61,6 +63,9 @@ def _order_payload(client_id, product_id, height=400, width=600, quantity=2):
             }
         ],
     }
+    if strategy is not None:
+        payload["strategy"] = strategy
+    return payload
 
 
 def _mint_order(db_session, payload):
@@ -458,3 +463,18 @@ def test_non_catalog_order_renders_document_and_production_sheet(client, db_sess
     assert sheet.status_code == 200
     assert sheet.headers["content-type"] == "application/pdf"
     assert len(sheet.content) > 1000
+
+
+def test_order_freezes_chosen_packing_strategy(client, db_session):
+    """La estrategia elegida se congela en el snapshot inmutable de la orden."""
+    b = _create_board(client)
+    c1 = _create_client(client, identifier="0991110001", phone="0991110001")
+    order = _mint_order(
+        db_session, _order_payload(c1["id"], b["id"], strategy="longOffcuts")
+    )
+    assert order.optimization_snapshot["strategy"] == "longOffcuts"
+
+    # Omitir la estrategia congela el comportamiento por defecto.
+    c2 = _create_client(client, identifier="0991110002", phone="0991110002")
+    order_default = _mint_order(db_session, _order_payload(c2["id"], b["id"]))
+    assert order_default.optimization_snapshot["strategy"] == "default"

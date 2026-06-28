@@ -1,5 +1,10 @@
 # Makefile para Cutter API
-.PHONY: help build start dev down tests lint-fix lint-check install clean logs redis-cli
+.PHONY: help build start dev down tests tests-local create-test-db lint-fix lint-check install clean logs redis-cli
+
+# Las pruebas corren SIEMPRE contra una base dedicada (cutter_test_db), nunca
+# contra la base de desarrollo (cutter_db): el conftest hace TRUNCATE por test.
+DB_TEST_DOCKER = postgresql://cutter:cutter@postgres:5432/cutter_test_db
+DB_TEST_LOCAL = postgresql://cutter:cutter@localhost:5433/cutter_test_db
 
 help: ## Muestra esta ayuda
 	@grep -E '^[A-Za-z0-9_.-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
@@ -22,11 +27,17 @@ down: ## Detiene los contenedores
 logs: ## Muestra los logs de la aplicación
 	docker compose logs -f api
 
-tests: ## Ejecuta las pruebas
-	docker compose run --no-deps --rm api pytest -q
+create-test-db: ## Crea cutter_test_db si no existe (idempotente, no toca cutter_db)
+	docker compose up -d postgres
+	@until docker compose exec -T postgres pg_isready -U cutter >/dev/null 2>&1; do sleep 1; done
+	@docker compose exec -T postgres psql -U cutter -d cutter_db -tc "SELECT 1 FROM pg_database WHERE datname='cutter_test_db'" | grep -q 1 || \
+		docker compose exec -T postgres psql -U cutter -d cutter_db -c "CREATE DATABASE cutter_test_db"
 
-tests-local: ## Ejecuta las pruebas localmente (requiere PostgreSQL en localhost:5433)
-	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db pytest -q
+tests: create-test-db ## Ejecuta las pruebas (contra cutter_test_db; nunca toca cutter_db)
+	docker compose run --no-deps --rm -e DATABASE_URL=$(DB_TEST_DOCKER) -e TEST_DATABASE_URL=$(DB_TEST_DOCKER) api pytest -q
+
+tests-local: create-test-db ## Ejecuta las pruebas localmente (PostgreSQL en localhost:5433)
+	DATABASE_URL=$(DB_TEST_LOCAL) TEST_DATABASE_URL=$(DB_TEST_LOCAL) pytest -q
 
 lint-fix: ## Corrige errores de formato y lint
 	source .venv/bin/activate && ruff check --fix . && ruff format .

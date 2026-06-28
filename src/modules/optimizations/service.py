@@ -12,8 +12,8 @@ from src.cutting import (
     CuttingParameters,
     Material,
     MultiSheetGuillotineOptimizer,
+    PackingStrategy,
     Piece,
-    SplitRule,
 )
 from src.modules.clients.model import ClientModel
 from src.modules.optimizations.labels import edge_banding_notation
@@ -21,8 +21,10 @@ from src.modules.optimizations.materials import MaterialResolver, ResolvedMateri
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import (
+    STRATEGY_TO_PACKING,
     EdgeBandingSpec,
     EdgeSide,
+    OptimizationStrategy,
     OptimizeRequest,
     OptimizeResponse,
     PricingSummary,
@@ -82,6 +84,7 @@ class OptimizationService:
             id=None,
             client=client,
             optimization_hash=optimization_hash,
+            strategy=payload.get("strategy", OptimizationStrategy.default.value),
             total_boards_used=payload["total_boards_used"],
             total_boards_cost=payload["total_boards_cost"],
             total_edge_banding_cost=payload.get("total_edge_banding_cost", 0.0),
@@ -138,6 +141,7 @@ class OptimizationService:
         if cached is not None:
             return cached, optimization_hash
 
+        strategy = STRATEGY_TO_PACKING[request.strategy]
         results = []
         for key, reqs in requirements_by_key.items():
             pieces, edge_map, net_map = self._build_pieces(reqs)
@@ -145,6 +149,7 @@ class OptimizationService:
                 pieces=pieces,
                 material=resolved[key],
                 cutting_params=cutting_params,
+                strategy=strategy,
             )[0]
             results.append((edge_map, net_map, layouts))
 
@@ -219,6 +224,7 @@ class OptimizationService:
                 "left_trim": cutting_params.left_trim,
                 "right_trim": cutting_params.right_trim,
                 "edge_banding_waste_factor": waste_factor,
+                "strategy": request.strategy.value,
             },
             "edge_prices": edge_prices,
         }
@@ -239,6 +245,7 @@ class OptimizationService:
         pieces: List[Piece],
         material: ResolvedMaterial,
         cutting_params: CuttingParameters,
+        strategy: PackingStrategy = PackingStrategy.MAX_EFFICIENCY,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
     ) -> Tuple[List[CuttingLayout], List[Piece]]:
@@ -247,7 +254,8 @@ class OptimizationService:
         Recibe las piezas de dominio ya expandidas y con id único (ver
         ``_build_pieces``): cada instancia física llega con ``quantity=1`` para que el
         optimizador conserve el id tal cual y la atribución de canto por pieza no
-        dependa de etiquetas ambiguas.
+        dependa de etiquetas ambiguas. ``strategy`` define el perfil de acomodo
+        (eficiencia máxima vs. retazos largos); la regla de split se deriva de él.
         """
         if not pieces:
             raise ValidationError("La lista de piezas no puede estar vacía")
@@ -263,7 +271,7 @@ class OptimizationService:
         optimizer = MultiSheetGuillotineOptimizer(
             material_template=domain_material,
             cutting_params=cutting_params,
-            split_rule=SplitRule.SHORTER_LEFTOVER_AXIS,
+            strategy=strategy,
             max_sheets=max_sheets,
             min_rect_size=min_rect_size,
         )
@@ -550,6 +558,7 @@ class OptimizationService:
             )
         )
         return {
+            "strategy": request.strategy.value,
             "total_boards_used": total_boards_used,
             "total_boards_cost": total_boards_cost,
             "total_edge_banding_cost": total_edge_banding_cost,

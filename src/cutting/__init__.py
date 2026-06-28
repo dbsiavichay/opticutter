@@ -3,7 +3,11 @@
 Sin dependencias de frameworks: solo dataclasses y lógica de optimización.
 """
 
-from src.cutting.enums import SplitRule
+from src.cutting.enums import (
+    PACKING_STRATEGY_SPLIT_RULE,
+    PackingStrategy,
+    SplitRule,
+)
 from src.cutting.models import (
     Cut,
     CuttingLayout,
@@ -16,12 +20,14 @@ from src.cutting.optimizer import GuillotineOptimizer, MultiSheetGuillotineOptim
 from src.cutting.parameters import CuttingParameters
 
 __all__ = [
+    "PACKING_STRATEGY_SPLIT_RULE",
     "Cut",
     "CuttingLayout",
     "CuttingParameters",
     "GuillotineOptimizer",
     "Material",
     "MultiSheetGuillotineOptimizer",
+    "PackingStrategy",
     "Piece",
     "PlacedPiece",
     "Rectangle",
