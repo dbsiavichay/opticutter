@@ -8,6 +8,7 @@ from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
     CutSegment,
     MaterialInput,
+    OptimizationStrategy,
     Remainder,
     Requirement,
 )
@@ -35,6 +36,13 @@ class OrderCreate(CamelModel):
         default="consumidor",
         max_length=32,
         description="Nivel de precio a congelar: consumidor (0%)|carpintero (2%)|efectivo (5%)",
+    )
+    strategy: OptimizationStrategy = Field(
+        default=OptimizationStrategy.default,
+        description=(
+            "Heurística de acomodo a usar al recalcular y congelar el snapshot "
+            "(default | longOffcuts). Heredada de la pre-orden al confirmar."
+        ),
     )
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)

@@ -164,6 +164,7 @@ class PreOrderReviewService:
                 client_id=preorder.client_id,
                 branch_id=preorder.branch_id,
                 price_tier_code=preorder.price_tier_code,
+                strategy=preorder.strategy,
                 notes=preorder.notes,
                 source=preorder.source,
             ),

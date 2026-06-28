@@ -7,6 +7,7 @@ from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
     MaterialInput,
+    OptimizationStrategy,
     OptimizeResponse,
     Requirement,
 )
@@ -35,6 +36,13 @@ class PreOrderCreate(CamelModel):
         max_length=32,
         description="Nivel de precio: consumidor (0%) | carpintero (2%) | efectivo (5%)",
     )
+    strategy: OptimizationStrategy = Field(
+        default=OptimizationStrategy.default,
+        description=(
+            "Heurística de acomodo a recordar para el recálculo: default | longOffcuts. "
+            "Afecta la geometría; se hereda a la orden al confirmar."
+        ),
+    )
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default="telegram", max_length=32)
     branch_id: Optional[int] = Field(
@@ -54,6 +62,7 @@ class PreOrderUpdate(CamelModel):
     requirements: Optional[List[Requirement]] = Field(default=None, min_length=1)
     client_id: Optional[int] = None
     price_tier_code: Optional[str] = Field(default=None, max_length=32)
+    strategy: Optional[OptimizationStrategy] = Field(default=None)
     notes: Optional[str] = Field(default=None, max_length=512)
     source: Optional[str] = Field(default=None, max_length=32)
 
@@ -87,6 +96,10 @@ class PreOrderResponse(CamelModel):
     status: PreOrderStatus
     price_tier_code: str = Field(
         default="consumidor", description="Selected price tier (discount level)"
+    )
+    strategy: OptimizationStrategy = Field(
+        default=OptimizationStrategy.default,
+        description="Packing heuristic remembered for the recompute",
     )
     notes: Optional[str] = None
     client_note: Optional[str] = Field(

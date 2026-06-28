@@ -1,6 +1,10 @@
 from typing import List, Tuple
 
-from src.cutting.enums import SplitRule
+from src.cutting.enums import (
+    PACKING_STRATEGY_SPLIT_RULE,
+    PackingStrategy,
+    SplitRule,
+)
 from src.cutting.models import (
     Cut,
     CuttingLayout,
@@ -12,6 +16,18 @@ from src.cutting.models import (
 from src.cutting.parameters import CuttingParameters
 
 
+def _sort_pieces(pieces: List[Piece], strategy: PackingStrategy) -> List[Piece]:
+    """Orden de colocación según la estrategia de empaquetado.
+
+    ``MAX_EFFICIENCY`` ordena por área descendente (Decreasing Area).
+    ``LONG_OFFCUTS`` ordena por alto y luego ancho descendentes, de modo que las
+    piezas más altas anclan columnas completas a lo largo del eje largo.
+    """
+    if strategy == PackingStrategy.LONG_OFFCUTS:
+        return sorted(pieces, key=lambda p: (-p.priority, -p.height, -p.width))
+    return sorted(pieces, key=lambda p: (-p.priority, -p.area))
+
+
 class GuillotineOptimizer:
     """Optimizador de corte usando el algoritmo Guillotine para un solo tablero"""
 
@@ -19,11 +35,18 @@ class GuillotineOptimizer:
         self,
         material: Material,
         cutting_params: CuttingParameters = None,
-        split_rule: SplitRule = SplitRule.SHORTER_LEFTOVER_AXIS,
+        split_rule: SplitRule = None,
         min_rect_size: float = 0.1,
+        strategy: PackingStrategy = PackingStrategy.MAX_EFFICIENCY,
     ):
         self.material = material
-        self.split_rule = split_rule
+        self.strategy = strategy
+        # ``split_rule`` explícito gana; si no, se deriva de la estrategia.
+        self.split_rule = (
+            split_rule
+            if split_rule is not None
+            else PACKING_STRATEGY_SPLIT_RULE[strategy]
+        )
         self.cutting_params = cutting_params or CuttingParameters()
         self.kerf = max(0, self.cutting_params.kerf)
         self.top_trim = max(0, self.cutting_params.top_trim)
@@ -74,7 +97,7 @@ class GuillotineOptimizer:
                 )
                 expanded_pieces.append(piece_copy)
 
-        sorted_pieces = sorted(expanded_pieces, key=lambda p: (-p.priority, -p.area))
+        sorted_pieces = _sort_pieces(expanded_pieces, self.strategy)
 
         unplaced_pieces = []
 
@@ -85,22 +108,36 @@ class GuillotineOptimizer:
 
         return self.placed_pieces, unplaced_pieces
 
+    def _fit_score(self, rect: Rectangle, piece: Piece):
+        """Puntaje de ajuste de un hueco para una pieza (menor = mejor).
+
+        ``MAX_EFFICIENCY`` usa Best-Area-Fit: el sobrante de área tras colocar la
+        pieza (``rect.area - piece.area``). ``LONG_OFFCUTS`` usa Bottom-Left:
+        prioriza el hueco más a la izquierda y abajo (``rect.x``, ``rect.y``),
+        desempatando por ajuste de área — así pega las piezas contra una esquina y
+        deja el sobrante dominante como una tira continua al lado opuesto.
+        """
+        leftover = rect.area - piece.area
+        if self.strategy == PackingStrategy.LONG_OFFCUTS:
+            return (rect.x, rect.y, leftover)
+        return leftover
+
     def _place_piece(self, piece: Piece) -> bool:
         best_rect_index = -1
         best_rotated = False
-        best_score = float("inf")
+        best_score = None
 
         for i, rect in enumerate(self.remainders):
             if rect.contains(piece.width, piece.height):
-                score = rect.area - piece.area
-                if score < best_score:
+                score = self._fit_score(rect, piece)
+                if best_score is None or score < best_score:
                     best_score = score
                     best_rect_index = i
                     best_rotated = False
 
             if piece.can_rotate and rect.contains(piece.height, piece.width):
-                score = rect.area - piece.area
-                if score < best_score:
+                score = self._fit_score(rect, piece)
+                if best_score is None or score < best_score:
                     best_score = score
                     best_rect_index = i
                     best_rotated = True
@@ -393,12 +430,19 @@ class MultiSheetGuillotineOptimizer:
         self,
         material_template: Material,
         cutting_params: CuttingParameters = None,
-        split_rule: SplitRule = SplitRule.SHORTER_LEFTOVER_AXIS,
+        split_rule: SplitRule = None,
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
+        strategy: PackingStrategy = PackingStrategy.MAX_EFFICIENCY,
     ):
         self.material_template = material_template
-        self.split_rule = split_rule
+        self.strategy = strategy
+        # ``split_rule`` explícito gana; si no, se deriva de la estrategia.
+        self.split_rule = (
+            split_rule
+            if split_rule is not None
+            else PACKING_STRATEGY_SPLIT_RULE[strategy]
+        )
         self.cutting_params = cutting_params or CuttingParameters()
         self.max_sheets = max_sheets
         self.min_rect_size = min_rect_size
@@ -424,7 +468,7 @@ class MultiSheetGuillotineOptimizer:
                 )
                 expanded_pieces.append(piece_copy)
 
-        remaining_pieces = sorted(expanded_pieces, key=lambda p: (-p.priority, -p.area))
+        remaining_pieces = _sort_pieces(expanded_pieces, self.strategy)
 
         sheet_count = 0
 
@@ -445,6 +489,7 @@ class MultiSheetGuillotineOptimizer:
                     split_rule=self.split_rule,
                     cutting_params=self.cutting_params,
                     min_rect_size=self.min_rect_size,
+                    strategy=self.strategy,
                 )
             except ValueError as e:
                 print(f"Error al crear optimizador: {e}")

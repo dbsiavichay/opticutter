@@ -10,6 +10,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.cutting import PackingStrategy
 from src.modules.clients.schemas import ClientResponse
 from src.shared.schemas import CamelModel
 
@@ -26,6 +27,26 @@ class MaterialSource(str, Enum):
     company_offcut = "companyOffcut"
     client_offcut = "clientOffcut"
     manual = "manual"
+
+
+class OptimizationStrategy(str, Enum):
+    """Heurística de acomodo a aplicar en la optimización.
+
+    ``default`` (Best-Area-Fit) minimiza la merma total pero la fragmenta en
+    varios retazos. ``longOffcuts`` pega las piezas contra un lado del tablero y
+    concentra la merma en una tira continua larga (apegada al eje largo del
+    tablero), reutilizable como retazo. Mapea a ``cutting.PackingStrategy``.
+    """
+
+    default = "default"
+    long_offcuts = "longOffcuts"
+
+
+# Traducción del enum de API al perfil del dominio de corte.
+STRATEGY_TO_PACKING = {
+    OptimizationStrategy.default: PackingStrategy.MAX_EFFICIENCY,
+    OptimizationStrategy.long_offcuts: PackingStrategy.LONG_OFFCUTS,
+}
 
 
 class MaterialSummary(CamelModel):
@@ -241,6 +262,15 @@ class OptimizeRequest(CamelModel):
             "el bloque `pricing` (descuento sobre tableros de catálogo)."
         ),
     )
+    strategy: OptimizationStrategy = Field(
+        default=OptimizationStrategy.default,
+        description=(
+            "Heurística de acomodo. `default`: máxima eficiencia (minimiza la merma "
+            "total). `longOffcuts`: concentra la merma en una tira continua larga "
+            "reutilizable, pegando las piezas a un lado. SÍ afecta la geometría y el "
+            "hash de la optimización (a diferencia de clientId/priceTierCode)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_material_refs(self) -> "OptimizeRequest":
@@ -365,6 +395,10 @@ class OptimizeResponse(CamelModel):
     )
     optimization_hash: Optional[str] = Field(
         default=None, description="Deterministic hash of the optimization inputs"
+    )
+    strategy: OptimizationStrategy = Field(
+        default=OptimizationStrategy.default,
+        description="Heurística de acomodo aplicada a esta optimización",
     )
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")
