@@ -75,7 +75,10 @@ def test_order_status_transition_records_staff_actor(client, db_session):
     order = _mint_order(db_session, _order_payload(c["id"], b["id"]))
     admin = _admin(db_session)
 
-    resp = client.patch(f"/api/v1/orders/{order.id}/status", json={"status": "queued"})
+    resp = client.patch(
+        f"/api/v1/orders/{order.id}/status",
+        json={"status": "queued", "payment": {"cashAmount": 100.0}},
+    )
     assert resp.status_code == 200
 
     last = resp.json()["data"]["history"][-1]
@@ -91,7 +94,10 @@ def test_mark_piece_cut_records_cut_by(client, db_session):
     order = _mint_order(db_session, _order_payload(c["id"], b["id"]))
     admin = _admin(db_session)
     for status in ("queued", "cutting"):
-        client.patch(f"/api/v1/orders/{order.id}/status", json={"status": status})
+        body = {"status": status}
+        if status == "queued":
+            body["payment"] = {"cashAmount": 100.0}
+        client.patch(f"/api/v1/orders/{order.id}/status", json=body)
 
     plan = client.get(f"/api/v1/orders/{order.id}/cutting-plan").json()["data"]
     piece_id = plan["boards"][0]["pieces"][0]["id"]

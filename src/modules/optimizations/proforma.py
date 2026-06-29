@@ -237,6 +237,11 @@ class ProformaService:
 
         story.append(ProformaService._build_totals_table(carrier))
 
+        payment_block = ProformaService._payment_section(carrier, heading_style)
+        if payment_block:
+            story.append(Spacer(1, 0.2 * inch))
+            story.extend(payment_block)
+
         story.append(PageBreak())
         story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
         story.append(Spacer(1, 0.08 * inch))
@@ -377,6 +382,11 @@ class ProformaService:
         story.append(Spacer(1, 0.12 * inch))
         story.append(ProformaService._build_boards_total_table(carrier))
         story.append(Spacer(1, 0.25 * inch))
+
+        payment_block = ProformaService._payment_section(carrier, heading_style)
+        if payment_block:
+            story.extend(payment_block)
+            story.append(Spacer(1, 0.25 * inch))
 
         story.extend(_section("DESCARGO DE RESPONSABILIDAD", heading_style))
         story.append(
@@ -902,6 +912,25 @@ class ProformaService:
             )
         summary_data.append(["Costo total estimado:", f"${carrier.total_cost:.2f}"])
         return _totals_table(summary_data)
+
+    @staticmethod
+    def _payment_section(carrier: ProformaCarrier, heading_style) -> list:
+        """Bloque "FORMA DE PAGO" (informativo): efectivo y/o crédito + total.
+
+        Devuelve ``[]`` cuando no hay pago registrado, para omitir el bloque en
+        cotizaciones efímeras y en órdenes aún no enviadas a la cola.
+        """
+        cash = carrier.payment_cash_amount or 0
+        credit = carrier.payment_credit_amount or 0
+        if cash <= 0 and credit <= 0:
+            return []
+        rows: List[List[str]] = []
+        if cash > 0:
+            rows.append(["Efectivo:", f"${cash:.2f}"])
+        if credit > 0:
+            rows.append(["A crédito:", f"${credit:.2f}"])
+        rows.append(["Total:", f"${cash + credit:.2f}"])
+        return [*_section("FORMA DE PAGO", heading_style), _totals_table(rows)]
 
     @staticmethod
     def _build_boards_total_table(

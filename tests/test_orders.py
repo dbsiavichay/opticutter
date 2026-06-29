@@ -161,7 +161,10 @@ def test_status_transitions_valid_and_invalid(client, db_session):
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
     oid = order["id"]
 
-    ok = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "queued"})
+    ok = client.patch(
+        f"/api/v1/orders/{oid}/status",
+        json={"status": "queued", "payment": {"cashAmount": 100.0}},
+    )
     assert ok.status_code == 200
     assert ok.json()["data"]["status"] == "queued"
 
@@ -188,6 +191,93 @@ def test_invalid_transition_from_confirmed(client, db_session):
     assert bad.status_code == 422
 
 
+def test_queued_requires_payment(client, db_session):
+    """confirmed → queued sin forma de pago se bloquea y la orden no avanza."""
+    c = _create_client(client)
+    b = _create_board(client)
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
+    oid = order["id"]
+
+    bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "queued"})
+    assert bad.status_code == 422
+    assert "forma de pago" in bad.json()["errors"][0]["message"].lower()
+    # La orden sigue en confirmed (la transición no se aplicó).
+    assert client.get(f"/api/v1/orders/{oid}").json()["data"]["status"] == "confirmed"
+
+    # Un pago presente pero con montos en cero tampoco vale.
+    zero = client.patch(
+        f"/api/v1/orders/{oid}/status",
+        json={"status": "queued", "payment": {"cashAmount": 0, "creditAmount": 0}},
+    )
+    assert zero.status_code == 422
+
+
+def test_queued_records_payment(client, db_session):
+    """Registra ambos métodos y los congela en la orden (informativos)."""
+    c = _create_client(client)
+    b = _create_board(client)
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
+    oid = order["id"]
+
+    ok = client.patch(
+        f"/api/v1/orders/{oid}/status",
+        json={
+            "status": "queued",
+            "payment": {"cashAmount": 30.5, "creditAmount": 15.0},
+        },
+    )
+    assert ok.status_code == 200
+    data = ok.json()["data"]
+    assert data["status"] == "queued"
+    assert data["paymentCashAmount"] == 30.5
+    assert data["paymentCreditAmount"] == 15.0
+
+    # Persistido: se relee igual.
+    reread = client.get(f"/api/v1/orders/{oid}").json()["data"]
+    assert reread["paymentCashAmount"] == 30.5
+    assert reread["paymentCreditAmount"] == 15.0
+
+
+def test_queued_payment_single_method(client, db_session):
+    """Un solo método (solo crédito) es válido; el otro queda en None."""
+    c = _create_client(client)
+    b = _create_board(client)
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
+    oid = order["id"]
+
+    ok = client.patch(
+        f"/api/v1/orders/{oid}/status",
+        json={"status": "queued", "payment": {"creditAmount": 80.0}},
+    )
+    assert ok.status_code == 200
+    data = ok.json()["data"]
+    assert data["paymentCreditAmount"] == 80.0
+    assert data["paymentCashAmount"] is None
+
+
+def test_payment_reflected_in_documents(client, db_session):
+    """Tras registrar el pago, el documento y la hoja de despacho se renderizan."""
+    c = _create_client(client)
+    b = _create_board(client)
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
+    oid = order["id"]
+
+    client.patch(
+        f"/api/v1/orders/{oid}/status",
+        json={"status": "queued", "payment": {"cashAmount": 50.0}},
+    )
+
+    doc = client.get(f"/api/v1/orders/{oid}/document")
+    assert doc.status_code == 200
+    assert doc.headers["content-type"] == "application/pdf"
+    assert len(doc.content) > 1000
+
+    dispatch = client.get(f"/api/v1/orders/{oid}/dispatch-sheet")
+    assert dispatch.status_code == 200
+    assert dispatch.headers["content-type"] == "application/pdf"
+    assert len(dispatch.content) > 1000
+
+
 def test_list_orders_filter_by_status(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
@@ -195,7 +285,10 @@ def test_list_orders_filter_by_status(client, db_session):
     _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
 
     # Enviar la primera a producción.
-    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued"})
+    client.patch(
+        f"/api/v1/orders/{o1['id']}/status",
+        json={"status": "queued", "payment": {"cashAmount": 100.0}},
+    )
 
     in_prod = client.get("/api/v1/orders/", params={"status": "queued"}).json()
     assert [o["id"] for o in in_prod["data"]] == [o1["id"]]
@@ -214,9 +307,14 @@ def test_list_orders_filter_by_multiple_statuses(client, db_session):
     o3 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=400))
 
     # o1: confirmed → queued → cutting; o2: queda confirmed; o3: queued.
-    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued"})
+    _pay = {"payment": {"cashAmount": 100.0}}
+    client.patch(
+        f"/api/v1/orders/{o1['id']}/status", json={"status": "queued", **_pay}
+    )
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "cutting"})
-    client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "queued"})
+    client.patch(
+        f"/api/v1/orders/{o3['id']}/status", json={"status": "queued", **_pay}
+    )
 
     # Repetir el parámetro filtra por varios estados a la vez.
     resp = client.get(

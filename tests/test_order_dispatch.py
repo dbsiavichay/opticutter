@@ -70,7 +70,11 @@ def _mint_order(client, db_session, identifier="0991112233", code="MEL18", width
 
 
 def _patch_status(client, oid, status, **kw):
-    return client.patch(f"/api/v1/orders/{oid}/status", json={"status": status}, **kw)
+    body = {"status": status}
+    if status == "queued":
+        # Pasar a cola exige registrar la forma de pago (informativa).
+        body["payment"] = {"cashAmount": 100.0}
+    return client.patch(f"/api/v1/orders/{oid}/status", json=body, **kw)
 
 
 def _to_completed(client, oid):

@@ -37,6 +37,10 @@ class ProformaCarrier:
     # fija ``from_order`` desde la orden; el camino de optimización efímera no.
     dispatch_date: Optional[datetime] = None
     dispatched_by_label: Optional[str] = None
+    # Forma de pago congelada (informativa). Solo la fija ``from_order``; las
+    # cotizaciones efímeras la dejan en ``None`` y el bloque se omite en el PDF.
+    payment_cash_amount: Optional[float] = None
+    payment_credit_amount: Optional[float] = None
 
     @property
     def subtotal(self) -> float:
@@ -117,4 +121,7 @@ class ProformaCarrier:
         # Despacho congelado (lo muestra la hoja de despacho; ``None`` antes de despachar).
         carrier.dispatch_date = order.dispatched_at
         carrier.dispatched_by_label = order.dispatched_by_label
+        # Forma de pago congelada (``None`` antes de pasar a cola).
+        carrier.payment_cash_amount = order.payment_cash_amount
+        carrier.payment_credit_amount = order.payment_credit_amount
         return carrier
