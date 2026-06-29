@@ -291,6 +291,24 @@ def test_login_success_returns_token_pair_and_user(client, auth):
     assert data["user"]["role"] == "administrador"
 
 
+def test_login_records_event_but_refresh_does_not(client, auth, db_session):
+    from src.modules.users.login_event_model import UserLoginEventModel
+
+    auth("vendedor")  # siembra el usuario (incluye un login para el header)
+    db_session.query(UserLoginEventModel).delete()
+    db_session.commit()
+
+    logged = _login(client, "vendedor@empresa.com", _PWD).json()["data"]
+    events = db_session.query(UserLoginEventModel).all()
+    assert len(events) == 1  # el login registra exactamente una entrada
+    assert events[0].user_agent == "testclient"
+    assert events[0].ip_address  # IP capturada
+
+    # La renovación de token NO es una entrada nueva.
+    client.post("/api/v1/auth/refresh", json={"refreshToken": logged["refreshToken"]})
+    assert db_session.query(UserLoginEventModel).count() == 1
+
+
 def test_login_wrong_password_returns_401(client, auth):
     auth("vendedor")
     resp = _login(client, "vendedor@empresa.com", "incorrecta")

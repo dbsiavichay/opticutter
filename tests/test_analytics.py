@@ -8,13 +8,18 @@ from datetime import datetime
 
 from src.modules.clients.model import ClientModel
 from src.modules.orders.model import (
+    OrderBoardModel,
     OrderLineModel,
     OrderModel,
+    OrderPlacedPieceModel,
     OrderStatusHistoryModel,
 )
+from src.modules.users.login_event_model import UserLoginEventModel
+from src.modules.users.model import UserModel
 
 _BASE = datetime(2026, 6, 15, 12, 0, 0)
 _RANGE = {"from": "2026-06-01", "to": "2026-06-30"}
+_CUT_AT = datetime(2026, 6, 15, 10, 0, 0)
 
 
 def _board_line(efficiency, area, *, qty=2, price=45.5):
@@ -91,6 +96,72 @@ def _hist(to_status, created_at, from_status=None):
         actor="system",
         created_at=created_at,
     )
+
+
+def _seed_user(db, *, role="operador", full_name="User", branch_id=1, email=None):
+    user = UserModel(
+        email=email or f"{full_name.replace(' ', '').lower()}@e.com",
+        full_name=full_name,
+        hashed_password="x",
+        role=role,
+        branch_id=branch_id,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _seed_board(db, order_id):
+    board = OrderBoardModel(
+        order_id=order_id,
+        sheet_number=1,
+        material_key="m",
+        width=2440,
+        height=1220,
+        thickness=15,
+    )
+    db.add(board)
+    db.commit()
+    db.refresh(board)
+    return board
+
+
+def _seed_placed_piece(
+    db,
+    *,
+    order_id,
+    board_id,
+    cut_by,
+    cut_at=_CUT_AT,
+    width=600,
+    height=400,
+    piece_id="p#1",
+):
+    db.add(
+        OrderPlacedPieceModel(
+            order_id=order_id,
+            board_id=board_id,
+            piece_id=piece_id,
+            label="p",
+            x=0,
+            y=0,
+            width=width,
+            height=height,
+            original_width=width,
+            original_height=height,
+            rotated=False,
+            cut_at=cut_at,
+            cut_by=cut_by,
+            cut_by_label="Op",
+        )
+    )
+    db.commit()
+
+
+def _seed_login(db, user_id, created_at):
+    db.add(UserLoginEventModel(user_id=user_id, created_at=created_at))
+    db.commit()
 
 
 # --------------------------------------------------------------------- summary
@@ -304,25 +375,193 @@ def test_operations_efficiency_mirrors_summary(client, db_session):
     assert data["wasteEstimateM2"] == 10.0
 
 
-def test_operations_lifecycle_dwell_times(client, db_session):
-    _seed_clients(db_session)
-    history = [
-        _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
-        _hist("queued", datetime(2026, 6, 15, 2, 0), from_status="confirmed"),
-        _hist("cutting", datetime(2026, 6, 15, 5, 0), from_status="queued"),
-    ]
-    _seed_order(db_session, status="cutting", history=history)
-
-    data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
-    cycle = {(d["fromStatus"], d["toStatus"]): d for d in data["lifecycle"]}
-    assert cycle[("confirmed", "queued")]["avgHours"] == 2.0
-    assert cycle[("confirmed", "queued")]["sampleCount"] == 1
-    assert cycle[("queued", "cutting")]["avgHours"] == 3.0
-
-
 def test_operations_empty_range(client):
     data = client.get("/api/v1/analytics/operations", params=_RANGE).json()["data"]
     assert data["averageEfficiency"] == 0
     assert data["totalAreaCutM2"] == 0
     assert data["wasteEstimateM2"] == 0
-    assert data["lifecycle"] == []
+    assert "lifecycle" not in data  # el ciclo de vida vive en /bottlenecks
+
+
+# ------------------------------------------------------------------ bottlenecks
+def test_bottlenecks_stage_durations_and_slowest_first(client, db_session):
+    _seed_clients(db_session)
+    # Espera en cola = 1h; corte = 6h (el cuello de botella).
+    history = [
+        _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
+        _hist("queued", datetime(2026, 6, 15, 1, 0), from_status="confirmed"),
+        _hist("cutting", datetime(2026, 6, 15, 2, 0), from_status="queued"),
+        _hist("cut", datetime(2026, 6, 15, 8, 0), from_status="cutting"),
+    ]
+    _seed_order(db_session, status="cut", history=history)
+
+    data = client.get("/api/v1/analytics/bottlenecks", params=_RANGE).json()["data"]
+    stages = {s["key"]: s for s in data["stages"]}
+    assert len(data["stages"]) == 6  # las 6 etapas densificadas
+    assert stages["queue_wait"]["avgHours"] == 1.0
+    assert stages["queue_wait"]["sampleCount"] == 1
+    assert stages["cutting"]["avgHours"] == 6.0
+    assert stages["cutting"]["medianHours"] == 6.0
+    assert stages["cutting"]["p90Hours"] == 6.0
+    assert stages["cutting"]["label"] == "Corte"
+    # Ordenado por mediana desc: el corte (6h) va antes que la espera en cola (1h).
+    keys = [s["key"] for s in data["stages"]]
+    assert keys.index("cutting") < keys.index("queue_wait")
+    # Etapas sin muestras quedan en cero (densificadas).
+    assert stages["dispatch_wait"]["sampleCount"] == 0
+    assert stages["dispatch_wait"]["avgHours"] == 0.0
+
+
+def test_bottlenecks_banding_stage_from_columns(client, db_session):
+    _seed_clients(db_session)
+    order = _seed_order(db_session, status="cut")
+    order.banding_started_at = datetime(2026, 6, 15, 10, 0)
+    order.banding_finished_at = datetime(2026, 6, 15, 13, 0)  # 3h de canteado
+    db_session.commit()
+
+    data = client.get("/api/v1/analytics/bottlenecks", params=_RANGE).json()["data"]
+    banding = next(s for s in data["stages"] if s["key"] == "banding")
+    assert banding["avgHours"] == 3.0
+    assert banding["sampleCount"] == 1
+
+
+def test_bottlenecks_median_and_p90_across_orders(client, db_session):
+    _seed_clients(db_session)
+    # Tres cortes de 2h, 4h y 10h → mediana 4h, p90 alto (cola lenta).
+    for end_hour in (2, 4, 10):
+        history = [
+            _hist("cutting", datetime(2026, 6, 15, 0, 0)),
+            _hist("cut", datetime(2026, 6, 15, end_hour, 0), from_status="cutting"),
+        ]
+        _seed_order(db_session, status="cut", history=history)
+
+    data = client.get("/api/v1/analytics/bottlenecks", params=_RANGE).json()["data"]
+    cutting = next(s for s in data["stages"] if s["key"] == "cutting")
+    assert cutting["sampleCount"] == 3
+    assert cutting["medianHours"] == 4.0
+    assert cutting["p90Hours"] > 4.0  # el p90 expone la orden de 10h
+
+
+def test_bottlenecks_series_places_duration_in_bucket(client, db_session):
+    _seed_clients(db_session)
+    history = [
+        _hist("cutting", datetime(2026, 6, 2, 0, 0)),
+        _hist("cut", datetime(2026, 6, 2, 3, 0), from_status="cutting"),
+    ]
+    _seed_order(
+        db_session, status="cut", created_at=datetime(2026, 6, 1, 9, 0), history=history
+    )
+
+    data = client.get(
+        "/api/v1/analytics/bottlenecks",
+        params={"from": "2026-06-01", "to": "2026-06-03", "granularity": "day"},
+    ).json()["data"]
+    assert data["buckets"] == ["2026-06-01", "2026-06-02", "2026-06-03"]
+    cutting = next(s for s in data["series"] if s["key"] == "cutting")
+    # El corte cierra el 06-02 → su duración cae en ese bucket.
+    assert cutting["avgHours"] == [0.0, 3.0, 0.0]
+
+
+# ----------------------------------------------------------- user productivity
+def test_user_productivity_operator_cutting(client, db_session):
+    _seed_clients(db_session)
+    op = _seed_user(db_session, role="operador", full_name="Op Uno")
+    history = [
+        _hist("cutting", datetime(2026, 6, 15, 8, 0)),
+        _hist("cut", datetime(2026, 6, 15, 10, 0), from_status="cutting"),
+    ]
+    order = _seed_order(db_session, status="cut", history=history)
+    order.assigned_to_id = op.id
+    db_session.commit()
+    board = _seed_board(db_session, order.id)
+    _seed_placed_piece(db_session, order_id=order.id, board_id=board.id, cut_by=op.id)
+    _seed_placed_piece(
+        db_session,
+        order_id=order.id,
+        board_id=board.id,
+        cut_by=op.id,
+        piece_id="p#2",
+    )
+
+    data = client.get("/api/v1/analytics/users", params=_RANGE).json()["data"]
+    row = next(u for u in data["users"] if u["userId"] == op.id)
+    assert row["role"] == "operador"
+    assert row["piecesCut"] == 2
+    assert row["areaCutM2"] == 0.48  # 2 piezas de 600x400mm = 0.24 m² c/u
+    assert row["ordersCut"] == 1
+    assert row["cuttingHours"] == 2.0
+    assert row["piecesPerHour"] == 1.0  # 2 piezas / 2h
+
+
+def test_user_productivity_seller_and_bander(client, db_session):
+    _seed_clients(db_session)
+    seller = _seed_user(db_session, role="vendedor", full_name="Vende")
+    bander = _seed_user(db_session, role="canteador", full_name="Canta")
+    order = _seed_order(db_session, status="completed", total=250.0)
+    order.created_by = seller.id
+    order.banding_finished_by = bander.id
+    order.banding_started_at = datetime(2026, 6, 15, 9, 0)
+    order.banding_finished_at = datetime(2026, 6, 15, 10, 0)  # 1h
+    db_session.commit()
+
+    data = client.get("/api/v1/analytics/users", params=_RANGE).json()["data"]
+    by_id = {u["userId"]: u for u in data["users"]}
+    assert by_id[seller.id]["ordersCreated"] == 1
+    assert by_id[seller.id]["revenueGenerated"] == 250.0
+    assert by_id[bander.id]["ordersBanded"] == 1
+    assert by_id[bander.id]["bandingHours"] == 1.0
+
+
+def test_user_productivity_filters_by_role(client, db_session):
+    _seed_clients(db_session)
+    op = _seed_user(db_session, role="operador", full_name="Op")
+    seller = _seed_user(db_session, role="vendedor", full_name="Vende")
+    o1 = _seed_order(db_session, status="completed")
+    o1.created_by = seller.id
+    o2 = _seed_order(db_session, status="cut")
+    o2.assigned_to_id = op.id
+    db_session.commit()
+    board = _seed_board(db_session, o2.id)
+    _seed_placed_piece(db_session, order_id=o2.id, board_id=board.id, cut_by=op.id)
+
+    data = client.get(
+        "/api/v1/analytics/users", params={**_RANGE, "role": "operador"}
+    ).json()["data"]
+    assert [u["userId"] for u in data["users"]] == [op.id]
+
+
+# --------------------------------------------------------------------- attendance
+def test_attendance_first_login_per_day(client, db_session):
+    op = _seed_user(db_session, role="operador", full_name="Op Uno")
+    _seed_login(db_session, op.id, datetime(2026, 6, 15, 8, 5))
+    _seed_login(db_session, op.id, datetime(2026, 6, 15, 13, 30))  # misma jornada
+    _seed_login(db_session, op.id, datetime(2026, 6, 16, 7, 50))  # otro día
+
+    data = client.get("/api/v1/analytics/attendance", params=_RANGE).json()["data"]
+    row = next(u for u in data["users"] if u["userId"] == op.id)
+    days = {d["date"]: d for d in row["days"]}
+    assert days["2026-06-15"]["firstLoginAt"].startswith("2026-06-15T08:05")
+    assert days["2026-06-15"]["loginCount"] == 2
+    assert days["2026-06-16"]["firstLoginAt"].startswith("2026-06-16T07:50")
+    assert days["2026-06-16"]["loginCount"] == 1
+
+
+def test_attendance_filters_by_role(client, db_session):
+    op = _seed_user(db_session, role="operador", full_name="Op")
+    seller = _seed_user(db_session, role="vendedor", full_name="Vende")
+    _seed_login(db_session, op.id, datetime(2026, 6, 15, 8, 0))
+    _seed_login(db_session, seller.id, datetime(2026, 6, 15, 8, 0))
+
+    data = client.get(
+        "/api/v1/analytics/attendance", params={**_RANGE, "role": "operador"}
+    ).json()["data"]
+    assert [u["userId"] for u in data["users"]] == [op.id]
+
+
+def test_attendance_empty_range(client):
+    # Rango lejano en el pasado: ningún login cae ahí (ni el del admin de conftest).
+    data = client.get(
+        "/api/v1/analytics/attendance",
+        params={"from": "2020-01-01", "to": "2020-01-31"},
+    ).json()["data"]
+    assert data["users"] == []

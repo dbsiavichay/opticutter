@@ -7,6 +7,7 @@ Redis), así que todo se construye sobre ``orders`` + ``order_lines`` + ``order_
 """
 
 from collections import defaultdict
+from statistics import median
 from typing import Optional
 
 from fastapi import Depends
@@ -16,24 +17,42 @@ from sqlalchemy.orm import Session
 from src.modules.analytics.constants import (
     PENDING_STATUSES,
     REALIZED_STATUSES,
+    STAGE_LABELS,
+    STAGE_ORDER,
     STATUS_LABELS,
+    STATUS_PAIR_TO_STAGE,
     Granularity,
+    percentile,
     safe_div,
     status_values,
 )
 from src.modules.analytics.dates import DateRange, bucket_key, iter_buckets
 from src.modules.analytics.schemas import (
     AnalyticsSummary,
+    AttendanceDay,
+    AttendanceReport,
+    BottleneckReport,
     Breakdown,
     BreakdownItem,
-    DwellTime,
     OperationsReport,
     RangeInfo,
+    StageDuration,
+    StageSeries,
     TimeSeries,
     TimeSeriesData,
+    UserAttendance,
+    UserProductivity,
+    UserProductivityReport,
 )
 from src.modules.branches.model import BranchModel
-from src.modules.orders.model import OrderLineModel, OrderModel, OrderStatus
+from src.modules.orders.model import (
+    OrderLineModel,
+    OrderModel,
+    OrderPlacedPieceModel,
+    OrderStatus,
+)
+from src.modules.users.login_event_model import UserLoginEventModel
+from src.modules.users.model import UserModel
 from src.shared.database import get_db
 
 
@@ -201,13 +220,209 @@ class AnalyticsService:
         avg_eff, area = self._efficiency_and_area(dr, branch_id=branch_id)
         waste = round(area * (1 - avg_eff / 100), 4)
 
-        orders = self.db.query(OrderModel).filter(*self._range(dr, branch_id)).all()
         return OperationsReport(
             average_efficiency=avg_eff,
             total_area_cut_m2=area,
             waste_estimate_m2=waste,
-            lifecycle=self._lifecycle(orders),
         )
+
+    # ----------------------------------------------------------------- bottlenecks
+    def bottlenecks(
+        self,
+        dr: DateRange,
+        granularity: Granularity,
+        branch_id: Optional[int] = None,
+    ) -> BottleneckReport:
+        """Duración por etapa del proceso: qué tarda más (avg/mediana/p90) y cuándo.
+
+        Cinco etapas salen de pares consecutivos del historial de estados; la sexta
+        (``banding``) de las columnas de canteado (pista paralela). El cuello de
+        botella es la etapa más lenta; ``series`` muestra en qué bucket se ralentiza.
+        """
+        buckets = iter_buckets(dr.date_from, dr.date_to, granularity)
+        labels = [b.isoformat() for b in buckets]
+        index = {b: i for i, b in enumerate(buckets)}
+        n = len(buckets)
+
+        samples: dict[str, list[float]] = defaultdict(list)
+        series_acc: dict[str, list[list[float]]] = {
+            key: [[] for _ in range(n)] for key in STAGE_ORDER
+        }
+
+        def add_sample(stage: str, hours: float, closed_at) -> None:
+            # Agrega siempre al total; al bucket solo si el cierre cae en el eje.
+            samples[stage].append(hours)
+            i = index.get(bucket_key(closed_at.date(), granularity))
+            if i is not None:
+                series_acc[stage][i].append(hours)
+
+        orders = self.db.query(OrderModel).filter(*self._range(dr, branch_id)).all()
+        for o in orders:
+            hist = sorted(o.history, key=lambda h: (h.created_at, h.id))
+            for prev, cur in zip(hist, hist[1:]):
+                if prev.to_status != cur.from_status:
+                    continue
+                stage = STATUS_PAIR_TO_STAGE.get((cur.from_status, cur.to_status))
+                if stage is None:
+                    continue
+                hours = (cur.created_at - prev.created_at).total_seconds() / 3600.0
+                add_sample(stage, hours, cur.created_at)
+            # Canteado: pista paralela, no en el historial → desde columnas.
+            if o.banding_started_at and o.banding_finished_at:
+                hours = (
+                    o.banding_finished_at - o.banding_started_at
+                ).total_seconds() / 3600.0
+                add_sample("banding", hours, o.banding_finished_at)
+
+        stages = [
+            StageDuration(
+                key=key,
+                label=STAGE_LABELS[key],
+                avg_hours=round(safe_div(sum(samples[key]), len(samples[key])), 2),
+                median_hours=round(median(samples[key]), 2) if samples[key] else 0.0,
+                p90_hours=round(percentile(samples[key], 0.9), 2),
+                sample_count=len(samples[key]),
+            )
+            for key in STAGE_ORDER
+        ]
+        # El más lento primero: prioriza dónde intervenir.
+        stages.sort(key=lambda s: s.median_hours, reverse=True)
+
+        series = [
+            StageSeries(
+                key=key,
+                label=STAGE_LABELS[key],
+                avg_hours=[
+                    round(safe_div(sum(bucket), len(bucket)), 2)
+                    for bucket in series_acc[key]
+                ],
+            )
+            for key in STAGE_ORDER
+        ]
+        return BottleneckReport(stages=stages, buckets=labels, series=series)
+
+    # ----------------------------------------------------------- user productivity
+    def user_productivity(
+        self,
+        dr: DateRange,
+        branch_id: Optional[int] = None,
+        role: Optional[str] = None,
+    ) -> UserProductivityReport:
+        """Trabajo y velocidad por usuario: corte, canteado y trabajo comercial.
+
+        Corte por pieza se mide por ``cut_at`` en el rango; las métricas a nivel de
+        orden (tiempo de corte, canteado, comercial) por órdenes creadas en el rango.
+        """
+        acc: dict[int, dict] = defaultdict(
+            lambda: {
+                "pieces_cut": 0,
+                "area_cut_m2": 0.0,
+                "orders_cut": set(),
+                "cutting_hours": 0.0,
+                "orders_banded": 0,
+                "banding_hours": 0.0,
+                "orders_created": 0,
+                "revenue_generated": 0.0,
+            }
+        )
+
+        # 1) Corte por pieza física marcada en el rango → operario que la cortó.
+        piece_q = self.db.query(
+            OrderPlacedPieceModel.cut_by,
+            OrderPlacedPieceModel.width,
+            OrderPlacedPieceModel.height,
+            OrderPlacedPieceModel.order_id,
+        ).filter(
+            OrderPlacedPieceModel.cut_by.isnot(None),
+            OrderPlacedPieceModel.cut_at >= dr.start,
+            OrderPlacedPieceModel.cut_at < dr.end,
+        )
+        if branch_id is not None:
+            piece_q = piece_q.join(
+                OrderModel, OrderPlacedPieceModel.order_id == OrderModel.id
+            ).filter(OrderModel.branch_id == branch_id)
+        for cut_by, width, height, order_id in piece_q.all():
+            a = acc[cut_by]
+            a["pieces_cut"] += 1
+            a["area_cut_m2"] += (width * height) / 1_000_000.0
+            a["orders_cut"].add(order_id)
+
+        # 2-4) Métricas a nivel de orden (orden creada en el rango).
+        realized = status_values(REALIZED_STATUSES)
+        orders = self.db.query(OrderModel).filter(*self._range(dr, branch_id)).all()
+        for o in orders:
+            # Tiempo de corte (cutting → cut) → operador asignado.
+            if o.assigned_to_id is not None:
+                cutting_ts = cut_ts = None
+                for h in o.history:
+                    if h.to_status == OrderStatus.cutting.value:
+                        cutting_ts = h.created_at
+                    elif h.to_status == OrderStatus.cut.value:
+                        cut_ts = h.created_at
+                if cutting_ts and cut_ts and cut_ts >= cutting_ts:
+                    acc[o.assigned_to_id]["cutting_hours"] += (
+                        cut_ts - cutting_ts
+                    ).total_seconds() / 3600.0
+            # Canteado → canteador que lo terminó.
+            if o.banding_finished_by is not None:
+                a = acc[o.banding_finished_by]
+                a["orders_banded"] += 1
+                if o.banding_started_at and o.banding_finished_at:
+                    a["banding_hours"] += (
+                        o.banding_finished_at - o.banding_started_at
+                    ).total_seconds() / 3600.0
+            # Trabajo comercial → vendedor creador.
+            if o.created_by is not None:
+                a = acc[o.created_by]
+                a["orders_created"] += 1
+                if o.status in realized:
+                    a["revenue_generated"] += o.total or 0.0
+
+        return UserProductivityReport(users=self._productivity_rows(acc, role))
+
+    # --------------------------------------------------------------------- attendance
+    def attendance(
+        self,
+        dr: DateRange,
+        branch_id: Optional[int] = None,
+        role: Optional[str] = None,
+    ) -> AttendanceReport:
+        """Primer login por usuario y día (referencia de hora de entrada)."""
+        rows = (
+            self.db.query(UserLoginEventModel.user_id, UserLoginEventModel.created_at)
+            .filter(
+                UserLoginEventModel.created_at >= dr.start,
+                UserLoginEventModel.created_at < dr.end,
+            )
+            .all()
+        )
+        per_user_day: dict[int, dict] = defaultdict(lambda: defaultdict(list))
+        for user_id, created_at in rows:
+            per_user_day[user_id][created_at.date()].append(created_at)
+        if not per_user_day:
+            return AttendanceReport(users=[])
+
+        users, branches = self._users_and_branches(per_user_day.keys())
+        result = []
+        for uid, days_map in per_user_day.items():
+            user = users.get(uid)
+            if user is None or not self._matches(user, branch_id, role):
+                continue
+            days = [
+                AttendanceDay(date=d, first_login_at=min(times), login_count=len(times))
+                for d, times in sorted(days_map.items())
+            ]
+            result.append(
+                UserAttendance(
+                    user_id=uid,
+                    full_name=user.full_name or "",
+                    role=user.role,
+                    branch_name=branches.get(user.branch_id),
+                    days=days,
+                )
+            )
+        result.sort(key=lambda u: u.full_name)
+        return AttendanceReport(users=result)
 
     # --------------------------------------------------------------------- helpers
     def _range(self, dr: DateRange, branch_id: Optional[int] = None) -> list:
@@ -275,31 +490,64 @@ class AnalyticsService:
         weighted = sum(eff * area for eff, area in rows) / total_area
         return round(weighted, 2), round(total_area, 4)
 
-    def _lifecycle(self, orders: list[OrderModel]) -> list[DwellTime]:
-        """Horas medias en cada estado, por par ``(from_status, to_status)``.
-
-        El tiempo en un estado = intervalo entre el evento que entró a él y el que lo
-        dejó; ``sample_count`` transparenta el tamaño de la muestra.
-        """
-        acc: dict[tuple[str, str], list[float]] = defaultdict(lambda: [0.0, 0])
-        for o in orders:
-            hist = sorted(o.history, key=lambda h: (h.created_at, h.id))
-            for prev, cur in zip(hist, hist[1:]):
-                if prev.to_status != cur.from_status:
-                    continue
-                hours = (cur.created_at - prev.created_at).total_seconds() / 3600.0
-                bucket = acc[(cur.from_status, cur.to_status)]
-                bucket[0] += hours
-                bucket[1] += 1
-        return [
-            DwellTime(
-                from_status=frm,
-                to_status=to,
-                avg_hours=round(safe_div(total_hours, count), 2),
-                sample_count=count,
+    def _productivity_rows(
+        self, acc: dict[int, dict], role: Optional[str]
+    ) -> list[UserProductivity]:
+        """Proyecta el acumulador por usuario a filas, filtrando por rol."""
+        if not acc:
+            return []
+        users, branches = self._users_and_branches(acc.keys())
+        rows = []
+        for uid, a in acc.items():
+            user = users.get(uid)
+            if user is None or (role is not None and user.role != role):
+                continue
+            rows.append(
+                UserProductivity(
+                    user_id=uid,
+                    full_name=user.full_name or "",
+                    role=user.role,
+                    branch_name=branches.get(user.branch_id),
+                    pieces_cut=a["pieces_cut"],
+                    area_cut_m2=round(a["area_cut_m2"], 4),
+                    orders_cut=len(a["orders_cut"]),
+                    cutting_hours=round(a["cutting_hours"], 2),
+                    pieces_per_hour=round(
+                        safe_div(a["pieces_cut"], a["cutting_hours"]), 2
+                    ),
+                    orders_banded=a["orders_banded"],
+                    banding_hours=round(a["banding_hours"], 2),
+                    orders_created=a["orders_created"],
+                    revenue_generated=round(a["revenue_generated"], 2),
+                )
             )
-            for (frm, to), (total_hours, count) in sorted(acc.items())
-        ]
+        # Más trabajo primero (corte + canteado + comercial).
+        rows.sort(
+            key=lambda r: r.pieces_cut + r.orders_banded + r.orders_created,
+            reverse=True,
+        )
+        return rows
+
+    def _users_and_branches(self, user_ids) -> tuple[dict, dict]:
+        """Carga usuarios por id y el mapa ``branch_id → nombre`` en dos consultas."""
+        ids = list(user_ids)
+        users = {
+            u.id: u
+            for u in self.db.query(UserModel).filter(UserModel.id.in_(ids)).all()
+        }
+        branches = {b.id: b.name for b in self.db.query(BranchModel).all()}
+        return users, branches
+
+    @staticmethod
+    def _matches(
+        user: UserModel, branch_id: Optional[int], role: Optional[str]
+    ) -> bool:
+        """¿El usuario pasa los filtros opcionales de sucursal y rol?"""
+        if branch_id is not None and user.branch_id != branch_id:
+            return False
+        if role is not None and user.role != role:
+            return False
+        return True
 
 
 def analytics_service(db: Session = Depends(get_db)) -> AnalyticsService:
