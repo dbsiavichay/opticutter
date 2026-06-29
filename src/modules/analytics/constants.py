@@ -38,6 +38,30 @@ STATUS_LABELS = {
     OrderStatus.cancelled: "Cancelada",
 }
 
+# --- Etapas del proceso (cuellos de botella) ----------------------------------
+# Cinco etapas se derivan de pares consecutivos del historial de estados; la sexta
+# (``banding``) sale de las columnas de canteado (pista paralela, fuera del historial).
+STAGE_LABELS = {
+    "confirm": "Confirmación → Cola",
+    "queue_wait": "Espera en cola (taller)",
+    "cutting": "Corte",
+    "finishing": "Cortada → Completada",
+    "dispatch_wait": "Espera de despacho",
+    "banding": "Canteado",
+}
+
+# Orden de presentación (flujo del proceso); el reporte luego ordena por duración.
+STAGE_ORDER = list(STAGE_LABELS.keys())
+
+# Par (from_status, to_status) del historial → etapa nombrada.
+STATUS_PAIR_TO_STAGE = {
+    (OrderStatus.confirmed.value, OrderStatus.queued.value): "confirm",
+    (OrderStatus.queued.value, OrderStatus.cutting.value): "queue_wait",
+    (OrderStatus.cutting.value, OrderStatus.cut.value): "cutting",
+    (OrderStatus.cut.value, OrderStatus.completed.value): "finishing",
+    (OrderStatus.completed.value, OrderStatus.dispatched.value): "dispatch_wait",
+}
+
 
 class Granularity(str, Enum):
     """Tamaño de bucket para las series temporales."""
@@ -55,3 +79,20 @@ def status_values(statuses: Iterable[OrderStatus]) -> list[str]:
 def safe_div(num: float, denom: float) -> float:
     """División protegida: devuelve ``0.0`` si el denominador es cero."""
     return num / denom if denom else 0.0
+
+
+def percentile(values: list[float], q: float) -> float:
+    """Percentil ``q`` (0..1) por interpolación lineal; ``0.0`` si no hay muestras.
+
+    Útil para detectar cuellos de botella: el p90 revela la cola lenta que el
+    promedio esconde (pocas órdenes muy demoradas).
+    """
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    pos = q * (len(ordered) - 1)
+    low = int(pos)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (pos - low)

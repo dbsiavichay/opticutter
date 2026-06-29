@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from src.modules.users.dependencies import get_current_user
+from src.modules.users.login_event_service import (
+    LoginEventService,
+    login_event_service,
+)
 from src.modules.users.model import UserModel
 from src.modules.users.refresh_token_service import (
     RefreshTokenService,
@@ -36,14 +40,22 @@ def _token_response(user: UserModel, refresh_token: str) -> TokenResponse:
 @router.post("/login", response_model=DataResponse[TokenResponse])
 def login(
     data: LoginRequest,
+    request: Request,
     svc: UserService = Depends(user_service),
     refresh_svc: RefreshTokenService = Depends(refresh_token_service),
+    login_event_svc: LoginEventService = Depends(login_event_service),
 ):
     """Valida email + contraseña y emite un par access/refresh."""
     user = svc.authenticate(data.email, data.password)
     if user is None:
         # Mensaje genérico: no revela si el email existe o si fue la contraseña.
         raise AuthenticationError("Email o contraseña incorrectos")
+    # Registra la entrada (referencia de "hora de entrada"); solo en login, no refresh.
+    login_event_svc.record(
+        user.id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return ok(_token_response(user, refresh_svc.issue(user.id)))
 
 

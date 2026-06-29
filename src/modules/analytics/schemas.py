@@ -4,8 +4,8 @@ Convenciones: ningún campo numérico es opcional (rango vacío → ceros, nunca
 las series temporales son arrays paralelos sobre un mismo eje ``buckets``.
 """
 
-from datetime import date
-from typing import List
+from datetime import date, datetime
+from typing import List, Optional
 
 from src.modules.analytics.constants import Granularity
 from src.shared.schemas import CamelModel
@@ -70,19 +70,90 @@ class Breakdown(CamelModel):
     items: List[BreakdownItem]
 
 
-class DwellTime(CamelModel):
-    """Tiempo medio que las órdenes pasan en ``from_status`` antes de ``to_status``."""
-
-    from_status: str
-    to_status: str
-    avg_hours: float
-    sample_count: int  # transiciones observadas (transparencia de muestra)
-
-
 class OperationsReport(CamelModel):
-    """Eficiencia de material y ciclo de vida de las órdenes."""
+    """Eficiencia de material de las órdenes (el ciclo de vida vive en ``/bottlenecks``)."""
 
     average_efficiency: float
     total_area_cut_m2: float
     waste_estimate_m2: float
-    lifecycle: List[DwellTime]
+
+
+# ------------------------------------------------------------------ bottlenecks
+class StageDuration(CamelModel):
+    """Duración agregada de una etapa del proceso (para hallar el cuello de botella)."""
+
+    key: str
+    label: str
+    avg_hours: float
+    median_hours: float
+    p90_hours: float  # cola lenta: lo que el promedio esconde
+    sample_count: int
+
+
+class StageSeries(CamelModel):
+    """Duración media de una etapa por bucket (cuándo se ralentiza); ceros en huecos."""
+
+    key: str
+    label: str
+    avg_hours: List[float]  # paralelo a ``buckets`` de ``BottleneckReport``
+
+
+class BottleneckReport(CamelModel):
+    """Qué proceso tarda más (``stages``, el más lento primero) y cuándo (``series``)."""
+
+    stages: List[StageDuration]
+    buckets: List[str]
+    series: List[StageSeries]
+
+
+# ----------------------------------------------------------- user productivity
+class UserProductivity(CamelModel):
+    """Trabajo y velocidad de un usuario en el periodo (no aplica → 0, nunca null)."""
+
+    user_id: int
+    full_name: str
+    role: str
+    branch_name: Optional[str]
+    # Corte (operador).
+    pieces_cut: int
+    area_cut_m2: float
+    orders_cut: int
+    cutting_hours: float
+    pieces_per_hour: float  # throughput
+    # Canteado (canteador).
+    orders_banded: int
+    banding_hours: float
+    # Comercial (vendedor).
+    orders_created: int
+    revenue_generated: float
+
+
+class UserProductivityReport(CamelModel):
+    """Productividad por usuario (taller + comercial)."""
+
+    users: List[UserProductivity]
+
+
+# --------------------------------------------------------------------- attendance
+class AttendanceDay(CamelModel):
+    """Asistencia de un usuario en un día: primer login (hora de entrada) y conteo."""
+
+    date: date
+    first_login_at: datetime
+    login_count: int
+
+
+class UserAttendance(CamelModel):
+    """Días con login de un usuario en el rango (referencia de hora de entrada)."""
+
+    user_id: int
+    full_name: str
+    role: str
+    branch_name: Optional[str]
+    days: List[AttendanceDay]
+
+
+class AttendanceReport(CamelModel):
+    """Hora de entrada por usuario y día."""
+
+    users: List[UserAttendance]
