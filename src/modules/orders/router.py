@@ -129,6 +129,7 @@ def update_order_status(
             data.status,
             actor=staff_actor(current_user),
             note=data.note,
+            payment=data.payment,
             branch_scope=branch_scope,
         )
     )

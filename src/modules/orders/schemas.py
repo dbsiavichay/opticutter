@@ -55,11 +55,33 @@ class OrderCreate(CamelModel):
     )
 
 
+class OrderPaymentInput(CamelModel):
+    """Forma de pago (informativa) registrada al pasar a ``queued``.
+
+    Una orden puede pagarse con ambos métodos a la vez; el método usado se
+    infiere de qué monto es > 0. No afecta precios ni el cobro de la orden.
+    """
+
+    cash_amount: Optional[float] = Field(
+        default=None, ge=0, description="Monto pagado en efectivo"
+    )
+    credit_amount: Optional[float] = Field(
+        default=None, ge=0, description="Monto pagado a crédito"
+    )
+
+
 class OrderStatusUpdate(CamelModel):
     """Transición de estado solicitada."""
 
     status: OrderStatus = Field(..., description="Target status to transition to")
     note: Optional[str] = Field(default=None, max_length=512)
+    payment: Optional[OrderPaymentInput] = Field(
+        default=None,
+        description=(
+            "Forma de pago, obligatoria al pasar de 'confirmed' a 'queued' "
+            "(al menos un monto > 0)"
+        ),
+    )
 
 
 class OrderInvoiceUpdate(CamelModel):
@@ -194,6 +216,12 @@ class OrderResponse(CamelModel):
     )
     dispatched_by_label: Optional[str] = Field(
         default=None, description="Frozen name of who dispatched the order"
+    )
+    payment_cash_amount: Optional[float] = Field(
+        default=None, description="Cash amount (registered on confirmed → queued)"
+    )
+    payment_credit_amount: Optional[float] = Field(
+        default=None, description="Credit amount (registered on confirmed → queued)"
     )
     banding_status: BandingStatus = Field(
         default=BandingStatus.not_applicable,

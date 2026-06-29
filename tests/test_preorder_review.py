@@ -337,7 +337,8 @@ def test_confirmed_order_continues_state_machine(client):
     pre_after = client.get(f"/api/v1/preorders/{pre['id']}").json()["data"]
 
     ok = client.patch(
-        f"/api/v1/orders/{pre_after['orderId']}/status", json={"status": "queued"}
+        f"/api/v1/orders/{pre_after['orderId']}/status",
+        json={"status": "queued", "payment": {"cashAmount": 100.0}},
     )
     assert ok.status_code == 200
     assert ok.json()["data"]["status"] == "queued"

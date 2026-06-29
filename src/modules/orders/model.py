@@ -164,6 +164,12 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         String(128), nullable=True
     )
 
+    # Forma de pago (informativa): se captura al transicionar de ``confirmed`` a
+    # ``queued``. Una orden puede pagarse con ambos métodos a la vez; el método
+    # usado se infiere de qué monto es > 0. No afecta precios ni el cobro.
+    payment_cash_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    payment_credit_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # Pista de CANTEADO (paralela al corte): el canteador marca inicio/fin. Se fija
     # a ``pending`` al crear si la orden lleva tapacantos, si no ``not_applicable``.
     banding_status: Mapped[str] = mapped_column(

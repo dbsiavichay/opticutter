@@ -119,7 +119,11 @@ def _order_without_banding(client, db_session):
 
 
 def _patch_status(client, oid, status, **kw):
-    return client.patch(f"/api/v1/orders/{oid}/status", json={"status": status}, **kw)
+    body = {"status": status}
+    if status == "queued":
+        # Pasar a cola exige registrar la forma de pago (informativa).
+        body["payment"] = {"cashAmount": 100.0}
+    return client.patch(f"/api/v1/orders/{oid}/status", json=body, **kw)
 
 
 def _patch_banding(client, oid, status, **kw):

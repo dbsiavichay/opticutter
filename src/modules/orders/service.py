@@ -37,6 +37,7 @@ from src.modules.orders.schemas import (
     OrderCreate,
     OrderExportLine,
     OrderExportResponse,
+    OrderPaymentInput,
     PieceCutResponse,
     PlacedPieceResponse,
 )
@@ -49,7 +50,15 @@ from src.shared.exceptions import (
     BusinessRuleError,
     ConflictError,
     EntityNotFoundError,
+    ValidationError,
 )
+
+
+def _has_payment(payment: Optional[OrderPaymentInput]) -> bool:
+    """True si se registró al menos un monto (> 0) en alguna forma de pago."""
+    if payment is None:
+        return False
+    return (payment.cash_amount or 0) > 0 or (payment.credit_amount or 0) > 0
 
 
 class OrderService(BranchScopedMixin):
@@ -237,6 +246,7 @@ class OrderService(BranchScopedMixin):
         to_status: OrderStatus,
         actor: Optional[Actor] = None,
         note: Optional[str] = None,
+        payment: Optional[OrderPaymentInput] = None,
         branch_scope: Optional[int] = None,
     ) -> OrderModel:
         """Valida y aplica una transición de estado, registrando el historial.
@@ -280,6 +290,16 @@ class OrderService(BranchScopedMixin):
         ):
             raise BusinessRuleError("Falta terminar el canteado")
 
+        # Gate de forma de pago: ingresar a la cola exige registrar cómo paga el
+        # cliente (al menos un monto > 0). Solo informativo, no se valida vs. total.
+        is_payment_capture = (
+            to_status == OrderStatus.queued and current == OrderStatus.confirmed
+        )
+        if is_payment_capture and not _has_payment(payment):
+            raise ValidationError(
+                "Registra la forma de pago (efectivo y/o crédito) para enviar a cola"
+            )
+
         self._apply_transition(order, to_status, actor=actor, note=note)
 
         # Asignación al transicionar a ``cutting``; limpieza al regresar a ``queued``.
@@ -297,6 +317,12 @@ class OrderService(BranchScopedMixin):
             order.dispatched_at = datetime.utcnow()
             order.dispatched_by = actor.user_id
             order.dispatched_by_label = actor.label
+
+        # Forma de pago: congela los montos al entrar a la cola (informativo). El
+        # rollback admin cutting → queued no entra aquí (current != confirmed).
+        if is_payment_capture:
+            order.payment_cash_amount = payment.cash_amount
+            order.payment_credit_amount = payment.credit_amount
 
         self.db.commit()
         self.db.refresh(order)
