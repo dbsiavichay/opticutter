@@ -62,7 +62,7 @@ redis-cli: ## Abre redis-cli dentro del contenedor de Redis
 run-local: ## Ejecuta la aplicación localmente (requiere PostgreSQL en localhost:5433)
 	ENVIRONMENT=local DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db python main.py
 
-seed-local: ## Siembra tableros y tapacantos en PostgreSQL local (puerto 5433)
+seed-boards: ## Siembra tableros y tapacantos en PostgreSQL local (puerto 5433)
 	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db .venv/bin/python scripts/seed_boards.py
 
 seed-admin: ## Crea el primer administrador desde ADMIN_EMAIL/ADMIN_PASSWORD en .env
