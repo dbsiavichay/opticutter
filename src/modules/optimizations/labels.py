@@ -15,7 +15,8 @@ def edge_banding_notation(sides: Iterable[str], band_type: Optional[str] = None)
     Clasifica por la medida del lado **nominal**: ``left``/``right`` son los lados del
     alto (primera medida) → ``L`` (largo); ``top``/``bottom`` son los del ancho →
     ``C`` (corto). Se omite el conteo en cero (``1L``, ``2C``) y, sin tipo de canto
-    conocido, se omite el sufijo. Devuelve ``''`` si no hay lados canteados.
+    conocido, se omite el sufijo. Cuando los 4 lados están canteados se nota ``4L``.
+    Devuelve ``''`` si no hay lados canteados.
 
     Importante: usar siempre los lados **nominales** (los del ``EdgeBandingSpec``), no
     los geométricos remapeados por rotación; así el conteo es estable bajo rotación.
@@ -25,10 +26,13 @@ def edge_banding_notation(sides: Iterable[str], band_type: Optional[str] = None)
         return ""
     long_count = sum(1 for s in sides if s in ("left", "right"))  # alto = Largo
     short_count = sum(1 for s in sides if s in ("top", "bottom"))  # ancho = Corto
-    parts = ""
-    if long_count:
-        parts += f"{long_count}L"
-    if short_count:
-        parts += f"{short_count}C"
+    if long_count == 2 and short_count == 2:
+        parts = "4L"
+    else:
+        parts = ""
+        if long_count:
+            parts += f"{long_count}L"
+        if short_count:
+            parts += f"{short_count}C"
     suffix = _BAND_TYPE_ABBR.get(band_type)
     return f"{parts} {suffix}" if (parts and suffix) else parts

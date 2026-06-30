@@ -88,7 +88,7 @@ def _expected_meters(net_m: float):
         (["left", "right", "top"], "Soft", "2L1C CS"),  # 2 largos (alto) + 1 corto
         (["left"], "Soft", "1L CS"),  # solo largo: omite la parte en cero
         (["top", "bottom"], "Hard", "2C CD"),  # solo cortos (ancho), canto duro
-        (["left", "right", "top", "bottom"], "Soft", "2L2C CS"),  # todos
+        (["left", "right", "top", "bottom"], "Soft", "4L CS"),  # todos los lados
         ([], "Soft", ""),  # sin lados → vacío
         (["left", "right"], None, "2L"),  # sin band_type → sin sufijo
     ],
