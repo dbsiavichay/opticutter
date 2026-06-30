@@ -51,7 +51,7 @@ from datetime import datetime, timedelta  # noqa: E402
 from src.modules.branches.model import BranchModel  # noqa: E402
 from src.modules.clients.model import ClientModel  # noqa: E402
 from src.modules.orders.model import BandingStatus, OrderModel, OrderStatus  # noqa: E402
-from src.modules.orders.schemas import OrderCreate  # noqa: E402
+from src.modules.orders.schemas import OrderCreate, OrderPaymentInput  # noqa: E402
 from src.modules.orders.service import OrderService  # noqa: E402
 from src.modules.preorders.model import (  # noqa: E402
     PreOrderModel,
@@ -114,6 +114,7 @@ ORDER_STATUSES = [
     OrderStatus.cutting,
     OrderStatus.cut,
     OrderStatus.completed,
+    OrderStatus.dispatched,
     OrderStatus.cancelled,
 ]
 
@@ -491,11 +492,13 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
         )
         return
 
+    # confirmed → queued requiere forma de pago (al menos un monto > 0).
     svc.transition(
         order.id,
         OrderStatus.queued,
         actor=seller_actor,
         note="Enviada a la cola de producción",
+        payment=OrderPaymentInput(cash_amount=500.00),
     )
     if target == OrderStatus.queued:
         return
@@ -529,6 +532,13 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
 
     svc.transition(
         order.id, OrderStatus.completed, actor=seller_actor, note="Pedido entregado"
+    )
+    if target == OrderStatus.completed:
+        return
+
+    # completed → despachado: cualquier rol puede despachar.
+    svc.transition(
+        order.id, OrderStatus.dispatched, actor=seller_actor, note="Mercadería entregada"
     )
 
 
@@ -575,7 +585,12 @@ def seed_transactional(db, branches, clients, staff, boards, edge_bands):
     para demostrar la pista de canteado con el canteador de la sucursal.
     """
     # Estados que deben incluir tapacantos para demostrar el flujo de canteado.
-    BANDING_STATUSES = {OrderStatus.cutting, OrderStatus.cut, OrderStatus.completed}
+    BANDING_STATUSES = {
+        OrderStatus.cutting,
+        OrderStatus.cut,
+        OrderStatus.completed,
+        OrderStatus.dispatched,
+    }
 
     for branch in branches:
         seller = staff[branch.id]["seller"]
