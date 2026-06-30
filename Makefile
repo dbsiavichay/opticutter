@@ -1,5 +1,5 @@
 # Makefile para Cutter API
-.PHONY: help build start dev down tests tests-local create-test-db lint-fix lint-check install clean logs redis-cli
+.PHONY: help build start dev down tests tests-local create-test-db lint-fix lint-check install clean logs redis-cli redis-flush
 
 # Las pruebas corren SIEMPRE contra una base dedicada (cutter_test_db), nunca
 # contra la base de desarrollo (cutter_db): el conftest hace TRUNCATE por test.
@@ -58,6 +58,9 @@ shell: ## Abre una shell en el contenedor
 
 redis-cli: ## Abre redis-cli dentro del contenedor de Redis
 	docker exec -it redis redis-cli
+
+redis-flush: ## Limpia toda la caché de Redis (FLUSHALL)
+	docker exec -it redis redis-cli FLUSHALL
 
 run-local: ## Ejecuta la aplicación localmente (requiere PostgreSQL en localhost:5433)
 	ENVIRONMENT=local DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db python main.py
