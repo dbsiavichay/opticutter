@@ -142,6 +142,9 @@ class OrderLineResponse(CamelModel):
     linear_m: Optional[float] = Field(
         default=None, description="Exact linear meters (incl. waste) for edge banding"
     )
+    half_board: bool = Field(
+        default=False, description="True if this board line was charged as a half board"
+    )
 
 
 class OrderPieceResponse(CamelModel):
@@ -290,6 +293,9 @@ class OrderBoardResponse(CamelModel):
     width: float
     height: float
     thickness: float
+    half_board: bool = Field(
+        default=False, description="True if this physical board is a half board"
+    )
     progress: CuttingProgress
     pieces: List[PlacedPieceResponse] = Field(default_factory=list)
     remainders: List[Remainder] = Field(

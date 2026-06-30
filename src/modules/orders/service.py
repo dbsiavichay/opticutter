@@ -187,6 +187,7 @@ class OrderService(BranchScopedMixin):
                 line_total=m["total_cost"],
                 avg_efficiency=m.get("avg_efficiency"),
                 total_area_m2=m.get("total_area_m2"),
+                half_board=m.get("half_board", False),
             )
             for m in payload["materials_summary"]
         ] + [
@@ -344,6 +345,7 @@ class OrderService(BranchScopedMixin):
                 width=board.width,
                 height=board.height,
                 thickness=board.thickness,
+                half_board=board.half_board,
                 progress=_progress(board.pieces),
                 pieces=[_piece_response(p) for p in board.pieces],
                 remainders=board.remainders or [],
@@ -627,6 +629,7 @@ def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
             width=material.get("width", 0.0),
             height=material.get("height", 0.0),
             thickness=material.get("thickness", 0.0),
+            half_board=bool(material.get("half_board", False)),
             remainders=layout.get("remainders") or None,
             # Snapshots previos a la serialización de ``cuts`` no traen la clave.
             cuts=layout.get("cuts") or None,

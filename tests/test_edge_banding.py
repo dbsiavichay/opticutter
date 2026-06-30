@@ -169,7 +169,7 @@ def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
             "requirements": [
                 {
                     "priority": 0,
-                    "height": 500,
+                    "height": 700,
                     "width": 1000,
                     "quantity": 1,
                     "materialKey": "b1",
@@ -205,7 +205,7 @@ def test_optimize_edge_banding_without_product_reports_length_only(client):
             "requirements": [
                 {
                     "priority": 0,
-                    "height": 500,
+                    "height": 700,
                     "width": 1000,
                     "quantity": 1,
                     "materialKey": "b1",

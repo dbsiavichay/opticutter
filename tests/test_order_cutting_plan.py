@@ -30,7 +30,9 @@ def _create_board(client, code="MEL18"):
     ).json()["data"]
 
 
-def _order_payload(client_id, product_id, height=400, width=600, quantity=3):
+# Default no-halvable (ambos lados > medio ancho de 610) para que el plan use tablero
+# completo; los tests de medio tablero viven en test_optimizations/test_orders.
+def _order_payload(client_id, product_id, height=800, width=700, quantity=3):
     return {
         "clientId": client_id,
         "branchId": 1,  # sucursal por defecto sembrada por conftest
@@ -55,7 +57,7 @@ def _mint(client, db_session, payload):
     return client.get(f"/api/v1/orders/{order.id}").json()["data"]
 
 
-def _create_order(client, db_session, quantity=3, width=600):
+def _create_order(client, db_session, quantity=3, width=700):
     c = _create_client(client)
     b = _create_board(client)
     payload = _order_payload(c["id"], b["id"], quantity=quantity, width=width)
@@ -90,7 +92,7 @@ def test_create_order_materializes_cutting_plan(client, db_session):
     assert plan["status"] == "confirmed"
     assert plan["progress"] == {"cutPieces": 0, "totalPieces": 3}
 
-    # 3 piezas de 400×600 caben en un solo tablero de 2440×1220.
+    # 3 piezas de 800×700 caben en un solo tablero de 2440×1220.
     assert len(plan["boards"]) == 1
     board = plan["boards"][0]
     assert board["sheetNumber"] == 1
@@ -110,7 +112,7 @@ def test_create_order_materializes_cutting_plan(client, db_session):
         assert piece["label"] == "Puerta"
         assert piece["cut"] is False and piece["cutAt"] is None
         # Geometría lista para dibujar + dims nominales para agrupar.
-        assert {piece["originalWidth"], piece["originalHeight"]} == {400, 600}
+        assert {piece["originalWidth"], piece["originalHeight"]} == {700, 800}
 
     # Sobrantes y cortes de guillotina del snapshot, para dibujar el tablero
     # completo en el taller (zonas libres + líneas de sierra).

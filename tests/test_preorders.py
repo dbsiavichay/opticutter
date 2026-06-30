@@ -39,7 +39,7 @@ def test_create_preorder_is_draft_with_live_optimization(client):
     assert data["materials"][0]["productId"] == b["id"]
     assert len(data["requirements"]) == 1
     assert data["requirements"][0]["materialKey"] == "b1"
-    assert data["requirements"][0]["height"] == 400
+    assert data["requirements"][0]["height"] == 800
 
     # Optimización recalculada embebida (precios vivos, nada congelado).
     opt = data["optimization"]

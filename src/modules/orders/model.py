@@ -2,7 +2,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.modules.users.enums import UserRole
@@ -245,6 +254,11 @@ class OrderLineModel(TimestampMixin, AuditMixin, Base):
     # Tapacanto: metros lineales exactos (con merma) para mostrar; ``quantity``
     # guarda los metros enteros cobrados. Nulo para tableros.
     linear_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Medio tablero: la línea se cobró a la mitad (ancho/2, costo/2). False para
+    # tableros completos y tapacantos.
+    half_board: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="lines")
 
@@ -299,6 +313,11 @@ class OrderBoardModel(TimestampMixin, AuditMixin, Base):
     width: Mapped[float] = mapped_column(Float)
     height: Mapped[float] = mapped_column(Float)
     thickness: Mapped[float] = mapped_column(Float)
+    # Medio tablero físico: el operario corta/usa un medio (ancho/2). El ``width`` ya
+    # llega partido; este flag lo marca explícito para la vista de taller.
+    half_board: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     # Rectángulos sobrantes del snapshot (display + futuro inventario de retazos).
     remainders: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     # Cortes de guillotina (recorridos de sierra) para dibujar las líneas de corte.
