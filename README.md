@@ -1,48 +1,140 @@
 # Cutter API
 
-API REST en Python + FastAPI para optimizar cortes 2D de tableros de melamina minimizando desperdicio y costos. Incluye caché en Redis e infraestructura con Docker y docker-compose.
+Cutter is a REST API, built with Python and FastAPI, that powers the full
+order-to-production workflow for a melamine board cutting business: it optimizes
+2D guillotine cuts to minimize waste and cost, then carries a quote through
+client review, confirmation, workshop production (cutting + edge banding) and
+dispatch.
 
-Contenido:
-- Endpoints: POST /api/v1/optimize, GET /api/v1/optimize/by-hash/{hash}, GET /api/v1/optimize/recent
-- Health: GET /api/v1/health/, GET /api/v1/health/ready, Root / y /health
-- Algoritmo: Guillotine 2D first-fit decreasing, respeta kerf y trims, reutiliza residuos (free rectangles)
-- Cacheo: Redis con clave opt:{sha256(payload_canónico)} y TTL configurable
+## Highlights
 
-Requisitos:
-- Docker y docker-compose
+- **2D guillotine cutting optimizer** — a pure, framework-free domain layer
+  (`src/cutting/`) that packs pieces onto boards with a selectable heuristic
+  (max efficiency, or one that concentrates waste into a single reusable
+  offcut), respecting kerf and trim margins.
+- **Material-source agnostic** — the optimizer accepts stock from the product
+  catalog, company/client offcuts, or ad-hoc manual entries through a single
+  resolver, so `cutting/` only ever deals with geometry.
+- **Deterministic, cached results** — identical optimization requests hash to
+  the same Redis-cached result; nothing is persisted until a client commits to
+  an order.
+- **Quote → order lifecycle** — mutable pre-orders (quotes) become immutable
+  order snapshots with frozen prices; orders carry a production status machine
+  (`confirmed → queued → cutting → cut → completed → dispatched`) plus an
+  independent edge-banding track for the `canteador` role.
+- **Commercial & production documents** — PDF proforma/order documents,
+  production sheets and dispatch sheets, all rendered from the same snapshot
+  and including a cutting diagram.
+- **JWT auth + RBAC** — short-lived access tokens, rotating refresh tokens, and
+  a role-based permission matrix (`administrador`, `vendedor`, `operador`,
+  `canteador`) enforced centrally.
+- **Multi-branch isolation** — orders, pre-orders and drafts are scoped to a
+  branch; clients and the product catalog remain global.
+- **Analytics** — read-only reporting on revenue, throughput, bottlenecks, user
+  productivity and attendance.
 
-Uso rápido:
-1) Copiar variables de entorno
+## Architecture at a glance
 
-    cp .env.example .env
+Vertical-slice modules (`src/modules/<name>/{model,schemas,service,router}.py`)
+sit on top of a pure cutting-optimization domain and a small shared
+infrastructure layer. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for
+the full breakdown.
 
-2) Construir e iniciar
+```
+src/cutting/     pure Python — the optimization algorithm, no framework imports
+src/shared/      infrastructure — DB, generic CRUD, error handling, auth primitives, config
+src/modules/*/   feature slices — depend on shared/ and cutting/, never on each other in a cycle
+main.py          wires routers, middleware and error handlers
+```
 
-    docker compose up -d --build
+## Getting started
 
-3) Abrir docs
+### Requirements
 
-    http://localhost:3000/docs
+- Docker and Docker Compose (recommended), or Python 3.11+ with a local
+  PostgreSQL 16 and Redis instance.
 
-Ejemplo de petición:
+### Run with Docker
 
-POST /api/v1/optimize
-{
-  "cuts": [...],
-  "materials": [...],
-  "cutting_parameters": {"kerf": 5, "top_trim": 0, "bottom_trim": 0, "left_trim": 0, "right_trim": 0}
-}
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
 
-Notas:
-- Si Redis no está disponible, el servicio sigue operando pero sin cacheo.
-- El algoritmo es heurístico y prioriza simplicidad/rapidez. Puede mejorarse con OR-Tools en versiones futuras.
+Open the interactive API docs at `http://localhost:3000/docs`.
 
-## Documentación
+### Run locally
 
-- [Arquitectura](docs/ARCHITECTURE.md) — slices verticales, reglas de dependencia y estructura del proyecto.
-- [Base de datos y migraciones](docs/DATABASE_SETUP.md) — configuración de SQLAlchemy/Alembic y creación de modelos.
-- [Endpoint de visualización](docs/VISUALIZATION_ENDPOINT.md) — generación de imágenes del layout de corte.
+```bash
+make run-local        # requires PostgreSQL reachable at localhost:5433 (see docs/DATABASE_SETUP.md)
+```
 
-## Comandos útiles
+### Useful commands
 
-Ver `make help` para todas las tareas (build, start, dev, tests, lint, migraciones, etc.).
+```bash
+make tests             # full test suite (Docker) against a dedicated cutter_test_db
+make lint-check-local   # ruff check + format check
+make migrations m="description"   # generate an Alembic migration
+make upgrade                      # apply pending migrations
+```
+
+Run `make help` for the full list of targets (build, dev, seeding scripts,
+migrations, etc.).
+
+## API conventions
+
+- All request/response bodies use **camelCase** (input also accepts
+  snake_case); internally the codebase stays in snake_case
+  (`src/shared/schemas.py::CamelModel`).
+- Successful responses wrap the payload in `{"data": ..., "meta": {...}}`;
+  paginated lists add `meta.pagination`. Errors share a uniform envelope:
+  `{"errors": [{"code", "message", "field?"}], "meta": {...}}`
+  (`src/shared/responses.py`, `src/shared/exceptions.py`).
+- Authentication is a JWT bearer access token plus an opaque, rotating refresh
+  token; authorization is role-based. See [`docs/AUTH.md`](docs/AUTH.md).
+- PDF documents (proforma, order, production sheet, dispatch sheet) and the
+  public client-review endpoints are the only routes exempt from the standard
+  envelope.
+
+### Example: run an optimization
+
+```bash
+curl -X POST "http://localhost:3000/api/v1/optimize" \
+  -H "Authorization: Bearer <accessToken>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "materials": [
+      {
+        "key": "MEL18", "source": "manual",
+        "height": 2440, "width": 1220, "thickness": 18, "costPerUnit": 45.50
+      }
+    ],
+    "requirements": [
+      {
+        "materialKey": "MEL18", "priority": 1,
+        "height": 400, "width": 600, "quantity": 2, "label": "Top shelf"
+      }
+    ]
+  }'
+```
+
+The response includes the cutting layout per board, board count, edge-banding
+length and total waste; nothing is persisted — the result is cached in Redis
+by a deterministic hash of the request.
+
+## Documentation
+
+| Doc | Covers |
+|-----|--------|
+| [Architecture](docs/ARCHITECTURE.md) | Module layout, dependency rules, shared building blocks, DB/migrations |
+| [Authentication & RBAC](docs/AUTH.md) | Login/refresh flow, roles, the per-endpoint permission matrix |
+| [Database setup](docs/DATABASE_SETUP.md) | PostgreSQL configuration and the Alembic migration workflow |
+| [Testing](docs/TESTING.md) | Unit vs. integration layers, commands, how to write each kind |
+| [Multi-branch](docs/MULTI_BRANCH.md) | Branch isolation rules for orders, pre-orders and drafts |
+| [Cutting diagram rendering](docs/CUTTING_DIAGRAM.md) | The Pillow-based renderer used inside the PDF documents |
+
+## Notes
+
+- If Redis is unavailable, the service keeps operating, just without caching.
+- The packing algorithm is a heuristic chosen for simplicity and speed over
+  provably optimal packing.
