@@ -30,6 +30,10 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
+markers = [
+    "unit: prueba unitaria sin DB (mock/funciones puras); no requiere PostgreSQL",
+    "integration: prueba de integración contra PostgreSQL real",
+]
 addopts = [
     "-v",
     "--tb=short",

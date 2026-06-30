@@ -125,7 +125,12 @@ def test_expired_token_raises_authentication_error():
 
 def test_tampered_token_raises_authentication_error():
     token = create_access_token(subject=1, role="vendedor")
-    tampered = token[:-1] + ("a" if token[-1] != "a" else "b")
+    # Alteramos el PRIMER carácter de la firma (un byte completo). Cambiar el último
+    # carácter base64 era flaky ~6%: solo codifica 4 bits útiles + 2 de relleno, así
+    # que para ciertas firmas decodificaba a los mismos bytes y el token "manipulado"
+    # seguía siendo válido.
+    head, _, sig = token.rpartition(".")
+    tampered = f"{head}.{'a' if sig[0] != 'a' else 'b'}{sig[1:]}"
     with pytest.raises(AuthenticationError):
         decode_access_token(tampered)
 

@@ -28,7 +28,8 @@ def _encode_password(plain: str) -> bytes:
 
 def hash_password(plain: str) -> str:
     """Devuelve el hash bcrypt de una contraseña en claro (almacenable como texto)."""
-    return bcrypt.hashpw(_encode_password(plain), bcrypt.gensalt()).decode("utf-8")
+    salt = bcrypt.gensalt(rounds=config.BCRYPT_ROUNDS)
+    return bcrypt.hashpw(_encode_password(plain), salt).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:

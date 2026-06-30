@@ -64,6 +64,11 @@ class Config:
     ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
     REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
+    # Factor de coste de bcrypt al hashear contraseñas (rounds = 2**factor iteraciones).
+    # 12 es un default seguro para prod/dev; la suite de tests lo baja a 4 (hashes válidos,
+    # ~16× más rápidos) para no pagar el coste deliberado de bcrypt en cada fixture.
+    BCRYPT_ROUNDS = env.int("BCRYPT_ROUNDS", 12)
+
     # Semilla del primer administrador (migración idempotente). Si ambos están
     # definidos y no existe un usuario con ese email, la migración lo crea con rol
     # "administrador". Vacíos = no se siembra nada.

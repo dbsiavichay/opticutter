@@ -25,6 +25,7 @@ from src.modules.users.schemas import UserCreate
 from src.modules.users.service import UserService
 from src.shared.cache import cache
 from src.shared.database import Base, get_db
+from src.shared.security import create_access_token
 
 # Credenciales del admin que el cliente autenticado por defecto usa (ver ``client``).
 _CONFTEST_ADMIN_EMAIL = "conftest-admin@empresa.com"
@@ -42,14 +43,19 @@ _TEST_DATABASE_URL = os.getenv(
 _test_engine = create_engine(_TEST_DATABASE_URL)
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _create_schema():
-    """Crea el schema una vez por sesión de pytest (idempotente)."""
+    """Crea el schema una vez por sesión de pytest (idempotente).
+
+    No es ``autouse``: solo lo piden los fixtures que tocan la base (``db_session``
+    y, transitivamente, ``client``/``anon_client``). Así los tests unitarios bajo
+    ``tests/unit/`` (marcados ``unit``) corren sin abrir conexión a PostgreSQL.
+    """
     Base.metadata.create_all(_test_engine)
 
 
 @pytest.fixture
-def db_session():
+def db_session(_create_schema):
     """Sesión PostgreSQL aislada por test: TRUNCATE al inicio + seed de sucursal."""
     table_names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
     with _test_engine.begin() as conn:
@@ -120,8 +126,9 @@ def client(anon_client, db_session):
     autenticación (``test_users.py``) usan ``anon_client``.
     """
     svc = UserService(db_session)
-    if svc.get_by_email(_CONFTEST_ADMIN_EMAIL) is None:
-        svc.create(
+    admin = svc.get_by_email(_CONFTEST_ADMIN_EMAIL)
+    if admin is None:
+        admin = svc.create(
             UserCreate(
                 email=_CONFTEST_ADMIN_EMAIL,
                 password=_CONFTEST_ADMIN_PWD,
@@ -129,10 +136,24 @@ def client(anon_client, db_session):
                 full_name="Conftest Admin",
             )
         )
-    resp = anon_client.post(
-        "/api/v1/auth/login",
-        json={"email": _CONFTEST_ADMIN_EMAIL, "password": _CONFTEST_ADMIN_PWD},
-    )
-    token = resp.json()["data"]["accessToken"]
+    # Minteamos el JWT directo en vez de pegarle a /auth/login: ``get_current_user``
+    # resuelve el rol vivo por ``sub`` (id del usuario), así que no hace falta el
+    # verify de bcrypt ni el round-trip HTTP del login en cada test.
+    token = create_access_token(admin.id, admin.role)
     anon_client.headers.update({"Authorization": f"Bearer {token}"})
     return anon_client
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-marca por ruta: ``tests/unit/`` ⇒ ``unit``; el resto ⇒ ``integration``.
+
+    Evita anotar a mano los archivos existentes y habilita el bucle rápido
+    ``pytest -m unit`` (sin PostgreSQL) frente a ``pytest -m integration`` (la suite
+    actual de integración). Los marcadores se declaran en ``pyproject.toml``
+    (``--strict-markers`` está activo).
+    """
+    for item in items:
+        parts = item.path.parts
+        idx = parts.index("tests") if "tests" in parts else -1
+        is_unit = idx != -1 and len(parts) > idx + 1 and parts[idx + 1] == "unit"
+        item.add_marker("unit" if is_unit else "integration")

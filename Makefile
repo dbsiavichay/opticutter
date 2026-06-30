@@ -34,10 +34,10 @@ create-test-db: ## Crea cutter_test_db si no existe (idempotente, no toca cutter
 		docker compose exec -T postgres psql -U cutter -d cutter_db -c "CREATE DATABASE cutter_test_db"
 
 tests: create-test-db ## Ejecuta las pruebas (contra cutter_test_db; nunca toca cutter_db)
-	docker compose run --no-deps --rm -e DATABASE_URL=$(DB_TEST_DOCKER) -e TEST_DATABASE_URL=$(DB_TEST_DOCKER) api pytest -q
+	docker compose run --no-deps --rm -e DATABASE_URL=$(DB_TEST_DOCKER) -e TEST_DATABASE_URL=$(DB_TEST_DOCKER) -e BCRYPT_ROUNDS=4 api pytest -q
 
 tests-local: create-test-db ## Ejecuta las pruebas localmente (PostgreSQL en localhost:5433)
-	DATABASE_URL=$(DB_TEST_LOCAL) TEST_DATABASE_URL=$(DB_TEST_LOCAL) pytest -q
+	DATABASE_URL=$(DB_TEST_LOCAL) TEST_DATABASE_URL=$(DB_TEST_LOCAL) BCRYPT_ROUNDS=4 pytest -q
 
 lint-fix: ## Corrige errores de formato y lint
 	source .venv/bin/activate && ruff check --fix . && ruff format .
