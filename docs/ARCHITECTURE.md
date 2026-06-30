@@ -1,114 +1,208 @@
-# Arquitectura del Proyecto Cutter
+# Architecture
 
-## Visión General
+## Overview
 
-Cutter es una API FastAPI para optimización de cortes 2D de melamina (algoritmo
-guillotina). El código se organiza en **módulos verticales (vertical slices)**: cada
-recurso reúne en una sola carpeta su router, su servicio, sus schemas y su modelo ORM.
-Esto reduce el boilerplate, mantiene cohesionado todo lo de un recurso y deja el dominio
-del algoritmo aislado y libre de frameworks.
+Cutter is a FastAPI service organized as **vertical slices**: each business
+resource owns its router, service, schemas and ORM model in a single folder.
+This keeps a resource's code cohesive, avoids empty "use case" layers and
+per-entity repositories, and keeps the cutting algorithm isolated from any
+framework concern.
 
-El objetivo de diseño es ser **pragmático y fácil de leer**: SOLID donde aporta, sin
-ceremonia. No hay repositorios por entidad ni capas de "casos de uso" vacías; el CRUD se
-centraliza en una base genérica y los errores en un único handler.
+Design goal: **pragmatic and easy to read**. SOLID where it earns its keep,
+without ceremony — a generic CRUD base and a single error-handling pipeline
+replace most of the boilerplate a layered architecture would otherwise need.
 
-## Estructura
+## Project layout
 
 ```
 src/
-├── shared/                 # Núcleo transversal reutilizable
-│   ├── config.py           # Config único (lee de entorno; KERF, trims, CORS, DB...)
-│   ├── database.py         # Base declarativa, engine, SessionLocal, get_db
-│   ├── schemas.py          # CamelModel (contrato camelCase del API)
-│   ├── exceptions.py       # AppError + jerarquía con status_code
-│   ├── errors.py           # register_exception_handlers(app)
-│   └── crud.py             # CRUDService[Model, Create, Update] genérico
-├── modules/                # Un slice por recurso
-│   ├── clients/            # {model, schemas, service, router}.py
-│   ├── products/           # catálogo multi-tipo: + registry.py y types/<tipo>.py
-│   ├── orders/             # raíz de agregado: snapshot inmutable + máquina de estados
-│   ├── optimizations/      # + proforma.py (PDF) y visualization.py (render)
-│   └── system/             # router.py (health + info del servicio)
-├── cutting/                # DOMINIO puro del algoritmo (sin frameworks)
-│   ├── models.py           # Rectangle, Piece, PlacedPiece, Material, CuttingLayout
-│   ├── enums.py            # SplitRule
-│   ├── parameters.py       # CuttingParameters (dataclass)
-│   └── optimizer.py        # GuillotineOptimizer, MultiSheetGuillotineOptimizer
-main.py                     # Crea la app, registra routers + handlers, CORS desde config
-alembic/                    # Migraciones (env.py importa Base y los modelos de cada módulo)
+├── shared/                    Cross-cutting infrastructure
+│   ├── config.py               Single Config instance (env-driven: KERF, trims, CORS, DB...)
+│   ├── database.py             Declarative Base, engine, SessionLocal, get_db
+│   ├── schemas.py              CamelModel — camelCase JSON contract
+│   ├── exceptions.py           AppError hierarchy with HTTP status_code
+│   ├── errors.py               register_exception_handlers(app)
+│   ├── crud.py                 CRUDService[Model, Create, Update] generic base
+│   ├── security.py             bcrypt hashing, JWT issue/verify, opaque token generation
+│   ├── responses.py            DataResponse/PaginatedResponse/ErrorResponse envelopes
+│   ├── pagination.py           PageParams (limit/offset query params)
+│   ├── audit.py                created_by/updated_by actor resolution
+│   ├── branch_scope.py         Branch-isolation query helpers
+│   ├── context.py              Per-request context (request ID, current user)
+│   ├── middleware.py           CurrentUserMiddleware, RequestIDMiddleware
+│   ├── cache.py                Redis client wrapper
+│   └── mixins.py               TimestampMixin, AuditMixin for ORM models
+├── modules/                    One slice per resource: {model,schemas,service,router}.py
+│   ├── users/                   Staff users, auth (JWT + refresh), RBAC source of truth
+│   ├── branches/                Branch CRUD (multi-branch isolation)
+│   ├── clients/                 Client management (CRUD)
+│   ├── products/                Unified product catalog (board / edge_banding / hardware)
+│   ├── optimizations/           Cutting optimizer orchestration, PDF documents, diagrams
+│   ├── optimization_drafts/     Saved, named, mutable optimizer inputs (work in progress)
+│   ├── preorders/                Mutable quotes + client review links
+│   ├── orders/                  Aggregate root: immutable snapshot, status machine, billing
+│   ├── settings/                Editable runtime configuration (cutting, pricing, company, preorders)
+│   ├── analytics/               Read-only reporting
+│   └── system/                  Health / readiness endpoints
+├── cutting/                    Pure domain — NO framework imports
+│   ├── models.py                Rectangle, Piece, PlacedPiece, Material, CuttingLayout
+│   ├── enums.py                 SplitRule, PackingStrategy
+│   ├── parameters.py            CuttingParameters (dataclass)
+│   └── optimizer.py             GuillotineOptimizer, MultiSheetGuillotineOptimizer
+main.py                         Creates the app, registers routers + middleware + handlers
+alembic/                        Migrations (env.py imports Base and every module's model)
 ```
 
-## Reglas de dependencia
+## Dependency rules
 
-Simples y sin ciclos:
+No cycles, enforced by convention:
 
-- **`cutting/`** no importa frameworks ni módulos. Permanece puro y testeable de forma
-  aislada.
-- **`shared/`** no depende de ningún módulo.
-- **`modules/*`** dependen de `shared/` y de `cutting/`.
-- Dependencias entre módulos solo en una dirección: `optimizations` → `clients`/`products`
-  (p. ej. reutiliza `ClientResponse` y `ProductService`; solo optimiza productos tipo
-  `board`), nunca al revés.
+- **`cutting/`** imports nothing from `shared/` or `modules/`. It stays pure
+  and unit-testable in isolation.
+- **`shared/`** depends on nothing in `modules/`.
+- **`modules/*`** depend on `shared/` and `cutting/`.
+- Cross-module dependencies flow one way only — e.g. `optimizations` reads
+  from `products`/`clients` (catalog lookups, client metadata) and `orders`
+  reads from `preorders`/`optimizations`, never the reverse. `users` is the
+  foundational auth module: every other module imports its `dependencies.py`
+  for permission checks, and `users` imports nothing from them.
 
-## Bloques clave
+## Feature modules
 
-### `shared/crud.py` — base CRUD genérica
+- **`users`** — staff accounts, JWT auth (short-lived access token + rotating
+  opaque refresh token), and the RBAC matrix (`permissions.py::RESOURCE_ROLES`)
+  that every other module's router depends on. Roles: `administrador`,
+  `vendedor` (both global), `operador`, `canteador` (both branch-scoped
+  workshop roles). See [`AUTH.md`](AUTH.md).
+- **`branches`** — CRUD for physical locations. Orders, pre-orders and
+  optimization drafts are scoped to a branch; clients and the product catalog
+  stay global. See [`MULTI_BRANCH.md`](MULTI_BRANCH.md).
+- **`clients`** — client CRUD, search by phone/identifier.
+- **`products`** — a single `products` table backs every catalog item
+  (`type`: `board` / `edge_banding` / `hardware`), with type-specific fields
+  validated by a Pydantic discriminated union over a JSON `attributes` column.
+  Add a new product type by registering a schema under `products/types/` —
+  no migration needed. Only `board`-typed products feed the optimizer.
+  `GET /products/{board_id}/edge-bandings` matches the edge bandings designed
+  for a given board by a shared design key derived from their codes, then
+  applies a thickness→width rule.
+- **`optimizations`** — orchestrates the pure `cutting/` domain. `POST
+  /optimize` is **material-source agnostic**: it takes a `materials` stock
+  list (catalog boards, company/client offcuts, or manual entries, unified by
+  a `MaterialInput` discriminated union) and `requirements` that reference a
+  material by `materialKey`, never a catalog ID directly — `cutting/` only
+  ever sees geometry. A pluggable `strategy` (`default` for maximum
+  efficiency, `longOffcuts` to concentrate waste into one reusable strip)
+  affects both the geometry and the result's cache key. Results are
+  deterministic and cached in Redis by a hash of the canonical request — nothing
+  is persisted to the database here. This module also owns the rendering
+  pipeline shared by every PDF document (proforma, order, production sheet,
+  dispatch sheet): `proforma.py` (document layout via ReportLab) and
+  `visualization.py` (the cutting diagram via Pillow — see
+  [`CUTTING_DIAGRAM.md`](CUTTING_DIAGRAM.md)).
+- **`optimization_drafts`** — lets a seller save a named, editable optimizer
+  input (materials + requirements + strategy) before turning it into a
+  pre-order.
+- **`preorders`** — mutable quotes. A pre-order re-optimizes from its stored
+  `materials`/`requirements`/`strategy` on every read, so prices and layout
+  always reflect current catalog/settings. Supports a client-review flow:
+  `POST /preorders/{id}/review-link` issues a single-use, sha256-hashed
+  token; the public, token-gated endpoints in `public_router.py` let the
+  client confirm or reject without a staff session.
+- **`orders`** — the durable aggregate root: an **immutable snapshot** of an
+  optimization plus frozen prices, billed by **product**
+  (`order_lines → product_id`, nullable for non-catalog materials) rather
+  than by raw cut piece. Order creation also materializes the snapshot into
+  `order_boards` / `order_placed_pieces` (one row per physical board/piece)
+  for workshop tracking. Two independent status tracks:
+  - **Cutting**: `confirmed → queued → cutting → cut → completed →
+    dispatched` (plus a `confirmed → cancelled` escape and an admin
+    `cutting → queued` rollback). The `confirmed → queued` transition
+    requires recording a payment method (cash/credit, informational only).
+  - **Banding** (edge banding, `banding_status`): `pending → in_progress →
+    done`, advanced independently by the `canteador` role while cutting is
+    still in progress. An order with edge banding can't reach `completed`
+    until banding is `done`.
 
-`CRUDService[ModelT, CreateT, UpdateT]` centraliza `get`/`get_or_404`/`list`/`create`/
-`update`/`delete` y la traducción de `IntegrityError`. Cada servicio solo declara su
-`model` y, opcionalmente, `conflict_messages` (substring de la restricción → mensaje
-legible) más los métodos específicos del recurso (`search`, `get_by_phone`, ...).
+  Orders render their own commercial document, production sheet and dispatch
+  sheet from the frozen snapshot.
+- **`settings`** — a singleton row holding runtime-editable configuration
+  (cutting parameters, price tiers, company info, pre-order policy) that is
+  only seeded from environment variables on first read; `PATCH` endpoints are
+  the source of truth afterwards.
+- **`analytics`** — read-only reporting: revenue summaries, time series,
+  status/branch breakdowns, bottleneck detection, user productivity and
+  attendance (derived from login events).
+- **`system`** — health and readiness checks.
 
-`create` mapea `data.model_dump()` directo a las columnas. Esto elimina los repositorios
-por entidad y el CRUD repetido en los servicios.
+## Shared building blocks
 
-### `shared/exceptions.py` + `shared/errors.py` — errores centralizados
+### `shared/crud.py` — generic CRUD base
 
-Una jerarquía con `status_code` propio (`EntityNotFoundError`=404, `ConflictError`=409,
-`BusinessRuleError`/`ValidationError`=422; base `AppError`=400). Los servicios y el dominio
-lanzan estas excepciones **sin conocer FastAPI**; un único handler registrado en
-`register_exception_handlers(app)` las traduce a `{"detail": ...}` con el código correcto.
-Así desaparecen los `if not x: raise HTTPException(404)` repetidos en las rutas.
+`CRUDService[ModelT, CreateT, UpdateT]` centralizes `get` / `get_or_404` /
+`list` / `create` / `update` / `delete` plus translation of `IntegrityError`
+into a domain exception. A service only declares its `model` and, optionally,
+`conflict_messages` (a substring of the DB constraint name → a human-readable
+message) plus whatever resource-specific methods it needs (`search`,
+`get_by_phone`, ...).
 
-### Inyección con `Depends` + rutas finas
+### `shared/exceptions.py` + `shared/errors.py` — centralized errors
 
-Cada módulo expone un *provider* (p. ej. `client_service(db = Depends(get_db))`). Las rutas
-quedan visibles y depurables, sin instanciar servicios a mano ni manejar 404 inline:
+A small hierarchy carrying its own `status_code`: `EntityNotFoundError`
+(404), `ConflictError` (409), `AuthenticationError` (401),
+`AuthorizationError` (403), `BusinessRuleError`/`ValidationError` (422), base
+`AppError` (400). Services and the domain raise these **without knowing
+about FastAPI**; a single handler registered via
+`register_exception_handlers(app)` translates them into the uniform
+`{"errors": [...], "meta": {...}}` envelope. This removes repeated
+`if not x: raise HTTPException(404)` checks from every route.
+
+### Dependency injection + thin routes
+
+Each module exposes a provider (e.g. `client_service(db = Depends(get_db))`).
+Routes stay short and debuggable, with permission checks declared at the
+router or route level:
 
 ```python
-@router.get("/{client_id}", response_model=ClientResponse)
+@router.get("/{client_id}", response_model=DataResponse[ClientResponse])
 def get_client(client_id: int, svc: ClientService = Depends(client_service)):
-    return svc.get_or_404(client_id)
+    return ok(svc.get_or_404(client_id))
 ```
 
-### `cutting/` — dominio del algoritmo
+### `cutting/` — the optimizer domain
 
-Dataclasses puras (`Piece`, `Material`, `CuttingLayout`, ...) y los optimizadores
-guillotina. El módulo `optimizations` orquesta este dominio y persiste el resultado; si un
-requerimiento referencia un tablero inexistente, lanza `EntityNotFoundError` (404) en lugar
-de descartarlo en silencio.
+Pure dataclasses (`Piece`, `Material`, `CuttingLayout`, ...) and the
+guillotine optimizers. `optimizations` orchestrates this domain: it picks the
+sort order and free-rectangle selection strategy based on `PackingStrategy`,
+runs the packer per material, and raises `EntityNotFoundError` if a
+requirement references an unknown catalog board instead of silently dropping
+it.
 
-## Contrato del API
+## API contract
 
-Todos los schemas extienden `CamelModel`: el contrato externo usa **camelCase** y aceptan
-también snake_case en input; internamente se trabaja en snake_case. Las respuestas se
-construyen directamente desde los modelos ORM (`from_attributes=True`).
+Every schema extends `CamelModel`: the external contract is **camelCase**
+(snake_case is also accepted on input); internally the codebase works in
+snake_case. Responses are built directly from ORM models
+(`from_attributes=True`) and wrapped in the envelopes defined in
+`shared/responses.py`.
 
-## Base de datos y migraciones
+## Database & migrations
 
-`shared/database.py` define la `Base` declarativa común; todos los modelos ORM la extienden.
-`alembic/env.py` apunta a `src.shared.database.Base` e **importa los modelos de cada módulo**
-(`src.modules.{clients,products,optimizations,orders}.model`) para poblar `Base.metadata`, de modo
-que `alembic revision --autogenerate` detecte las tablas. La URL se toma de
-`config.DATABASE_URL`.
+`shared/database.py` defines the common declarative `Base`; every ORM model
+extends it. `alembic/env.py` points at `src.shared.database.Base` and imports
+every module's `model.py` so `alembic revision --autogenerate` can see all
+tables. The connection URL comes from `config.DATABASE_URL`. PostgreSQL is
+the only supported engine — see [`DATABASE_SETUP.md`](DATABASE_SETUP.md).
 
-## Ejecución y verificación
+## Running & verifying
 
-- **App local**: `make run-local` (`ENVIRONMENT=local python main.py`); SQLite por defecto.
-- **Tests**: `make tests-local` (o `.venv/bin/python -m pytest`). La suite cubre el dominio
-  del optimizador, el CRUD genérico vía clients/products (incluyendo conflictos 409 y 404),
-  el flujo de optimización (geometría) y los documentos comerciales (proforma de
-  cotización / orden de pedido), y los endpoints del sistema.
-- **Lint**: `make lint-check-local` (ruff).
-- **Migraciones**: `alembic upgrade head`; `alembic revision --autogenerate` no debe generar
-  diffs cuando los modelos coinciden con el esquema.
+- **App locally**: `make run-local` (`ENVIRONMENT=local`, requires PostgreSQL
+  on `localhost:5433`).
+- **Tests**: `make tests` (Docker, full suite + 80% coverage gate) or the
+  unit-only fast loop described in [`TESTING.md`](TESTING.md). Coverage spans
+  the optimizer domain, generic CRUD (including 409/404 paths), the
+  optimization/order/pre-order flows, document rendering and the auth/RBAC
+  layer.
+- **Lint**: `make lint-check-local` (ruff check + format check).
+- **Migrations**: `alembic upgrade head`; `alembic revision --autogenerate`
+  should produce no diff when models match the live schema.

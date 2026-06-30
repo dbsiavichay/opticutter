@@ -1,105 +1,130 @@
-# Autenticación y autorización (RBAC)
+# Authentication & Authorization (RBAC)
 
-Contrato de auth del API Cutter para el dashboard web (React). Todos los endpoints
-salvo los públicos exigen un **access token** (JWT) en el header
-`Authorization: Bearer <accessToken>`. La autorización es por **rol** según la
-matriz de permisos.
+Auth contract for the Cutter API, consumed by the Maderable web dashboard
+(React). Every endpoint except the public ones requires an **access token**
+(JWT) in the `Authorization: Bearer <accessToken>` header. Authorization is
+**role-based**, resolved against a single permission matrix.
 
 ## Roles
 
-| Rol (valor en BD)    | Descripción                                  |
-|----------------------|----------------------------------------------|
-| `administrador`      | Acceso total (gestión, config, analítica).   |
-| `vendedor`           | Comercial: catálogo (lectura), clientes, optimizador, pre-órdenes, órdenes. |
-| `operador`           | Taller (corte): lectura de órdenes, plan de corte y marcado de piezas. |
-| `canteador`          | Taller (canteado): su cola de canteado e inicio/fin del tapacanto; **no** ve el detalle de la orden. |
+| Role (DB value) | Description |
+|------------------|-------------|
+| `administrador`  | Full access (management, settings, analytics). |
+| `vendedor`       | Sales: catalog (read), clients, optimizer, pre-orders, orders. |
+| `operador`       | Workshop (cutting): reads orders, drives the cutting plan, marks pieces cut. |
+| `canteador`      | Workshop (edge banding): its banding queue and the start/finish actions; does **not** see order detail. |
 
-`operador` y `canteador` son roles de taller atados a una sucursal; `administrador` y
-`vendedor` son globales.
+`operador` and `canteador` are workshop roles bound to a single branch;
+`administrador` and `vendedor` are global (see
+[`MULTI_BRANCH.md`](MULTI_BRANCH.md)).
 
-El login es por `email` (único). La contraseña se guarda solo como hash bcrypt.
+Login is by `email` (unique). Passwords are stored only as a bcrypt hash.
 
-## Flujo de sesión
+## Session flow
 
-1. **Login** → `POST /api/v1/auth/login` con `{ email, password }`.
-   Respuesta: `{ accessToken, refreshToken, tokenType: "bearer", expiresIn, user }`.
-   - `accessToken`: JWT corto (por defecto 30 min, `ACCESS_TOKEN_EXPIRE_MINUTES`).
-   - `refreshToken`: token opaco largo (por defecto 30 días, `REFRESH_TOKEN_EXPIRE_DAYS`).
-   - `expiresIn`: vigencia del access token en segundos.
-2. **Usar el API** → enviar `Authorization: Bearer <accessToken>` en cada request.
-3. **Renovar** → cuando el access token expira (o ante un `401`), llamar
-   `POST /api/v1/auth/refresh` con `{ refreshToken }`. Devuelve un **par nuevo**
-   (mismo shape que login). El refresh presentado **se rota**: queda invalidado y se
-   emite otro. Guardar siempre el `refreshToken` más reciente.
-4. **Cerrar sesión** → `POST /api/v1/auth/logout` con `{ refreshToken }` (revoca ese
-   refresh; idempotente, `204`).
+1. **Login** → `POST /api/v1/auth/login` with `{ email, password }`.
+   Response: `{ accessToken, refreshToken, tokenType: "bearer", expiresIn, user }`.
+   - `accessToken`: short-lived JWT (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 30 min).
+   - `refreshToken`: long-lived opaque token (`REFRESH_TOKEN_EXPIRE_DAYS`, default 30 days).
+   - `expiresIn`: access token lifetime in seconds.
+2. **Call the API** → send `Authorization: Bearer <accessToken>` on every request.
+3. **Refresh** → when the access token expires (or on a `401`), call
+   `POST /api/v1/auth/refresh` with `{ refreshToken }`. Returns a **new pair**
+   (same shape as login). The submitted refresh token **rotates**: it is
+   invalidated and a new one is issued. Always persist the most recent
+   `refreshToken`.
+4. **Logout** → `POST /api/v1/auth/logout` with `{ refreshToken }` (revokes
+   that refresh token; idempotent, `204`).
 
-### Seguridad del refresh token (rotación y reúso)
+### Refresh token security (rotation & reuse detection)
 
-- Cada `refreshToken` se usa **una sola vez**: `refresh` lo revoca y entrega uno nuevo.
-- Si se reusa un refresh **ya rotado** (señal de robo), el API revoca **toda la
-  familia** de refresh tokens del usuario y responde `401`. El usuario debe
-  volver a hacer login. → El front nunca debe reusar un refresh viejo; debe
-  reemplazarlo por el que devuelve `refresh`.
-- En reposo solo se guarda el `sha256` del token, nunca el token en claro.
+- Each `refreshToken` is single-use: `refresh` revokes it and issues a new one.
+- Reusing an **already-rotated** refresh token (a signal of theft) makes the
+  API revoke the user's **entire refresh-token family** and respond `401`;
+  the user must log in again. The frontend must never reuse a stale refresh
+  token — always replace it with the one returned by `refresh`.
+- Only the `sha256` of the token is stored at rest, never the raw token.
 
-## Autoservicio (cualquier rol autenticado)
+## Self-service (any authenticated role)
 
-- `GET /api/v1/auth/me` → usuario autenticado.
-- `PATCH /api/v1/auth/me` con `{ fullName }` → edita **solo** el nombre propio.
-  No permite cambiar `role`, `isActive` ni `email` (eso es gestión solo-admin).
-- `POST /api/v1/auth/change-password` con `{ currentPassword, newPassword }` → cambia
-  la propia contraseña verificando la actual. **Revoca todos los refresh tokens** del
-  usuario (cierra otras sesiones); el front debe re-loguear tras un `204`.
+- `GET /api/v1/auth/me` → the current user.
+- `PATCH /api/v1/auth/me` with `{ fullName }` → edits **only** the user's own
+  name. Does not allow changing `role`, `isActive` or `email` (admin-only
+  management).
+- `POST /api/v1/auth/change-password` with `{ currentPassword, newPassword }`
+  → changes the user's own password after verifying the current one.
+  **Revokes all of the user's refresh tokens** (closes other sessions); the
+  frontend should force a re-login after a `204`.
 
-## Semántica de errores
+## Error semantics
 
-| Código | Significado | Acción del front |
-|--------|-------------|------------------|
-| `401 UNAUTHORIZED` | Falta el token, es inválido o expiró; o credenciales malas. | Intentar `refresh`; si también `401`, redirigir a login. |
-| `403 FORBIDDEN`    | Autenticado pero el **rol** no tiene permiso para esa área. | Mostrar "sin permiso"; no reintentar. |
+| Code | Meaning | Frontend action |
+|------|---------|------------------|
+| `401 UNAUTHORIZED` | Token missing/invalid/expired, or bad credentials. | Try `refresh`; if that also `401`s, redirect to login. |
+| `403 FORBIDDEN`    | Authenticated, but the **role** lacks permission for that area. | Show "not authorized"; do not retry. |
 
-Todos los errores comparten la envoltura `{ errors: [{ code, message, field? }], meta }`.
+All errors share the envelope `{ errors: [{ code, message, field? }], meta }`.
 
-## Matriz de permisos por endpoint
+## Permission matrix by endpoint
 
-Fuente de verdad: `src/modules/users/permissions.py` (`RESOURCE_ROLES`). Cada ruta
-se protege con `Depends(require_permission("<clave>"))`.
+Source of truth: `src/modules/users/permissions.py` (`RESOURCE_ROLES`). Every
+route is protected with `Depends(require_permission("<key>"))`.
 
-| Área (`clave`)        | administrador | vendedor | operador | canteador | Endpoints |
-|-----------------------|:---:|:---:|:---:|:---:|---|
-| `users:manage`        | ✅ | ❌ | ❌ | ❌ | `/users/*` |
-| `settings:manage`     | ✅ | ❌ | ❌ | ❌ | `/settings/*` |
-| `analytics`           | ✅ | ❌ | ❌ | ❌ | `/analytics/*` |
-| `products:read`       | ✅ | ✅ | ❌ | ❌ | `GET /products/*` |
-| `products:write`      | ✅ | ❌ | ❌ | ❌ | `POST/PUT/DELETE /products/*` |
-| `clients:manage`      | ✅ | ✅ | ❌ | ❌ | `/clients/*` |
-| `optimizer`           | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
-| `preorders`           | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (interno) |
-| `orders:read`         | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document`, `GET /orders/{id}/dispatch-sheet` |
-| `orders:write`        | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
-| `orders:transition`   | ✅ | ✅ | ✅* | ✅* | `PATCH /orders/{id}/status` (filtra por transición en `TRANSITION_ROLES`) |
-| `cutting_plan`        | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |
-| `orders:cut`          | ✅ | ❌ | ✅ | ❌ | `PATCH /orders/{id}/cutting-plan/pieces/{id}` |
-| `orders:band`         | ✅ | ❌ | ❌ | ✅ | `GET /orders/banding-queue`, `PATCH /orders/{id}/banding` |
+| Area (`key`)        | administrador | vendedor | operador | canteador | Endpoints |
+|----------------------|:---:|:---:|:---:|:---:|---|
+| `users:manage`       | ✅ | ❌ | ❌ | ❌ | `/users/*` |
+| `settings:manage`    | ✅ | ❌ | ❌ | ❌ | `/settings/*` |
+| `branches:manage`    | ✅ | ❌ | ❌ | ❌ | `POST/PUT/DELETE /branches/*` |
+| `branches:read`      | ✅ | ✅ | ✅ | ✅ | `GET /branches/*` |
+| `analytics`          | ✅ | ❌ | ❌ | ❌ | `/analytics/*` |
+| `products:read`      | ✅ | ✅ | ❌ | ❌ | `GET /products/*` |
+| `products:write`     | ✅ | ❌ | ❌ | ❌ | `POST/PUT/DELETE /products/*` |
+| `clients:manage`     | ✅ | ✅ | ❌ | ❌ | `/clients/*` |
+| `optimizer`          | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
+| `preorders`          | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (internal; the client-facing flow is public, see below) |
+| `orders:read`        | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document`, `GET /orders/{id}/dispatch-sheet` |
+| `orders:write`       | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
+| `orders:transition`  | ✅ | ✅ | ✅* | ✅* | `PATCH /orders/{id}/status` (narrowed per-transition by `TRANSITION_ROLES`) |
+| `cutting_plan`       | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |
+| `orders:cut`         | ✅ | ❌ | ✅ | ❌ | `PATCH /orders/{id}/cutting-plan/pieces/{id}` |
+| `orders:band`        | ✅ | ❌ | ❌ | ✅ | `GET /orders/banding-queue`, `PATCH /orders/{id}/banding` |
 
-\* `orders:transition` es la puerta gruesa; qué rol puede cada transición concreta
-vive en `TRANSITION_ROLES` (`src/modules/orders/model.py`). El `canteador` entra a este
-permiso **solo** para registrar el despacho (`completed → despachado`, la única
-transición abierta a cualquier rol); el resto de transiciones le siguen vedadas.
+\* `orders:transition` is the coarse gate; which role can perform each
+*specific* transition lives in `TRANSITION_ROLES`
+(`src/modules/orders/model.py`). `canteador` only gets into this permission
+to register dispatch (`completed → dispatched`, the one transition open to
+every role) — every other transition stays closed to it.
 
-## Endpoints públicos (sin token)
+### Order status transitions and roles
 
-- `GET /health`, `GET /api/v1/health/`, `/health/ready`, `/api/v1/cutter/*` — diagnóstico.
-- `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`.
-- `GET/POST /api/v1/public/review/{token}*` — flujo de revisión del cliente:
-  el **token del enlace** es la única credencial (no usa JWT).
+| Transition | Allowed roles |
+|------------|----------------|
+| `confirmed → queued` | administrador, vendedor (requires a `payment` body, see below) |
+| `confirmed → cancelled` | administrador, vendedor |
+| `queued → cutting` | administrador, operador |
+| `cutting → queued` (admin rollback) | administrador |
+| `cutting → cut` | administrador, operador |
+| `cut → completed` | administrador, vendedor |
+| `completed → dispatched` | administrador, vendedor, operador, canteador (any role) |
 
-## Configuración (env)
+Note: the order status wire value for the final state is the literal string
+`"despachado"` (`OrderStatus.dispatched`), kept in Spanish for backward
+compatibility with the dashboard.
 
-| Var | Default | Descripción |
-|-----|---------|-------------|
-| `SECRET_KEY` | `dev-secret-change-me` (obligatorio en prod) | Firma HS256 del JWT. |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Vigencia del access token. |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Vigencia del refresh token. |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | vacío | Siembran el primer admin (migración idempotente). |
+## Public endpoints (no token)
+
+- `GET /health`, `GET /api/v1/health/`, `/health/ready`, `/api/v1/cutter/*` —
+  diagnostics.
+- `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`,
+  `POST /api/v1/auth/logout`.
+- `GET/POST /api/v1/public/review/{token}*` — the client review flow: the
+  **link token** is the only credential (no JWT involved).
+
+## Configuration (env)
+
+| Var | Default | Description |
+|-----|---------|--------------|
+| `SECRET_KEY` | `dev-secret-change-me` (required in production) | Signs the JWT (HS256). |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh token lifetime. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | empty | Seed the first admin account (idempotent on migration). |
