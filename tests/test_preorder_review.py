@@ -121,7 +121,7 @@ def test_public_review_detail_is_sanitized(client):
     assert len(data["lines"]) == 1
     assert data["lines"][0]["productCode"] == "MEL18"
     assert len(data["pieces"]) == 1
-    assert data["pieces"][0]["height"] == 400
+    assert data["pieces"][0]["height"] == 800
 
     # Sanitización: nada de contacto, identificadores internos ni inputs crudos.
     assert "0991112233" not in resp.text

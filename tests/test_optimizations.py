@@ -50,6 +50,25 @@ def _optimize_payload(client_id, product_id):
     }
 
 
+def _full_board_payload(client_id, product_id, quantity=2):
+    """Job que exige tablero(s) completo(s): pieza con ambos lados > medio ancho (610)."""
+    return {
+        "clientId": client_id,
+        "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 800,
+                "width": 700,
+                "quantity": quantity,
+                "materialKey": "b1",
+                "label": "Costado",
+                "canRotate": True,
+            }
+        ],
+    }
+
+
 def test_optimize_returns_layouts(client):
     created_client = _create_client(client)
     created_board = _create_board(client)
@@ -164,7 +183,7 @@ def test_optimize_computes_total_boards_cost(client):
 
     resp = client.post(
         "/api/v1/optimize/",
-        json=_optimize_payload(created_client["id"], created_board["id"]),
+        json=_full_board_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -309,7 +328,7 @@ def test_optimize_includes_materials_summary(client):
 
     resp = client.post(
         "/api/v1/optimize/",
-        json=_optimize_payload(created_client["id"], created_board["id"]),
+        json=_full_board_payload(created_client["id"], created_board["id"]),
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -322,6 +341,7 @@ def test_optimize_includes_materials_summary(client):
     assert entry["source"] == "catalog"
     assert entry["productCode"] == "MEL18"
     assert entry["productName"] == "Melamina MEL18"
+    assert entry["halfBoard"] is False
     assert entry["count"] == data["totalBoardsUsed"]
     assert entry["totalCost"] == pytest.approx(data["totalBoardsCost"])
 
@@ -538,3 +558,170 @@ def test_material_resolver_resolves_each_source(db_session):
     assert manual.product_id is None and manual.code is None
     assert manual.name == "Sobrante" and manual.cost_per_unit == 12.5
     assert manual.to_dict()["source"] == "manual"
+
+
+# --- Medios tableros (cobro a la mitad) ------------------------------------
+
+
+def _full_layouts(pieces, width=1220, height=2440, cost=45.5):
+    """Optimiza ``pieces`` sobre un tablero completo y devuelve los layouts."""
+    from src.cutting import (
+        CuttingParameters,
+        Material,
+        MultiSheetGuillotineOptimizer,
+        PackingStrategy,
+    )
+
+    template = Material(
+        id="b1", width=width, height=height, thickness=18, cost_per_unit=cost
+    )
+    optimizer = MultiSheetGuillotineOptimizer(
+        material_template=template,
+        cutting_params=CuttingParameters(kerf=5),
+        strategy=PackingStrategy.MAX_EFFICIENCY,
+    )
+    return optimizer.optimize(pieces)[0]
+
+
+def _resolved(source="catalog", product_id=1, width=1220, height=2440, cost=45.5):
+    from src.modules.optimizations.materials import ResolvedMaterial
+
+    return {
+        "b1": ResolvedMaterial(
+            key="b1",
+            width=width,
+            height=height,
+            thickness=18,
+            cost_per_unit=cost,
+            source=source,
+            product_id=product_id,
+            code="MEL18",
+            name="Melamina",
+        )
+    }
+
+
+def test_apply_half_boards_downgrades_fitting_board():
+    """Una plancha de catálogo cuyo contenido cabe en medio pasa a medio tablero."""
+    from src.cutting import CuttingParameters, PackingStrategy, Piece
+    from src.modules.optimizations.half_boards import apply_half_boards
+
+    layouts = _full_layouts([Piece(id="p1", width=300, height=300)])
+    results = [({}, {}, layouts)]
+    apply_half_boards(
+        results, _resolved(), CuttingParameters(kerf=5), PackingStrategy.MAX_EFFICIENCY
+    )
+
+    out = results[0][2]
+    assert len(out) == 1
+    board = out[0]
+    assert board.material.half_board is True
+    assert board.material.width == 610  # ancho/2, largo intacto
+    assert board.material.height == 2440
+    assert board.material.cost_per_unit == 22.75  # precio/2
+    assert len(board.placed_pieces) == 1  # no se pierden piezas
+
+
+def test_apply_half_boards_keeps_wide_board_full():
+    """Una pieza más ancha que medio (en ambos ejes) mantiene el tablero completo."""
+    from src.cutting import CuttingParameters, PackingStrategy, Piece
+    from src.modules.optimizations.half_boards import apply_half_boards
+
+    # 700×800: ambos lados > 610, no entra en un medio (610 de ancho).
+    layouts = _full_layouts([Piece(id="p1", width=700, height=800)])
+    results = [({}, {}, layouts)]
+    apply_half_boards(
+        results, _resolved(), CuttingParameters(kerf=5), PackingStrategy.MAX_EFFICIENCY
+    )
+
+    board = results[0][2][0]
+    assert board.material.half_board is False
+    assert board.material.width == 1220
+    assert board.material.cost_per_unit == 45.5
+
+
+def test_apply_half_boards_skips_non_catalog():
+    """Retazos/manual no se vuelven medio aunque su contenido quepa (van a costo)."""
+    from src.cutting import CuttingParameters, PackingStrategy, Piece
+    from src.modules.optimizations.half_boards import apply_half_boards
+
+    layouts = _full_layouts([Piece(id="p1", width=300, height=300)])
+    results = [({}, {}, layouts)]
+    apply_half_boards(
+        results,
+        _resolved(source="manual", product_id=None),
+        CuttingParameters(kerf=5),
+        PackingStrategy.MAX_EFFICIENCY,
+    )
+
+    board = results[0][2][0]
+    assert board.material.half_board is False
+    assert board.material.width == 1220
+
+
+def test_optimize_charges_half_board_for_sparse_job(client):
+    """Un trabajo chico de catálogo se cobra como medio tablero (precio/2)."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)  # 2440×1220, precio 45.5
+
+    payload = {
+        "clientId": created_client["id"],
+        "materials": [
+            {"key": "b1", "source": "catalog", "productId": created_board["id"]}
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 300,
+                "width": 300,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Repisa",
+                "canRotate": True,
+            }
+        ],
+    }
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    summary = data["materialsSummary"]
+    assert len(summary) == 1
+    assert summary[0]["halfBoard"] is True
+    assert summary[0]["costPerUnit"] == 22.75
+    assert summary[0]["productName"].endswith("(medio tablero)")
+    assert data["totalBoardsCost"] == 22.75
+
+    material = data["layouts"][0]["material"]
+    assert material["halfBoard"] is True
+    assert material["width"] == 610
+
+
+def test_optimize_keeps_full_board_for_wide_job(client):
+    """Un trabajo con una pieza ancha se cobra como tablero completo."""
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    payload = {
+        "clientId": created_client["id"],
+        "materials": [
+            {"key": "b1", "source": "catalog", "productId": created_board["id"]}
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 800,
+                "width": 700,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Costado",
+                "canRotate": True,
+            }
+        ],
+    }
+    data = client.post("/api/v1/optimize/", json=payload).json()["data"]
+    summary = data["materialsSummary"]
+    assert len(summary) == 1
+    assert summary[0]["halfBoard"] is False
+    assert summary[0]["costPerUnit"] == 45.5
+    assert data["totalBoardsCost"] == 45.5

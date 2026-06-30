@@ -63,6 +63,10 @@ class MaterialSummary(CamelModel):
     avg_efficiency: float
     cost_per_unit: float
     total_cost: float
+    half_board: bool = Field(
+        default=False,
+        description="True if this line is a half board (largo intacto, ancho/2, costo/2)",
+    )
 
 
 class EdgeSide(str, Enum):
@@ -298,6 +302,10 @@ class Material(CamelModel):
     width: float = Field(..., description="Width of the material (ancho)")
     thickness: float = Field(..., description="Thickness of the material")
     area: float = Field(..., description="Area of the material")
+    half_board: bool = Field(
+        default=False,
+        description="True if this sheet is a half board (largo intacto, ancho/2, costo/2)",
+    )
 
 
 class PlacedPiece(CamelModel):

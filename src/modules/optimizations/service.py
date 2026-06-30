@@ -16,6 +16,7 @@ from src.cutting import (
     Piece,
 )
 from src.modules.clients.model import ClientModel
+from src.modules.optimizations.half_boards import apply_half_boards
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import group_layouts
@@ -152,6 +153,10 @@ class OptimizationService:
                 strategy=strategy,
             )[0]
             results.append((edge_map, net_map, layouts))
+
+        # Cobro a la mitad: las planchas de catálogo cuyo contenido cabe en un medio
+        # tablero se reemplazan por el medio (ancho/2, costo/2) antes de armar el payload.
+        apply_half_boards(results, resolved, cutting_params, strategy)
 
         payload = self._build_result_payload(
             request, results, resolved, eb_products, waste_factor
@@ -443,18 +448,25 @@ class OptimizationService:
         inline cae a la key como código y a las dimensiones como nombre legible, de
         modo que la proforma renderiza sin tratamiento especial.
         """
-        summary: Dict[str, dict] = {}
+        # Clave compuesta (material, ¿medio?) para que completos y medios del mismo
+        # tablero sean líneas de cobro distintas (distinto ancho, costo y etiqueta).
+        summary: Dict[Tuple[str, bool], dict] = {}
         for layout in layouts:
             key = layout.material.id
-            if key not in summary:
+            is_half = layout.material.half_board
+            group = (key, is_half)
+            if group not in summary:
                 rm = resolved.get(key)
                 dims_label = f"{layout.material.width:g}×{layout.material.height:g}"
-                summary[key] = {
+                base_name = rm.name if rm and rm.name else dims_label
+                summary[group] = {
                     "material_key": key,
                     "source": rm.source if rm else None,
                     "product_id": rm.product_id if rm else None,
                     "product_code": (rm.code if rm and rm.code else key),
-                    "product_name": (rm.name if rm and rm.name else dims_label),
+                    "product_name": (
+                        f"{base_name} (medio tablero)" if is_half else base_name
+                    ),
                     "width": layout.material.width,
                     "height": layout.material.height,
                     "thickness": layout.material.thickness,
@@ -463,8 +475,9 @@ class OptimizationService:
                     "_efficiencies": [],
                     "cost_per_unit": layout.material.cost_per_unit,
                     "total_cost": 0.0,
+                    "half_board": is_half,
                 }
-            entry = summary[key]
+            entry = summary[group]
             entry["count"] += 1
             entry["total_area_m2"] += round(layout.material.area / 1_000_000, 4)
             entry["_efficiencies"].append(layout.efficiency * 100)

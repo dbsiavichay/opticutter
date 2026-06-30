@@ -45,8 +45,11 @@ _BRANCH = 1
 
 
 def _order_payload(
-    client_id, product_id, height=400, width=600, quantity=2, strategy=None
+    client_id, product_id, height=800, width=700, quantity=2, strategy=None
 ):
+    # Default no-halvable (ambos lados > medio ancho de 610): el cobro por tablero
+    # completo se prueba con un trabajo que no cabe en medio tablero. Los tests de
+    # medio tablero pasan dimensiones chicas explícitas.
     payload = {
         "clientId": client_id,
         "branchId": _BRANCH,
@@ -110,7 +113,7 @@ def test_create_order_freezes_snapshot_and_charges_boards(client, db_session):
     # Lista de corte = piezas (insumo de producción, no se cobra).
     assert len(data["pieces"]) == 1
     piece = data["pieces"][0]
-    assert piece["height"] == 400 and piece["width"] == 600
+    assert piece["height"] == 800 and piece["width"] == 700
     assert piece["quantity"] == 2
 
     # Historial inicial registra la creación.
@@ -308,13 +311,9 @@ def test_list_orders_filter_by_multiple_statuses(client, db_session):
 
     # o1: confirmed → queued → cutting; o2: queda confirmed; o3: queued.
     _pay = {"payment": {"cashAmount": 100.0}}
-    client.patch(
-        f"/api/v1/orders/{o1['id']}/status", json={"status": "queued", **_pay}
-    )
+    client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued", **_pay})
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "cutting"})
-    client.patch(
-        f"/api/v1/orders/{o3['id']}/status", json={"status": "queued", **_pay}
-    )
+    client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "queued", **_pay})
 
     # Repetir el parámetro filtra por varios estados a la vez.
     resp = client.get(
@@ -576,3 +575,35 @@ def test_order_freezes_chosen_packing_strategy(client, db_session):
     c2 = _create_client(client, identifier="0991110002", phone="0991110002")
     order_default = _mint_order(db_session, _order_payload(c2["id"], b["id"]))
     assert order_default.optimization_snapshot["strategy"] == "default"
+
+
+def test_order_freezes_half_board_line_and_plan(client, db_session):
+    """Un trabajo chico de catálogo congela la línea y el tablero como medio."""
+    c = _create_client(client)
+    b = _create_board(client)  # 2440×1220, precio 45.5
+
+    # Una sola pieza chica → cabe en un medio tablero (ancho 610).
+    payload = _order_payload(c["id"], b["id"], height=300, width=300, quantity=1)
+    data = _create_order(client, db_session, payload)
+
+    # Cobro a la mitad, etiquetado como medio tablero.
+    assert len(data["lines"]) == 1
+    line = data["lines"][0]
+    assert line["halfBoard"] is True
+    assert line["quantity"] == 1
+    assert line["unitPriceSnapshot"] == 22.75
+    assert line["lineTotal"] == 22.75
+    assert line["productName"].endswith("(medio tablero)")
+    assert data["total"] == data["subtotal"] == 22.75
+
+    # Plan de corte: el tablero físico es un medio (ancho/2), marcado.
+    plan = client.get(f"/api/v1/orders/{data['id']}/cutting-plan").json()["data"]
+    assert len(plan["boards"]) == 1
+    board = plan["boards"][0]
+    assert board["halfBoard"] is True
+    assert board["width"] == 610
+
+    # El documento (ORDEN DE PEDIDO) se genera con la línea de medio tablero.
+    doc = client.get(f"/api/v1/orders/{data['id']}/document")
+    assert doc.status_code == 200
+    assert doc.headers["content-type"] == "application/pdf"

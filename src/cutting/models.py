@@ -111,6 +111,10 @@ class Material:
     height: float
     thickness: float
     cost_per_unit: float = 0.0
+    # Metadato descriptivo: ``True`` si esta plancha es un medio tablero (ancho/2,
+    # costo/2). El algoritmo lo ignora; lo usan las capas superiores para agrupar el
+    # cobro y etiquetar el documento/plan de corte.
+    half_board: bool = False
 
     def __post_init__(self):
         """Valida las dimensiones del material"""
@@ -175,6 +179,7 @@ class CuttingLayout:
                 "thickness": self.material.thickness,
                 "area": self.material.area,
                 "cost_per_unit": self.material.cost_per_unit,
+                "half_board": self.material.half_board,
             },
             "placed_pieces": [p.to_dict() for p in self.placed_pieces],
             "statistics": {
