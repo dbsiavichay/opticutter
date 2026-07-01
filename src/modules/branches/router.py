@@ -16,8 +16,8 @@ from src.shared.responses import (
 
 router = APIRouter(prefix="/branches", tags=["branches"], responses=ERROR_RESPONSES)
 
-# Administración (CRUD): solo "administrador". Lectura/listado: cualquier staff
-# (para selectores y mostrar el nombre de la sucursal propia).
+# Administration (CRUD): "administrador" only. Read/list: any staff member
+# (for selectors and to show the name of their own branch).
 _READ = Depends(require_permission("branches:read"))
 _WRITE = Depends(require_permission("branches:manage"))
 
@@ -29,17 +29,17 @@ _WRITE = Depends(require_permission("branches:manage"))
     dependencies=[_WRITE],
 )
 def create_branch(data: BranchCreate, svc: BranchService = Depends(branch_service)):
-    """Crea una sucursal."""
+    """Creates a branch."""
     return ok(svc.create(data))
 
 
 @router.get("/", response_model=PaginatedResponse[BranchResponse], dependencies=[_READ])
 def list_branches(
     paging: PageParams = Depends(),
-    search: Optional[str] = Query(None, description="Búsqueda por código o nombre"),
+    search: Optional[str] = Query(None, description="Search by code or name"),
     svc: BranchService = Depends(branch_service),
 ):
-    """Lista sucursales con búsqueda y paginación opcionales."""
+    """Lists branches with optional search and pagination."""
     if search:
         items, total = svc.search_paginated(search, paging.limit, paging.offset)
     else:
@@ -51,7 +51,7 @@ def list_branches(
     "/{branch_id}", response_model=DataResponse[BranchResponse], dependencies=[_READ]
 )
 def get_branch(branch_id: int, svc: BranchService = Depends(branch_service)):
-    """Obtiene una sucursal por ID."""
+    """Gets a branch by ID."""
     return ok(svc.get_or_404(branch_id))
 
 
@@ -61,11 +61,11 @@ def get_branch(branch_id: int, svc: BranchService = Depends(branch_service)):
 def update_branch(
     branch_id: int, data: BranchUpdate, svc: BranchService = Depends(branch_service)
 ):
-    """Actualiza una sucursal (incluye baja lógica vía ``isActive``)."""
+    """Updates a branch (includes logical deactivation via ``isActive``)."""
     return ok(svc.update(branch_id, data))
 
 
 @router.delete("/{branch_id}", status_code=204, dependencies=[_WRITE])
 def delete_branch(branch_id: int, svc: BranchService = Depends(branch_service)):
-    """Elimina una sucursal."""
+    """Deletes a branch."""
     svc.delete(branch_id)

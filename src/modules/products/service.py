@@ -11,18 +11,18 @@ from src.shared.crud import CRUDService
 from src.shared.database import get_db
 from src.shared.exceptions import BusinessRuleError
 
-# Regla de negocio: ancho de tapacanto (mm) coordinado con el grosor del tablero.
-# El canto debe cubrir el canto del tablero más un margen, así que un tablero de
-# 15 mm usa cinta de 19 mm y uno de 36 mm usa cinta de 40 mm.
+# Business rule: edge banding width (mm) coordinated with the board thickness.
+# The banding must cover the board's edge plus a margin, so a 15 mm board uses
+# 19 mm tape and a 36 mm board uses 40 mm tape.
 BOARD_THICKNESS_TO_EDGE_WIDTH = {15: 19, 36: 40}
 
 
 class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
-    """CRUD del catálogo de productos + búsquedas y validación de atributos por tipo.
+    """Product catalog CRUD + searches and per-type attribute validation.
 
-    ``create``/``update`` se sobrescriben porque el payload trae un submodelo
-    ``attributes`` discriminado por ``type`` que se persiste como JSON (en la forma
-    canónica camelCase del API).
+    ``create``/``update`` are overridden because the payload carries an
+    ``attributes`` submodel discriminated by ``type`` that gets persisted as
+    JSON (in the API's canonical camelCase shape).
     """
 
     model = ProductModel
@@ -34,8 +34,8 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
     def create(self, data: ProductCreate) -> ProductModel:
         payload = data.model_dump()
         payload["type"] = data.type.value
-        # mode="json" garantiza valores JSON-serializables (enums -> su valor)
-        # para el bag ``attributes`` que se persiste en la columna JSON.
+        # mode="json" guarantees JSON-serializable values (enums -> their value)
+        # for the ``attributes`` bag persisted in the JSON column.
         payload["attributes"] = data.attributes.model_dump(by_alias=True, mode="json")
         return self._persist(ProductModel(**payload))
 
@@ -52,7 +52,7 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
         return self._persist(obj)
 
     def get_by_code(self, code: str) -> Optional[ProductModel]:
-        """Obtiene un producto por su código."""
+        """Gets a product by its code."""
         return self.db.query(ProductModel).filter(ProductModel.code == code).first()
 
     def search_paginated(
@@ -62,7 +62,7 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[ProductModel], int]:
-        """Lista productos filtrando por tipo y/o texto (código/nombre)."""
+        """Lists products filtering by type and/or text (code/name)."""
         query = self.db.query(ProductModel)
         if type is not None:
             query = query.filter(ProductModel.type == ProductType(type).value)
@@ -75,13 +75,13 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
 
     @staticmethod
     def _design_key(code: str) -> Optional[str]:
-        """Clave de diseño compartida por un tablero y su tapacanto coordinado.
+        """Design key shared by a board and its coordinated edge banding.
 
-        Los códigos siguen ``{prefijo}-{categoría}-{abreviatura}-…`` (p. ej.
-        ``MDP-SL-CSH-15`` y ``TAP-SL-CSH-045``), así que ``{categoría}-{abreviatura}``
-        (``SL-CSH``) identifica el diseño de forma única —a diferencia del ``name``,
-        que comparte tokens entre diseños (p. ej. varios "Barroco")—. Devuelve
-        ``None`` si el código no tiene suficientes segmentos.
+        Codes follow ``{prefix}-{category}-{abbreviation}-…`` (e.g.
+        ``MDP-SL-CSH-15`` and ``TAP-SL-CSH-045``), so ``{category}-{abbreviation}``
+        (``SL-CSH``) uniquely identifies the design — unlike ``name``, which
+        shares tokens across designs (e.g. several "Barroco"s). Returns ``None``
+        if the code doesn't have enough segments.
         """
         parts = code.split("-")
         if len(parts) < 3:
@@ -91,13 +91,13 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
     def find_edge_bandings_for_board(
         self, board_id: int, band_type: Optional[BandType] = None
     ) -> List[ProductModel]:
-        """Tapacantos coordinados con un tablero (mismo diseño y ancho correcto).
+        """Edge bandings coordinated with a board (same design and correct width).
 
-        Empareja por la clave de diseño del código (no por nombre, que da falsos
-        positivos) y aplica la regla grosor→ancho (``BOARD_THICKNESS_TO_EDGE_WIDTH``).
-        Filtra de forma opcional por tipo de canto (``BandType``). Devuelve ``[]`` si
-        no hay coordinado para esa combinación (hueco real del catálogo, p. ej. canto
-        suave para un tablero de 36 mm).
+        Matches on the design key derived from the code (not the name, which
+        produces false positives) and applies the thickness→width rule
+        (``BOARD_THICKNESS_TO_EDGE_WIDTH``). Optionally filters by band type
+        (``BandType``). Returns ``[]`` if there's no match for that combination
+        (a real catalog gap, e.g. soft banding for a 36 mm board).
         """
         board = self.get_or_404(board_id)
         if board.type != ProductType.BOARD.value:
@@ -133,5 +133,5 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
 
 
 def product_service(db: Session = Depends(get_db)) -> ProductService:
-    """Provider de ``ProductService`` para inyección en rutas."""
+    """``ProductService`` provider for route injection."""
     return ProductService(db)

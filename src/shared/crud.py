@@ -16,12 +16,12 @@ UpdateT = TypeVar("UpdateT", bound=BaseModel)
 
 
 class CRUDService(Generic[ModelT, CreateT, UpdateT]):
-    """Servicio CRUD genérico sobre un modelo ORM.
+    """Generic CRUD service over an ORM model.
 
-    Las subclases definen ``model`` y, opcionalmente, ``conflict_messages``
-    (substring de la restricción -> mensaje legible) y métodos específicos.
+    Subclasses define ``model`` and, optionally, ``conflict_messages``
+    (constraint substring -> readable message) and entity-specific methods.
 
-    Reemplaza el CRUD repetido en los servicios y los repositorios por entidad.
+    Replaces the CRUD logic repeated across per-entity services and repositories.
     """
 
     model: Type[ModelT]
@@ -42,13 +42,13 @@ class CRUDService(Generic[ModelT, CreateT, UpdateT]):
     def list_paginated(
         self, limit: int = 20, offset: int = 0
     ) -> Tuple[List[ModelT], int]:
-        """Página de registros más su conteo total: ``(items, total)``."""
+        """A page of records plus its total count: ``(items, total)``."""
         return self._paginate(self.db.query(self.model), limit, offset)
 
     def _paginate(
         self, query: Query, limit: int, offset: int
     ) -> Tuple[List[ModelT], int]:
-        """Cuenta el total y devuelve la página, reusable por búsquedas de slice."""
+        """Counts the total and returns the page; reusable by filtered searches."""
         total = query.count()
         items = query.offset(offset).limit(limit).all()
         return items, total
@@ -63,19 +63,19 @@ class CRUDService(Generic[ModelT, CreateT, UpdateT]):
         return self._persist(obj)
 
     def _stamp_actor(self, obj: ModelT) -> None:
-        """Estampa ``created_by``/``updated_by`` desde el usuario del request.
+        """Stamps ``created_by``/``updated_by`` from the request's user.
 
-        Centralizado en ``_persist`` para cubrir también los servicios que lo
-        invocan directo (p. ej. ``ProductService``). Distingue alta de edición por
-        la identidad del objeto (transitorio = aún sin PK = creación). No-op para
-        modelos sin ``AuditMixin`` o requests sin usuario (públicos).
+        Centralized in ``_persist`` to also cover services that call it
+        directly (e.g. ``ProductService``). Distinguishes create from update by
+        the object's identity (transient = no PK yet = creation). No-op for
+        models without ``AuditMixin`` or requests without a user (public).
         """
         if not isinstance(obj, AuditMixin):
             return
         user_id = get_current_user_id()
         if user_id is None:
             return
-        if inspect(obj).identity is None:  # transitorio: es un alta
+        if inspect(obj).identity is None:  # transient: this is a create
             obj.created_by = user_id
         obj.updated_by = user_id
 

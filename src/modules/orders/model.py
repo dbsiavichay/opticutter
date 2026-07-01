@@ -20,16 +20,16 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class OrderStatus(str, Enum):
-    """Estados del proceso de CORTE de una orden.
+    """States of an order's CUTTING process.
 
-    La revisión previa del cliente (cotización mutable) vive en la pre-orden; una
-    orden nace ya ``confirmed`` y desde ahí sólo avanza por producción. ``queued``
-    es la cola de taller: la orden está lista pero el corte aún no empieza (entrar
-    a ``cutting`` marca el inicio del corte; ``cut`` su fin).
+    The client's pre-purchase review (mutable quote) lives in the pre-order; an
+    order is born ``confirmed`` and from there only advances through production.
+    ``queued`` is the workshop queue: the order is ready but cutting hasn't started
+    yet (entering ``cutting`` marks the start of the cut; ``cut`` marks its end).
 
-    El CANTEADO corre en una pista paralela e independiente (``BandingStatus``): el
-    canteador puede ir canteando piezas que el operador libera, sin esperar a que
-    todo el corte termine.
+    EDGE BANDING runs on a parallel, independent track (``BandingStatus``): the
+    bander can band pieces the operator releases without waiting for the whole
+    cut to finish.
     """
 
     confirmed = "confirmed"
@@ -42,11 +42,12 @@ class OrderStatus(str, Enum):
 
 
 class BandingStatus(str, Enum):
-    """Estado de la pista paralela de CANTEADO (tapacantos).
+    """Status of the parallel EDGE BANDING track.
 
-    Dimensión ortogonal a ``OrderStatus``: avanza por su cuenta mientras el corte
-    sigue su curso. ``not_applicable`` = la orden no lleva tapacantos (nada que
-    cantear). El canteador la mueve ``pending → in_progress → done``.
+    Orthogonal dimension to ``OrderStatus``: it advances on its own while
+    cutting follows its course. ``not_applicable`` = the order has no edge
+    banding (nothing to band). The bander moves it ``pending → in_progress →
+    done``.
     """
 
     not_applicable = "not_applicable"
@@ -55,23 +56,24 @@ class BandingStatus(str, Enum):
     done = "done"
 
 
-# Estados de canteado que aún bloquean el cierre de la orden (queda canteado por hacer).
+# Banding statuses that still block closing the order (banding work remains).
 BANDING_PENDING_STATUSES = {BandingStatus.pending, BandingStatus.in_progress}
 
-# Estados de corte en los que el canteado puede registrarse (ya hay piezas liberadas).
+# Cutting statuses in which banding can be registered (pieces are already released).
 BANDING_MUTABLE_ORDER_STATUSES = {OrderStatus.cutting, OrderStatus.cut}
 
-# Estados sin salida: la orden ya no se transforma. ``dispatched`` (mercadería
-# entregada al cliente) es el cierre real del ciclo; ``completed`` deja de ser
-# terminal en el grafo (avanza a ``dispatched``) pero sigue contando como "no
-# activa" para el control de duplicados/cap de pendientes.
+# Statuses with no outgoing transition: the order no longer changes.
+# ``dispatched`` (goods handed to the client) is the real end of the cycle;
+# ``completed`` is no longer terminal in the graph (it advances to
+# ``dispatched``) but still counts as "not active" for duplicate
+# detection/pending-order cap purposes.
 TERMINAL_STATUSES = {
     OrderStatus.completed,
     OrderStatus.dispatched,
     OrderStatus.cancelled,
 }
 
-# Mapa de transiciones válidas de la máquina de estados.
+# Map of valid state-machine transitions.
 TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.confirmed: {OrderStatus.queued, OrderStatus.cancelled},
     OrderStatus.queued: {OrderStatus.cutting},
@@ -82,7 +84,7 @@ TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.cancelled: set(),
 }
 
-# Qué roles pueden ejecutar cada transición (from, to) → roles permitidos.
+# Which roles can execute each transition (from, to) → allowed roles.
 TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = {
     (OrderStatus.confirmed, OrderStatus.queued): (
         UserRole.ADMIN,
@@ -96,8 +98,8 @@ TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = 
     (OrderStatus.cutting, OrderStatus.queued): (UserRole.ADMIN,),
     (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
     (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
-    # El despacho (entrega física) lo puede registrar cualquier rol: quien entregue
-    # la mercadería. Se lista a todos explícitamente en vez de omitir la entrada.
+    # Dispatch (physical handover) can be registered by any role: whoever hands
+    # over the goods. All roles are listed explicitly instead of omitting the entry.
     (OrderStatus.completed, OrderStatus.dispatched): (
         UserRole.ADMIN,
         UserRole.SELLER,
@@ -106,27 +108,27 @@ TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = 
     ),
 }
 
-# Transiciones válidas de la pista de canteado (forward-only; re-aplicar = idempotente).
+# Valid transitions of the banding track (forward-only; re-applying is idempotent).
 BANDING_TRANSITIONS: dict[BandingStatus, set[BandingStatus]] = {
     BandingStatus.pending: {BandingStatus.in_progress},
     BandingStatus.in_progress: {BandingStatus.done},
     BandingStatus.done: set(),
 }
 
-# Qué roles pueden mover la pista de canteado.
+# Which roles can move the banding track.
 BANDING_TRANSITION_ROLES: tuple[UserRole, ...] = (UserRole.ADMIN, UserRole.BANDER)
 
 
 class OrderModel(TimestampMixin, AuditMixin, Base):
-    """Raíz de agregado: pedido con snapshot inmutable y máquina de estados."""
+    """Aggregate root: order with an immutable snapshot and a state machine."""
 
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
-    # Sucursal dueña de la orden: hecho histórico inmutable (heredado de la pre-orden
-    # al confirmar). Mover de sucursal a un vendedor no reasigna sus órdenes pasadas.
+    # Branch that owns the order: immutable historical fact (inherited from the
+    # pre-order on confirmation). Reassigning a seller's branch doesn't move their past orders.
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=OrderStatus.confirmed.value)
 
@@ -134,9 +136,9 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     optimization_hash: Mapped[str] = mapped_column(String(64))
 
     currency: Mapped[str] = mapped_column(String(8), default="USD")
-    # subtotal = suma a precio de lista (tableros + tapacantos); total = subtotal menos
-    # el descuento del nivel de precio congelado (price_tier_code/discount_rate). El
-    # rate se congela aquí para preservar el histórico aunque luego cambien las tarifas.
+    # subtotal = sum at list price (boards + edge banding); total = subtotal minus
+    # the discount of the frozen price tier (price_tier_code/discount_rate). The
+    # rate is frozen here to preserve history even if rates change later.
     subtotal: Mapped[float] = mapped_column(Float)
     total: Mapped[float] = mapped_column(Float)
     price_tier_code: Mapped[str] = mapped_column(
@@ -156,15 +158,15 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
 
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
-    # Operador autoasignado: se rellena al transicionar a ``cutting``.
+    # Self-assigned operator: filled in when transitioning to ``cutting``.
     assigned_to_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
     assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     assigned_to_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
-    # Despacho (entrega física al cliente): se congela al transicionar a
-    # ``dispatched``. La hoja de despacho muestra esta fecha y quién entregó.
+    # Dispatch (physical handover to the client): frozen when transitioning to
+    # ``dispatched``. The dispatch sheet shows this date and who handed it over.
     dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     dispatched_by: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"), nullable=True
@@ -173,14 +175,15 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         String(128), nullable=True
     )
 
-    # Forma de pago (informativa): se captura al transicionar de ``confirmed`` a
-    # ``queued``. Una orden puede pagarse con ambos métodos a la vez; el método
-    # usado se infiere de qué monto es > 0. No afecta precios ni el cobro.
+    # Payment method (informational only): captured when transitioning from
+    # ``confirmed`` to ``queued``. An order can be paid with both methods at
+    # once; the method used is inferred from which amount is > 0. Doesn't affect
+    # pricing or billing.
     payment_cash_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     payment_credit_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Pista de CANTEADO (paralela al corte): el canteador marca inicio/fin. Se fija
-    # a ``pending`` al crear si la orden lleva tapacantos, si no ``not_applicable``.
+    # EDGE BANDING track (parallel to cutting): the bander marks start/finish. Set
+    # to ``pending`` on creation if the order has edge banding, else ``not_applicable``.
     banding_status: Mapped[str] = mapped_column(
         String(16),
         default=BandingStatus.not_applicable.value,
@@ -228,13 +231,13 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
 
 
 class OrderLineModel(TimestampMixin, AuditMixin, Base):
-    """Línea de COBRO: un producto facturado (cantidad × precio congelado).
+    """BILLING line: a charged product (quantity × frozen price).
 
-    Hoy el cobro es por tableros usados; el modelo admite cualquier producto
-    (tablero, tapacanto, herraje) para órdenes mixtas futuras.
+    Today billing is by boards used; the model supports any product (board,
+    edge banding, hardware) for future mixed orders.
 
-    ``product_id`` es nulo para materiales fuera del catálogo (retazos o medidas
-    manuales): esos se identifican por ``product_code``/``product_name``.
+    ``product_id`` is null for materials outside the catalog (offcuts or
+    manual measurements): those are identified by ``product_code``/``product_name``.
     """
 
     __tablename__ = "order_lines"
@@ -251,11 +254,11 @@ class OrderLineModel(TimestampMixin, AuditMixin, Base):
     line_total: Mapped[float] = mapped_column(Float)
     avg_efficiency: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     total_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # Tapacanto: metros lineales exactos (con merma) para mostrar; ``quantity``
-    # guarda los metros enteros cobrados. Nulo para tableros.
+    # Edge banding: exact linear meters (incl. waste) for display; ``quantity``
+    # stores the whole meters billed. Null for boards.
     linear_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # Medio tablero: la línea se cobró a la mitad (ancho/2, costo/2). False para
-    # tableros completos y tapacantos.
+    # Half board: the line was charged at half (width/2, cost/2). False for
+    # full boards and edge banding.
     half_board: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
@@ -264,10 +267,11 @@ class OrderLineModel(TimestampMixin, AuditMixin, Base):
 
 
 class OrderPieceModel(TimestampMixin, AuditMixin, Base):
-    """Pieza de la LISTA DE CORTE (insumo de producción; no se cobra).
+    """Piece of the CUT LIST (production input; not billed).
 
-    ``product_id`` referencia el tablero (producto tipo ``board``) del que se corta;
-    es nulo cuando el material está fuera del catálogo (retazo o medida manual).
+    ``product_id`` references the board (``board``-type product) it's cut
+    from; it's null when the material is outside the catalog (offcut or
+    manual measurement).
     """
 
     __tablename__ = "order_pieces"
@@ -283,20 +287,20 @@ class OrderPieceModel(TimestampMixin, AuditMixin, Base):
     quantity: Mapped[int] = mapped_column(Integer)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     can_rotate: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Tapacanto de la pieza (lados nominales + producto), p. ej.
-    # ``{"product_id": 42, "sides": ["top", "left"]}``. Nulo si no lleva canto.
+    # Piece edge banding (nominal sides + product), e.g.
+    # ``{"product_id": 42, "sides": ["top", "left"]}``. Null if not banded.
     edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="pieces")
 
 
 class OrderBoardModel(TimestampMixin, AuditMixin, Base):
-    """Tablero FÍSICO del plan de corte, materializado desde el snapshot.
+    """PHYSICAL board of the cutting plan, materialized from the snapshot.
 
-    Cada fila es una hoja real a cortar (los ``layout_groups`` del snapshot solo
-    deduplican la vista). ``sheet_number`` es la secuencia global 1..N dentro de
-    la orden (el ``sheet_number`` del snapshot se reinicia por material).
-    ``product_id`` es nulo para materiales fuera del catálogo (retazo/manual).
+    Each row is a real sheet to cut (the snapshot's ``layout_groups`` only
+    deduplicate the view). ``sheet_number`` is the global 1..N sequence
+    within the order (the snapshot's ``sheet_number`` resets per material).
+    ``product_id`` is null for materials outside the catalog (offcut/manual).
     """
 
     __tablename__ = "order_boards"
@@ -313,15 +317,15 @@ class OrderBoardModel(TimestampMixin, AuditMixin, Base):
     width: Mapped[float] = mapped_column(Float)
     height: Mapped[float] = mapped_column(Float)
     thickness: Mapped[float] = mapped_column(Float)
-    # Medio tablero físico: el operario corta/usa un medio (ancho/2). El ``width`` ya
-    # llega partido; este flag lo marca explícito para la vista de taller.
+    # Physical half board: the operator cuts/uses a half (width/2). ``width``
+    # already arrives split; this flag makes it explicit for the workshop view.
     half_board: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
-    # Rectángulos sobrantes del snapshot (display + futuro inventario de retazos).
+    # Leftover rectangles from the snapshot (display + future offcut inventory).
     remainders: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    # Cortes de guillotina (recorridos de sierra) para dibujar las líneas de corte.
-    # Nulo en órdenes cuyo snapshot es previo a la serialización de ``cuts``.
+    # Guillotine saw cuts, used to draw the cut lines. Null in orders whose
+    # snapshot predates the serialization of ``cuts``.
     cuts: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel", back_populates="boards")
@@ -334,12 +338,12 @@ class OrderBoardModel(TimestampMixin, AuditMixin, Base):
 
 
 class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
-    """Pieza COLOCADA en un tablero físico: la unidad que el operario marca.
+    """Piece PLACED on a physical board: the unit the operator marks.
 
-    Geometría ya rotada (x, y, width, height) lista para dibujar; las dims
-    nominales (``original_*``) sirven para agrupar piezas iguales en el front.
-    ``piece_id`` conserva la identidad de instancia del snapshot (``label#N``).
-    ``cut_at`` nulo = pendiente de corte; con fecha = cortada.
+    Geometry is already rotated (x, y, width, height) and ready to draw; the
+    nominal dims (``original_*``) are used to group identical pieces on the
+    frontend. ``piece_id`` preserves the snapshot's instance identity
+    (``label#N``). ``cut_at`` null = pending cut; with a date = cut.
     """
 
     __tablename__ = "order_placed_pieces"
@@ -356,11 +360,11 @@ class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
     original_width: Mapped[float] = mapped_column(Float)
     original_height: Mapped[float] = mapped_column(Float)
     rotated: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Lados canteados geométricos, tal cual el snapshot (nulo si no lleva canto).
+    # Geometric banded sides, as-is from the snapshot (null if not banded).
     edges: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     cut_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # Quién marcó la pieza como cortada: FK al operario + etiqueta congelada.
-    # NULL mientras esté pendiente (en sincronía con ``cut_at``).
+    # Who marked the piece as cut: FK to the operator + frozen label.
+    # NULL while pending (in sync with ``cut_at``).
     cut_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     cut_by_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
@@ -371,11 +375,11 @@ class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
 
 
 class OrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
-    """Auditoría de transiciones de estado de una orden.
+    """Audit trail of an order's state transitions.
 
-    ``actor`` es el TIPO de actor (``staff``/``client``/``system``); ``actor_user_id``
-    es la FK al usuario de staff (NULL para cliente/sistema) y ``actor_label`` el
-    snapshot legible del nombre al momento del hecho.
+    ``actor`` is the actor TYPE (``staff``/``client``/``system``);
+    ``actor_user_id`` is the FK to the staff user (NULL for client/system) and
+    ``actor_label`` is the human-readable name snapshot at the time of the event.
     """
 
     __tablename__ = "order_status_history"

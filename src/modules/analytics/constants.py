@@ -1,8 +1,8 @@
-"""Semántica compartida de la analítica: estados de ingreso, granularidad y utilidades.
+"""Shared analytics semantics: revenue states, granularity and utilities.
 
-Es la columna vertebral del módulo: todos los endpoints coinciden en qué estados
-cuentan como ingreso realizado/comprometido/perdido. Reutiliza ``OrderStatus`` y los
-sets ya definidos en el módulo de órdenes en lugar de repetir strings.
+This is the module's backbone: every endpoint agrees on which states count as
+realized/booked/lost revenue. Reuses ``OrderStatus`` and the sets already
+defined in the orders module instead of repeating strings.
 """
 
 from enum import Enum
@@ -10,13 +10,13 @@ from typing import Iterable
 
 from src.modules.orders.model import OrderStatus
 
-# Ingreso ganado: la orden llegó a su fin productivo (completada o ya despachada).
+# Realized revenue: the order reached its productive end (completed or already dispatched).
 REALIZED_STATUSES = {OrderStatus.completed, OrderStatus.dispatched}
 
-# Ingreso perdido: no se cobrará nunca.
+# Lost revenue: will never be charged.
 LOST_STATUSES = {OrderStatus.cancelled}
 
-# Pipeline comprometido: vinculado pero aún no completado.
+# Booked pipeline: committed but not yet completed.
 BOOKED_STATUSES = {
     OrderStatus.confirmed,
     OrderStatus.queued,
@@ -24,10 +24,10 @@ BOOKED_STATUSES = {
     OrderStatus.cut,
 }
 
-# Pendientes (abiertas, pre-producción): vinculadas pero aún sin entrar a taller.
+# Pending (open, pre-production): committed but not yet in the workshop.
 PENDING_STATUSES = {OrderStatus.confirmed}
 
-# Etiquetas legibles por estado para los desgloses (eje del embudo).
+# Readable label per status for breakdowns (funnel axis). User-facing copy.
 STATUS_LABELS = {
     OrderStatus.confirmed: "Confirmada",
     OrderStatus.queued: "En cola",
@@ -38,9 +38,10 @@ STATUS_LABELS = {
     OrderStatus.cancelled: "Cancelada",
 }
 
-# --- Etapas del proceso (cuellos de botella) ----------------------------------
-# Cinco etapas se derivan de pares consecutivos del historial de estados; la sexta
-# (``banding``) sale de las columnas de canteado (pista paralela, fuera del historial).
+# --- Process stages (bottlenecks) ----------------------------------------------
+# Five stages are derived from consecutive pairs in the status history; the sixth
+# (``banding``) comes from the banding columns (parallel track, outside the history).
+# User-facing labels below.
 STAGE_LABELS = {
     "confirm": "Confirmación → Cola",
     "queue_wait": "Espera en cola (taller)",
@@ -50,10 +51,10 @@ STAGE_LABELS = {
     "banding": "Canteado",
 }
 
-# Orden de presentación (flujo del proceso); el reporte luego ordena por duración.
+# Display order (process flow); the report then sorts by duration.
 STAGE_ORDER = list(STAGE_LABELS.keys())
 
-# Par (from_status, to_status) del historial → etapa nombrada.
+# (from_status, to_status) pair from the history → named stage.
 STATUS_PAIR_TO_STAGE = {
     (OrderStatus.confirmed.value, OrderStatus.queued.value): "confirm",
     (OrderStatus.queued.value, OrderStatus.cutting.value): "queue_wait",
@@ -64,7 +65,7 @@ STATUS_PAIR_TO_STAGE = {
 
 
 class Granularity(str, Enum):
-    """Tamaño de bucket para las series temporales."""
+    """Bucket size for the time series."""
 
     day = "day"
     week = "week"
@@ -72,20 +73,20 @@ class Granularity(str, Enum):
 
 
 def status_values(statuses: Iterable[OrderStatus]) -> list[str]:
-    """Proyecta un conjunto de estados a sus valores string (para ``.in_(...)``)."""
+    """Projects a set of statuses to their string values (for ``.in_(...)``)."""
     return [s.value for s in statuses]
 
 
 def safe_div(num: float, denom: float) -> float:
-    """División protegida: devuelve ``0.0`` si el denominador es cero."""
+    """Safe division: returns ``0.0`` if the denominator is zero."""
     return num / denom if denom else 0.0
 
 
 def percentile(values: list[float], q: float) -> float:
-    """Percentil ``q`` (0..1) por interpolación lineal; ``0.0`` si no hay muestras.
+    """``q`` percentile (0..1) via linear interpolation; ``0.0`` if there are no samples.
 
-    Útil para detectar cuellos de botella: el p90 revela la cola lenta que el
-    promedio esconde (pocas órdenes muy demoradas).
+    Useful for spotting bottlenecks: p90 reveals the slow tail that the
+    average hides (a few orders that took much longer).
     """
     if not values:
         return 0.0

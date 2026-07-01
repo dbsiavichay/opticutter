@@ -8,9 +8,9 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class OptimizationModel(TimestampMixin, AuditMixin, Base):
-    """Modelo ORM de la tabla ``optimizations`` (conservada, pero ya sin escrituras:
-    las optimizaciones son cache-only desde S2). Sin relación ORM hacia ``clients``:
-    el cómputo es efímero y la orden es la raíz durable."""
+    """ORM model for the ``optimizations`` table (kept around, but no longer written to:
+    optimizations have been cache-only since S2). No ORM relationship to ``clients``:
+    the computation is ephemeral and the order is the durable root."""
 
     __tablename__ = "optimizations"
 

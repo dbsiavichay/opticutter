@@ -1,7 +1,7 @@
-"""Tests del módulo analytics: summary, timeseries, breakdown de estados y operaciones.
+"""Tests for the analytics module: summary, timeseries, status breakdown, and operations.
 
-Se siembra directo por ``db_session`` para fijar estados, ``created_at`` e historial con
-precisión (la máquina de estados no deja alcanzar todos los casos limpio).
+Seeding goes straight through ``db_session`` to pin statuses, ``created_at``, and history
+precisely (the state machine doesn't let every case be reached cleanly).
 """
 
 from datetime import datetime
@@ -34,7 +34,7 @@ def _board_line(efficiency, area, *, qty=2, price=45.5):
 
 
 def _edge_line(linear_m, *, price=1.5):
-    """Línea de tapacanto: sin área/eficiencia (no debe contaminar la ponderación)."""
+    """Edge-banding line: no area/efficiency (must not contaminate the weighting)."""
     return OrderLineModel(
         product_id=None,
         quantity=int(linear_m),
@@ -81,7 +81,7 @@ def _seed_order(
 
 
 def _seed_clients(db, n=1):
-    """Siembra n clientes con identifiers únicos; el primero obtiene id=1, etc."""
+    """Seed n clients with unique identifiers; the first one gets id=1, and so on."""
     clients = [ClientModel(identifier=f"TEST{i:07d}") for i in range(1, n + 1)]
     for c in clients:
         db.add(c)
@@ -195,11 +195,11 @@ def test_summary_revenue_and_rates_isolated_by_status(client, db_session):
     data = client.get("/api/v1/analytics/summary", params=_RANGE).json()["data"]
 
     assert data["orderCount"] == 3
-    assert data["realizedRevenue"] == 100.0  # solo completed
-    assert data["averageTicket"] == 100.0  # 100 / 1 completada
+    assert data["realizedRevenue"] == 100.0  # completed only
+    assert data["averageTicket"] == 100.0  # 100 / 1 completed order
     assert data["pendingOrdersCount"] == 1  # confirmed
     assert data["cancellationRate"] == round(1 / 3, 4)  # 1 / 3
-    assert data["activeClientsCount"] == 2  # clientes 1 y 2 distintos
+    assert data["activeClientsCount"] == 2  # clients 1 and 2 are distinct
 
 
 def test_summary_efficiency_is_area_weighted_and_ignores_edge_banding(
@@ -218,7 +218,7 @@ def test_summary_efficiency_is_area_weighted_and_ignores_edge_banding(
 
     data = client.get("/api/v1/analytics/summary", params=_RANGE).json()["data"]
 
-    # Ponderada: (90*10 + 70*30) / (10+30) = 3000/40 = 75.0
+    # Weighted: (90*10 + 70*30) / (10+30) = 3000/40 = 75.0
     assert data["averageEfficiency"] == 75.0
     assert data["totalAreaCutM2"] == 40.0
     assert data["wasteEstimateM2"] == 10.0  # 40 * (1 - 0.75)
@@ -301,7 +301,7 @@ def test_timeseries_monthly_crosses_year_boundary(client, db_session):
 
 def test_timeseries_weekly_buckets(client, db_session):
     _seed_clients(db_session)
-    # 2026-06-01 es lunes; las semanas ISO arrancan en 06-01 y 06-08.
+    # 2026-06-01 is a Monday; ISO weeks start on 06-01 and 06-08.
     _seed_order(db_session, total=100.0, created_at=datetime(2026, 6, 3, 9, 0))
     _seed_order(db_session, total=50.0, created_at=datetime(2026, 6, 10, 9, 0))
 
@@ -316,12 +316,12 @@ def test_timeseries_weekly_buckets(client, db_session):
 
 def test_timeseries_new_clients_counts_first_order_only(client, db_session):
     _seed_clients(db_session, 3)
-    # Cliente 1: primer pedido el 06-01, segundo el 06-02 (no recuenta).
+    # Client 1: first order on 06-01, second on 06-02 (doesn't recount).
     _seed_order(db_session, client_id=1, created_at=datetime(2026, 6, 1, 9, 0))
     _seed_order(db_session, client_id=1, created_at=datetime(2026, 6, 2, 9, 0))
-    # Cliente 2: nuevo el 06-02.
+    # Client 2: new on 06-02.
     _seed_order(db_session, client_id=2, created_at=datetime(2026, 6, 2, 9, 0))
-    # Cliente 3: su primer pedido fue antes del rango → no es "nuevo" aquí.
+    # Client 3: their first order was before the range, so not "new" here.
     _seed_order(db_session, client_id=3, created_at=datetime(2026, 5, 1, 9, 0))
     _seed_order(db_session, client_id=3, created_at=datetime(2026, 6, 2, 9, 0))
 
@@ -345,14 +345,14 @@ def test_breakdown_status_densifies_all_states(client, db_session):
     ]
 
     assert data["dimension"] == "status"
-    assert len(data["items"]) == 7  # todos los OrderStatus
+    assert len(data["items"]) == 7  # every OrderStatus
     by_key = {it["key"]: it for it in data["items"]}
     assert by_key["completed"]["orderCount"] == 2
     assert by_key["completed"]["revenue"] == 300.0
     assert by_key["completed"]["label"] == "Completada"
     assert by_key["cancelled"]["orderCount"] == 1
     assert by_key["cancelled"]["revenue"] == 50.0
-    assert by_key["confirmed"]["orderCount"] == 0  # densificado en cero
+    assert by_key["confirmed"]["orderCount"] == 0  # densified to zero
 
 
 def test_breakdown_status_empty_range(client):
@@ -380,13 +380,13 @@ def test_operations_empty_range(client):
     assert data["averageEfficiency"] == 0
     assert data["totalAreaCutM2"] == 0
     assert data["wasteEstimateM2"] == 0
-    assert "lifecycle" not in data  # el ciclo de vida vive en /bottlenecks
+    assert "lifecycle" not in data  # lifecycle lives in /bottlenecks
 
 
 # ------------------------------------------------------------------ bottlenecks
 def test_bottlenecks_stage_durations_and_slowest_first(client, db_session):
     _seed_clients(db_session)
-    # Espera en cola = 1h; corte = 6h (el cuello de botella).
+    # Queue wait = 1h; cutting = 6h (the bottleneck).
     history = [
         _hist("confirmed", datetime(2026, 6, 15, 0, 0)),
         _hist("queued", datetime(2026, 6, 15, 1, 0), from_status="confirmed"),
@@ -397,17 +397,17 @@ def test_bottlenecks_stage_durations_and_slowest_first(client, db_session):
 
     data = client.get("/api/v1/analytics/bottlenecks", params=_RANGE).json()["data"]
     stages = {s["key"]: s for s in data["stages"]}
-    assert len(data["stages"]) == 6  # las 6 etapas densificadas
+    assert len(data["stages"]) == 6  # the 6 densified stages
     assert stages["queue_wait"]["avgHours"] == 1.0
     assert stages["queue_wait"]["sampleCount"] == 1
     assert stages["cutting"]["avgHours"] == 6.0
     assert stages["cutting"]["medianHours"] == 6.0
     assert stages["cutting"]["p90Hours"] == 6.0
     assert stages["cutting"]["label"] == "Corte"
-    # Ordenado por mediana desc: el corte (6h) va antes que la espera en cola (1h).
+    # Sorted by median desc: cutting (6h) comes before queue wait (1h).
     keys = [s["key"] for s in data["stages"]]
     assert keys.index("cutting") < keys.index("queue_wait")
-    # Etapas sin muestras quedan en cero (densificadas).
+    # Stages with no samples stay at zero (densified).
     assert stages["dispatch_wait"]["sampleCount"] == 0
     assert stages["dispatch_wait"]["avgHours"] == 0.0
 
@@ -416,7 +416,7 @@ def test_bottlenecks_banding_stage_from_columns(client, db_session):
     _seed_clients(db_session)
     order = _seed_order(db_session, status="cut")
     order.banding_started_at = datetime(2026, 6, 15, 10, 0)
-    order.banding_finished_at = datetime(2026, 6, 15, 13, 0)  # 3h de canteado
+    order.banding_finished_at = datetime(2026, 6, 15, 13, 0)  # 3h of edge banding
     db_session.commit()
 
     data = client.get("/api/v1/analytics/bottlenecks", params=_RANGE).json()["data"]
@@ -427,7 +427,7 @@ def test_bottlenecks_banding_stage_from_columns(client, db_session):
 
 def test_bottlenecks_median_and_p90_across_orders(client, db_session):
     _seed_clients(db_session)
-    # Tres cortes de 2h, 4h y 10h → mediana 4h, p90 alto (cola lenta).
+    # Three cuts of 2h, 4h, and 10h -> median 4h, high p90 (slow tail).
     for end_hour in (2, 4, 10):
         history = [
             _hist("cutting", datetime(2026, 6, 15, 0, 0)),
@@ -439,7 +439,7 @@ def test_bottlenecks_median_and_p90_across_orders(client, db_session):
     cutting = next(s for s in data["stages"] if s["key"] == "cutting")
     assert cutting["sampleCount"] == 3
     assert cutting["medianHours"] == 4.0
-    assert cutting["p90Hours"] > 4.0  # el p90 expone la orden de 10h
+    assert cutting["p90Hours"] > 4.0  # the p90 exposes the 10h order
 
 
 def test_bottlenecks_series_places_duration_in_bucket(client, db_session):
@@ -458,7 +458,7 @@ def test_bottlenecks_series_places_duration_in_bucket(client, db_session):
     ).json()["data"]
     assert data["buckets"] == ["2026-06-01", "2026-06-02", "2026-06-03"]
     cutting = next(s for s in data["series"] if s["key"] == "cutting")
-    # El corte cierra el 06-02 → su duración cae en ese bucket.
+    # Cutting closes on 06-02, so its duration falls in that bucket.
     assert cutting["avgHours"] == [0.0, 3.0, 0.0]
 
 
@@ -487,10 +487,10 @@ def test_user_productivity_operator_cutting(client, db_session):
     row = next(u for u in data["users"] if u["userId"] == op.id)
     assert row["role"] == "operador"
     assert row["piecesCut"] == 2
-    assert row["areaCutM2"] == 0.48  # 2 piezas de 600x400mm = 0.24 m² c/u
+    assert row["areaCutM2"] == 0.48  # 2 pieces of 600x400mm = 0.24 m² each
     assert row["ordersCut"] == 1
     assert row["cuttingHours"] == 2.0
-    assert row["piecesPerHour"] == 1.0  # 2 piezas / 2h
+    assert row["piecesPerHour"] == 1.0  # 2 pieces / 2h
 
 
 def test_user_productivity_seller_and_bander(client, db_session):
@@ -534,8 +534,8 @@ def test_user_productivity_filters_by_role(client, db_session):
 def test_attendance_first_login_per_day(client, db_session):
     op = _seed_user(db_session, role="operador", full_name="Op Uno")
     _seed_login(db_session, op.id, datetime(2026, 6, 15, 8, 5))
-    _seed_login(db_session, op.id, datetime(2026, 6, 15, 13, 30))  # misma jornada
-    _seed_login(db_session, op.id, datetime(2026, 6, 16, 7, 50))  # otro día
+    _seed_login(db_session, op.id, datetime(2026, 6, 15, 13, 30))  # same day
+    _seed_login(db_session, op.id, datetime(2026, 6, 16, 7, 50))  # different day
 
     data = client.get("/api/v1/analytics/attendance", params=_RANGE).json()["data"]
     row = next(u for u in data["users"] if u["userId"] == op.id)
@@ -559,7 +559,7 @@ def test_attendance_filters_by_role(client, db_session):
 
 
 def test_attendance_empty_range(client):
-    # Rango lejano en el pasado: ningún login cae ahí (ni el del admin de conftest).
+    # Range far in the past: no login falls there (not even conftest's admin).
     data = client.get(
         "/api/v1/analytics/attendance",
         params={"from": "2020-01-01", "to": "2020-01-31"},

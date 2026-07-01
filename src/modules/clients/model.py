@@ -8,7 +8,7 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class ClientModel(TimestampMixin, AuditMixin, Base):
-    """Modelo ORM para clientes."""
+    """ORM model for clients."""
 
     __tablename__ = "clients"
 
@@ -17,8 +17,8 @@ class ClientModel(TimestampMixin, AuditMixin, Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     source: Mapped[Optional[str]] = mapped_column(String(64))
-    # Celular y email: nullable porque el cliente se crea perezosamente (resolve) antes
-    # de conocerse. Exigir el celular es una regla de negocio al generar proforma/orden,
-    # no un constraint de creación.
+    # Phone and email are nullable because the client is created lazily (resolve)
+    # before either is known. Requiring the phone is a business rule enforced when
+    # generating a proforma/order, not a creation-time constraint.
     phone: Mapped[Optional[str]] = mapped_column(String(32))
     email: Mapped[Optional[str]] = mapped_column(String(128))

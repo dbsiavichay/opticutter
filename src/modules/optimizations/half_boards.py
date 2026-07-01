@@ -1,16 +1,16 @@
-"""Detección de medios tableros (cobro a la mitad) como post-paso del optimizado.
+"""Half-board detection (charged at half price) as a post-optimization step.
 
-El negocio vende medios tableros del catálogo, divididos **a lo largo** (se conserva
-el largo/``height`` y se parte el ancho/``width`` a la mitad). El cliente no los pide
-explícitamente: pide piezas. Por eso, tras optimizar contra tableros completos, este
-módulo revisa cada plancha (layout) y, si **todas** sus piezas caben en un solo medio
-tablero, la reemplaza por el layout de medio (geometría + cortes del re-encaje) y su
-costo pasa a la mitad.
+The business sells half catalog boards, split **lengthwise** (the
+length/``height`` is kept and the width/``width`` is cut in half). The client
+doesn't request them explicitly: they request pieces. So, after optimizing
+against full boards, this module checks each sheet (layout) and, if **all**
+of its pieces fit on a single half board, replaces it with the half-board
+layout (re-packed geometry + cuts) and halves its cost.
 
-Es determinista (depende solo de entradas ya incluidas en el hash de la caché) y reusa
-el motor de corte puro, así que el medio fluye solo a costos, resumen, descuento,
-snapshot de la orden y plan de corte. Solo aplica a materiales de **catálogo**: los
-retazos/medidas manuales ya se cobran a costo.
+It's deterministic (depends only on inputs already included in the cache hash)
+and reuses the pure cutting engine, so the half board flows through to costs,
+summary, discount, order snapshot and cutting plan. It only applies to
+**catalog** materials: offcuts/manual measurements are already charged at cost.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -21,7 +21,7 @@ from src.cutting.optimizer import GuillotineOptimizer
 from src.cutting.parameters import CuttingParameters
 from src.modules.optimizations.materials import ResolvedMaterial
 
-# Resultado por material: mapas de canto/metraje (indexados por id de pieza) + layouts.
+# Per-material result: edge-banding/length maps (indexed by piece id) + layouts.
 MaterialResult = Tuple[Dict[str, object], Dict[str, float], List[CuttingLayout]]
 
 
@@ -32,20 +32,20 @@ def apply_half_boards(
     strategy: PackingStrategy,
     min_rect_size: float = 0.1,
 ) -> None:
-    """Reemplaza in situ las planchas de catálogo que caben en un medio tablero.
+    """Replaces in place the catalog sheets that fit on a half board.
 
-    Cada layout cuyo contenido encaje completo en un medio (mismo largo, ancho/2) se
-    sustituye por el layout de medio: ``half_board=True``, ancho y costo a la mitad,
-    y las piezas reubicadas por el re-encaje. La ``material.id`` (= ``material_key``)
-    se conserva, de modo que el tablero sigue ligado a su producto; la distinción
-    completo/medio vive solo en el flag ``half_board``.
+    Each layout whose content fully fits on a half board (same length, width/2)
+    is replaced by the half-board layout: ``half_board=True``, half width and
+    cost, and pieces re-placed by the re-pack. ``material.id`` (= ``material_key``)
+    is preserved, so the board stays linked to its product; the full/half
+    distinction lives solely in the ``half_board`` flag.
     """
     for _edge_map, _net_map, layouts in results:
         if not layouts:
             continue
         key = layouts[0].material.id
         rm = resolved.get(key)
-        # Solo tableros de catálogo; retazos/manual se cobran a costo (sin medios).
+        # Catalog boards only; offcuts/manual are charged at cost (no halves).
         if rm is None or not rm.is_catalog:
             continue
         for idx, layout in enumerate(layouts):
@@ -63,7 +63,7 @@ def _fit_on_half_board(
     strategy: PackingStrategy,
     min_rect_size: float,
 ) -> Optional[CuttingLayout]:
-    """Devuelve el layout de medio tablero si todas las piezas caben; si no, ``None``."""
+    """Returns the half-board layout if every piece fits; otherwise ``None``."""
     pieces = [pp.piece for pp in layout.placed_pieces]
     if not pieces:
         return None
@@ -85,7 +85,7 @@ def _fit_on_half_board(
             min_rect_size=min_rect_size,
         )
     except ValueError:
-        # Los trims exceden el ancho/2 (medio demasiado angosto): no es viable.
+        # Trims exceed width/2 (half board too narrow): not viable.
         return None
 
     placed, unplaced = optimizer.optimize(pieces)

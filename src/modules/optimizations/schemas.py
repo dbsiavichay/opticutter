@@ -16,11 +16,12 @@ from src.shared.schemas import CamelModel
 
 
 class MaterialSource(str, Enum):
-    """Origen del material a optimizar.
+    """Source of the material to optimize.
 
-    El motor de corte es agnóstico al origen: solo necesita dimensiones y costo.
-    ``catalog`` resuelve un tablero del catálogo de productos; el resto aporta sus
-    dimensiones inline. Una fuente nueva = un valor más + su rama en la unión.
+    The cutting engine is source-agnostic: it only needs dimensions and cost.
+    ``catalog`` resolves a board from the product catalog; the rest provide
+    their dimensions inline. A new source = one more value + its branch in the
+    union.
     """
 
     catalog = "catalog"
@@ -30,19 +31,19 @@ class MaterialSource(str, Enum):
 
 
 class OptimizationStrategy(str, Enum):
-    """Heurística de acomodo a aplicar en la optimización.
+    """Packing heuristic to apply during optimization.
 
-    ``default`` (Best-Area-Fit) minimiza la merma total pero la fragmenta en
-    varios retazos. ``longOffcuts`` pega las piezas contra un lado del tablero y
-    concentra la merma en una tira continua larga (apegada al eje largo del
-    tablero), reutilizable como retazo. Mapea a ``cutting.PackingStrategy``.
+    ``default`` (Best-Area-Fit) minimizes total waste but fragments it across
+    several offcuts. ``longOffcuts`` pushes pieces against one side of the
+    board and concentrates the waste into one long continuous strip (along the
+    board's long axis), reusable as an offcut. Maps to ``cutting.PackingStrategy``.
     """
 
     default = "default"
     long_offcuts = "longOffcuts"
 
 
-# Traducción del enum de API al perfil del dominio de corte.
+# Translation from the API enum to the cutting domain's profile.
 STRATEGY_TO_PACKING = {
     OptimizationStrategy.default: PackingStrategy.MAX_EFFICIENCY,
     OptimizationStrategy.long_offcuts: PackingStrategy.LONG_OFFCUTS,
@@ -65,15 +66,15 @@ class MaterialSummary(CamelModel):
     total_cost: float
     half_board: bool = Field(
         default=False,
-        description="True if this line is a half board (largo intacto, ancho/2, costo/2)",
+        description="True if this line is a half board (length kept, width/2, cost/2)",
     )
 
 
 class EdgeSide(str, Enum):
-    """Lados nominales de una pieza (marco sin rotar).
+    """Nominal sides of a piece (unrotated frame).
 
-    ``top``/``bottom`` son los lados de longitud ``width`` (ancho); ``left``/
-    ``right`` los de longitud ``height`` (alto).
+    ``top``/``bottom`` are the sides of length ``width``; ``left``/``right``
+    are the sides of length ``height``.
     """
 
     top = "top"
@@ -83,12 +84,12 @@ class EdgeSide(str, Enum):
 
 
 class EdgeBandingSpec(CamelModel):
-    """Tapacanto a aplicar en una pieza: los lados a tapar y, opcionalmente, el producto.
+    """Edge banding to apply to a piece: the sides to band and, optionally, the product.
 
-    En el optimizador basta con ``sides`` para calcular la longitud de canto (metros
-    lineales) —que es lo que importa para cortes y metraje—. El ``productId`` (precio
-    + tipo suave/duro + color para el diagrama) se asigna recién al cotizar; por eso es
-    opcional aquí.
+    At optimize time ``sides`` is enough to compute the edge-banding length
+    (linear meters) — which is what matters for cuts and length. The
+    ``productId`` (price + soft/hard type + color for the diagram) is only
+    assigned when quoting; that's why it's optional here.
     """
 
     sides: List[EdgeSide] = Field(
@@ -113,8 +114,8 @@ class EdgeBandingSpec(CamelModel):
 
 
 class EdgeBandingSummary(CamelModel):
-    # product_* y thickness quedan opcionales: una pieza canteada sin producto asignado
-    # (solo lados, en el optimizador) aporta su metraje pero sin identidad ni precio.
+    # product_* and thickness stay optional: a banded piece without an assigned
+    # product (sides only, at optimize time) contributes length but no identity or price.
     product_id: Optional[int] = None
     product_code: Optional[str] = None
     product_name: Optional[str] = None
@@ -133,29 +134,29 @@ class EdgeBandingSummary(CamelModel):
 
 
 class PricingSummary(CamelModel):
-    """Bloque de descuento a nivel documento (nivel de precio aplicado).
+    """Document-level discount block (applied price tier).
 
-    Las líneas se cobran a precio de lista ("Precio Consumidor"); ``discountAmount`` es
-    el único ajuste, calculado solo sobre los tableros de catálogo (``discountBase``).
+    Line items are charged at list price ("Precio Consumidor"); ``discountAmount``
+    is the single adjustment, computed only over the catalog boards (``discountBase``).
     """
 
     price_tier_code: Optional[str] = Field(
-        default=None, description="Código del nivel de precio aplicado"
+        default=None, description="Code of the applied price tier"
     )
     price_tier_name: Optional[str] = Field(default=None)
     discount_rate: float = Field(
-        default=0.0, description="Descuento aplicado (0.02 = 2%)"
+        default=0.0, description="Applied discount (0.02 = 2%)"
     )
     discount_base: float = Field(
-        default=0.0, description="Base del descuento: tableros de catálogo"
+        default=0.0, description="Discount base: catalog boards"
     )
-    subtotal: float = Field(default=0.0, description="Suma a precio de lista")
+    subtotal: float = Field(default=0.0, description="Sum at list price")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(default=0.0, description="Subtotal - descuento")
+    total: float = Field(default=0.0, description="Subtotal minus discount")
 
 
 class CatalogMaterialInput(CamelModel):
-    """Material del catálogo de productos (tablero)."""
+    """Material from the product catalog (board)."""
 
     key: str = Field(
         ...,
@@ -168,10 +169,10 @@ class CatalogMaterialInput(CamelModel):
 
 
 class InlineMaterialInput(CamelModel):
-    """Material con dimensiones inline: retazo de empresa/cliente o medida manual.
+    """Material with inline dimensions: company/client offcut or manual measurement.
 
-    Comparten forma; solo difieren en ``source``. ``quantity`` se acepta pero no se
-    enforca todavía (suministro infinito en Fase 1).
+    They share the same shape; only ``source`` differs. ``quantity`` is accepted
+    but not yet enforced (infinite supply in Phase 1).
     """
 
     key: str = Field(
@@ -199,9 +200,9 @@ class InlineMaterialInput(CamelModel):
     )
 
 
-# Unión discriminada por ``source`` (mismo patrón que ``products/schemas.py``):
-# Pydantic v2 elige y valida la rama según el ``source`` enviado. Una fuente nueva
-# = un valor en ``MaterialSource`` + su rama aquí (o reusar la rama inline).
+# Union discriminated by ``source`` (same pattern as ``products/schemas.py``):
+# Pydantic v2 picks and validates the branch based on the ``source`` sent. A new
+# source = a value in ``MaterialSource`` + its branch here (or reuse the inline branch).
 MaterialInput = Annotated[
     Union[CatalogMaterialInput, InlineMaterialInput],
     Field(discriminator="source"),
@@ -261,24 +262,24 @@ class OptimizeRequest(CamelModel):
         default="consumidor",
         max_length=32,
         description=(
-            "Nivel de precio para la proforma: consumidor (0%) | carpintero (2%) | "
-            "efectivo (5%). No afecta la geometría ni el hash de la optimización; solo "
-            "el bloque `pricing` (descuento sobre tableros de catálogo)."
+            "Price tier for the proforma: consumidor (0%) | carpintero (2%) | "
+            "efectivo (5%). Does not affect optimization geometry or hash; only "
+            "the `pricing` block (discount over catalog boards)."
         ),
     )
     strategy: OptimizationStrategy = Field(
         default=OptimizationStrategy.default,
         description=(
-            "Heurística de acomodo. `default`: máxima eficiencia (minimiza la merma "
-            "total). `longOffcuts`: concentra la merma en una tira continua larga "
-            "reutilizable, pegando las piezas a un lado. SÍ afecta la geometría y el "
-            "hash de la optimización (a diferencia de clientId/priceTierCode)."
+            "Packing heuristic. `default`: maximum efficiency (minimizes total "
+            "waste). `longOffcuts`: concentrates waste into one long reusable "
+            "strip by pushing pieces to one side. DOES affect optimization "
+            "geometry and hash (unlike clientId/priceTierCode)."
         ),
     )
 
     @model_validator(mode="after")
     def _validate_material_refs(self) -> "OptimizeRequest":
-        """Las keys de materiales son únicas y cada requerimiento referencia una."""
+        """Material keys are unique and every requirement references one."""
         keys = [m.key for m in self.materials]
         if len(set(keys)) != len(keys):
             raise ValueError("material keys must be unique")
@@ -304,7 +305,7 @@ class Material(CamelModel):
     area: float = Field(..., description="Area of the material")
     half_board: bool = Field(
         default=False,
-        description="True if this sheet is a half board (largo intacto, ancho/2, costo/2)",
+        description="True if this sheet is a half board (length kept, width/2, cost/2)",
     )
 
 
@@ -339,7 +340,7 @@ class Remainder(CamelModel):
 
 
 class CutSegment(CamelModel):
-    """Segmento de corte de guillotina (recorrido de la sierra) sobre la plancha."""
+    """Guillotine cut segment (saw travel) on the sheet."""
 
     x: float = Field(..., description="X where the saw cut starts")
     y: float = Field(..., description="Y where the saw cut starts")
@@ -374,7 +375,7 @@ class Layout(CamelModel):
     remainders: List[Remainder] = Field(
         ..., description="Leftover rectangles on this sheet"
     )
-    # Default vacío: payloads cacheados/snapshots previos a esta clave validan igual.
+    # Empty default: cached payloads/snapshots predating this key still validate.
     cuts: List[CutSegment] = Field(
         default_factory=list,
         description="Guillotine saw cuts on this sheet (for drawing cut lines)",
@@ -406,7 +407,7 @@ class OptimizeResponse(CamelModel):
     )
     strategy: OptimizationStrategy = Field(
         default=OptimizationStrategy.default,
-        description="Heurística de acomodo aplicada a esta optimización",
+        description="Packing heuristic applied to this optimization",
     )
     total_boards_used: int = Field(..., description="Total number of boards used")
     total_boards_cost: float = Field(..., description="Total cost of boards used")

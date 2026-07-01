@@ -8,17 +8,17 @@ from src.shared.mixins import TimestampMixin
 
 
 class UserLoginEventModel(TimestampMixin, Base):
-    """Evento de inicio de sesión: un row por login exitoso en ``/auth/login``.
+    """Login event: one row per successful login on ``/auth/login``.
 
-    Sirve como referencia de "hora de entrada": el primer evento del día de un
-    usuario aproxima su hora de llegada. NO se registra en ``/auth/refresh`` (la
-    renovación de token no es una entrada nueva). ``created_at`` (del mixin) es la
-    hora del login; ``ip_address``/``user_agent`` son contexto opcional.
+    Serves as an "arrival time" reference: a user's first event of the day
+    approximates their arrival time. NOT recorded on ``/auth/refresh`` (token
+    renewal isn't a new entry). ``created_at`` (from the mixin) is the login
+    time; ``ip_address``/``user_agent`` are optional context.
     """
 
     __tablename__ = "user_login_events"
     __table_args__ = (
-        # Sirve las consultas de asistencia (primer login por usuario y día).
+        # Serves attendance queries (first login per user and day).
         Index("ix_user_login_events_user_created", "user_id", "created_at"),
     )
 

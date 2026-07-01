@@ -1,8 +1,8 @@
-"""Registro de tipos de producto: mapea cada ``ProductType`` a su esquema de atributos.
+"""Product type registry: maps each ``ProductType`` to its attributes schema.
 
-Punto único de extensión. Para soportar un tipo nuevo: crear su esquema en
-``products/types/<tipo>.py``, registrarlo aquí y añadir su rama a la unión
-discriminada de ``products/schemas.py``. No requiere migración de base de datos.
+Single extension point. To support a new type: create its schema in
+``products/types/<type>.py``, register it here, and add its branch to the
+discriminated union in ``products/schemas.py``. No database migration needed.
 """
 
 from typing import Type
@@ -19,5 +19,5 @@ ATTRIBUTE_SCHEMAS: dict[ProductType, Type[CamelModel]] = {
 
 
 def attributes_schema_for(product_type: str | ProductType) -> Type[CamelModel]:
-    """Devuelve el esquema de atributos registrado para un tipo de producto."""
+    """Returns the registered attributes schema for a product type."""
     return ATTRIBUTE_SCHEMAS[ProductType(product_type)]

@@ -11,9 +11,9 @@ from src.shared.exceptions import EntityNotFoundError, ValidationError
 
 
 def branch_letterhead(db: Session, branch_id: Optional[int]) -> Optional[dict]:
-    """Membrete de una sucursal para la proforma: ``{"name", "address"}`` o ``None``.
+    """Branch letterhead for the proforma: ``{"name", "address"}`` or ``None``.
 
-    Acota el listado de sucursales del membrete a la sucursal dueña del documento.
+    Scopes the letterhead to the branch that owns the document.
     """
     if branch_id is None:
         return None
@@ -29,16 +29,17 @@ def resolve_branch_for_create(
     requested_branch_id: Optional[int],
     default_branch_id: Optional[int] = None,
 ) -> int:
-    """Resuelve y valida la sucursal destino de un alta (orden/pre-orden/borrador).
+    """Resolves and validates the target branch for a creation (order/pre-order/draft).
 
-    - scoped (``branch_scope`` no None, p. ej. operador): siempre su propia sucursal
-      (ignora lo pedido en el body, para que no pueda crear en otra sucursal).
-    - global (``branch_scope`` None: admin o vendedor): usa ``requested_branch_id`` si
-      viene; si no, cae en ``default_branch_id`` (la **sucursal base** del creador). El
-      admin no tiene sucursal base (``None``), así que debe indicar ``branchId``; el
-      vendedor predetermina la suya y puede sobrescribirla con ``branchId``.
+    - scoped (``branch_scope`` not None, e.g. operator): always their own branch
+      (ignores what's requested in the body, so they can't create in another branch).
+    - global (``branch_scope`` None: admin or seller): uses ``requested_branch_id``
+      if given; otherwise falls back to ``default_branch_id`` (the creator's
+      **base branch**). The admin has no base branch (``None``), so they must
+      provide ``branchId``; the seller defaults to their own and can override it
+      with ``branchId``.
 
-    Verifica que la sucursal exista y esté activa.
+    Verifies the branch exists and is active.
     """
     if branch_scope is not None:
         branch_id: Optional[int] = branch_scope
@@ -59,19 +60,19 @@ def resolve_branch_for_create(
 
 
 class BranchService(CRUDService[BranchModel, BranchCreate, BranchUpdate]):
-    """CRUD de sucursales + búsquedas específicas."""
+    """Branch CRUD + specific searches."""
 
     model = BranchModel
     conflict_messages = {"code": "El código de sucursal ya existe"}
 
     def get_by_code(self, code: str) -> Optional[BranchModel]:
-        """Obtiene una sucursal por su código."""
+        """Gets a branch by its code."""
         return self.db.query(BranchModel).filter(BranchModel.code == code).first()
 
     def search_paginated(
         self, search: str, limit: int = 20, offset: int = 0
     ) -> Tuple[List[BranchModel], int]:
-        """Busca sucursales por código o nombre; ``(items, total)``."""
+        """Searches branches by code or name; ``(items, total)``."""
         pattern = f"%{search}%"
         query = self.db.query(BranchModel).filter(
             BranchModel.code.ilike(pattern) | BranchModel.name.ilike(pattern)
@@ -80,5 +81,5 @@ class BranchService(CRUDService[BranchModel, BranchCreate, BranchUpdate]):
 
 
 def branch_service(db: Session = Depends(get_db)) -> BranchService:
-    """Provider de ``BranchService`` para inyección en rutas."""
+    """Provider for ``BranchService`` injection in routes."""
     return BranchService(db)

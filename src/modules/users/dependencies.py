@@ -1,11 +1,11 @@
-"""Dependencias de autenticación y autorización.
+"""Authentication and authorization dependencies.
 
-``get_current_user`` resuelve el usuario autenticado desde el JWT; ``require_role``
-restringe por rol y ``require_permission`` por **área** (clave de la matriz
-``RESOURCE_ROLES``). Los endpoints declaran intención con
-``Depends(require_permission("orders:write"))`` y la matriz queda como única fuente
-de verdad. ``require_role`` valida contra el rol **leído de la BD** (vía
-``get_current_user``), así que un cambio de rol surte efecto al instante.
+``get_current_user`` resolves the authenticated user from the JWT; ``require_role``
+restricts by role and ``require_permission`` by **area** (key of the
+``RESOURCE_ROLES`` matrix). Endpoints declare intent with
+``Depends(require_permission("orders:write"))`` and the matrix stays the single
+source of truth. ``require_role`` validates against the role **read from the DB**
+(via ``get_current_user``), so a role change takes effect instantly.
 """
 
 from typing import Optional
@@ -20,8 +20,8 @@ from src.modules.users.service import UserService, user_service
 from src.shared.exceptions import AuthenticationError, AuthorizationError
 from src.shared.security import decode_access_token
 
-# auto_error=False: gestionamos nosotros el 401 vía AuthenticationError para que
-# pase por la envoltura uniforme {errors, meta} en lugar del HTTPException de FastAPI.
+# auto_error=False: we handle the 401 ourselves via AuthenticationError so it
+# goes through the uniform {errors, meta} wrapper instead of FastAPI's HTTPException.
 bearer = HTTPBearer(auto_error=False)
 
 
@@ -29,7 +29,7 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
     svc: UserService = Depends(user_service),
 ) -> UserModel:
-    """Resuelve el usuario autenticado a partir del ``Authorization: Bearer <jwt>``."""
+    """Resolves the authenticated user from the ``Authorization: Bearer <jwt>`` header."""
     if credentials is None or not credentials.credentials:
         raise AuthenticationError("Falta el token de autenticación")
     payload = decode_access_token(credentials.credentials)
@@ -44,10 +44,10 @@ def get_current_user(
 
 
 def require_role(*roles: UserRole):
-    """Factory de dependencia: exige que el usuario tenga uno de ``roles``.
+    """Dependency factory: requires the user to have one of ``roles``.
 
-    p. ej. ``Depends(require_role(UserRole.ADMIN))``. Prefiere ``require_permission``
-    cuando exista una clave de área en ``RESOURCE_ROLES`` (centraliza la política).
+    e.g. ``Depends(require_role(UserRole.ADMIN))``. Prefer ``require_permission``
+    when an area key exists in ``RESOURCE_ROLES`` (centralizes the policy).
     """
     allowed = {role.value for role in roles}
 
@@ -60,10 +60,10 @@ def require_role(*roles: UserRole):
 
 
 def require_permission(resource: str):
-    """Dependencia de autorización por área, resuelta contra ``RESOURCE_ROLES``.
+    """Per-area authorization dependency, resolved against ``RESOURCE_ROLES``.
 
-    ``Depends(require_permission("orders:write"))``. Una clave inexistente revienta
-    con ``KeyError`` al **cargar el router** (no en runtime), atrapando typos en CI.
+    ``Depends(require_permission("orders:write"))``. A nonexistent key blows up
+    with ``KeyError`` at **router load time** (not at runtime), catching typos in CI.
     """
     return require_role(*RESOURCE_ROLES[resource])
 
@@ -71,15 +71,16 @@ def require_permission(resource: str):
 def get_branch_scope(
     current_user: UserModel = Depends(get_current_user),
 ) -> Optional[int]:
-    """Resuelve el alcance por sucursal del usuario autenticado.
+    """Resolves the authenticated user's branch scope.
 
-    ``None`` para los roles **globales** (administrador y vendedor): ven y operan todas
-    las sucursales. El ``branch_id`` asignado para los roles de taller (operador y
-    canteador), atados a la suya. Como ``get_current_user`` lee el usuario fresco de la
-    BD en cada request, reasignar su sucursal surte efecto al instante. Un rol de taller
-    sin sucursal asignada es un estado inválido (403). Nota: el vendedor conserva su
-    ``branch_id`` como **sucursal base** (default al crear, ver
-    ``resolve_branch_for_create``), aunque su lectura sea global.
+    ``None`` for the **global** roles (administrador and vendedor): they see and
+    operate all branches. The assigned ``branch_id`` for the workshop roles
+    (operador and canteador), bound to their own. Since ``get_current_user`` reads
+    the fresh user from the DB on every request, reassigning their branch takes
+    effect instantly. A workshop role with no assigned branch is an invalid state
+    (403). Note: the vendedor keeps their ``branch_id`` as a **base branch**
+    (default on create, see ``resolve_branch_for_create``), even though their
+    reads are global.
     """
     if current_user.role in (UserRole.ADMIN.value, UserRole.SELLER.value):
         return None

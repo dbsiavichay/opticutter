@@ -1,7 +1,7 @@
-"""Tests del módulo optimization_drafts (CRUD vía CRUDService + rutas finas)."""
+"""Tests for the optimization_drafts module (CRUD via CRUDService + thin routes)."""
 
-# Estado de formulario tal cual lo enviaría el frontend, con una pieza a medio
-# llenar (width vacío): el backend debe persistirlo sin validar su forma interna.
+# Form state exactly as the frontend would send it, with a partially-filled
+# piece (empty width): the backend must persist it without validating its inner shape.
 FORM_PAYLOAD = {
     "materials": [
         {"uid": "mat-0-abc", "source": "catalog", "boardId": "12"},
@@ -24,7 +24,7 @@ FORM_PAYLOAD = {
 def _payload(name="Cocina Pérez", payload=None, client_id=None):
     body = {
         "name": name,
-        "branchId": 1,  # sucursal por defecto sembrada por conftest
+        "branchId": 1,  # default branch seeded by conftest
         "payload": payload if payload is not None else FORM_PAYLOAD,
     }
     if client_id is not None:
@@ -40,13 +40,13 @@ def _make_client(client, identifier="0991112233"):
 
 
 def test_create_and_get_draft_roundtrips_payload(client):
-    """El detalle devuelve el ``payload`` idéntico, incluidas filas incompletas."""
+    """The detail endpoint returns the ``payload`` unchanged, including incomplete rows."""
     resp = client.post("/api/v1/optimization-drafts/", json=_payload())
     assert resp.status_code == 201
     created = resp.json()["data"]
     assert created["name"] == "Cocina Pérez"
     assert created["clientId"] is None
-    # El borrador expone su sucursal dueña (referencia compacta).
+    # The draft exposes its owning branch (compact reference).
     assert created["branch"]["id"] == 1
     assert created["branch"]["code"] == "MATRIZ"
     assert "id" in created
@@ -56,7 +56,7 @@ def test_create_and_get_draft_roundtrips_payload(client):
     assert got.status_code == 200
     data = got.json()["data"]
     assert data["id"] == created["id"]
-    # El bag JSON se conserva tal cual (incluida la pieza con width vacío).
+    # The JSON bag is preserved as-is (including the piece with empty width).
     assert data["payload"] == FORM_PAYLOAD
 
 
@@ -98,7 +98,7 @@ def test_list_drafts_omits_payload_and_paginates(client):
     body = listed.json()
     assert len(body["data"]) == 2
     assert body["meta"]["pagination"]["total"] == 2
-    # El resumen es liviano: no expone el payload.
+    # The summary is lightweight: it doesn't expose the payload.
     assert all("payload" not in item for item in body["data"])
     assert {item["name"] for item in body["data"]} == {"A", "B"}
 
@@ -112,7 +112,7 @@ def test_update_draft_overwrites_partially(client):
         "data"
     ]
 
-    # Solo el nombre: el payload no se toca.
+    # Name only: the payload is untouched.
     renamed = client.put(
         f"/api/v1/optimization-drafts/{created['id']}", json={"name": "Cocina v2"}
     )
@@ -120,7 +120,7 @@ def test_update_draft_overwrites_partially(client):
     assert renamed.json()["data"]["name"] == "Cocina v2"
     assert renamed.json()["data"]["payload"] == FORM_PAYLOAD
 
-    # Solo el payload: el nombre se conserva.
+    # Payload only: the name is preserved.
     new_payload = {"materials": [], "requirements": []}
     repayloaded = client.put(
         f"/api/v1/optimization-drafts/{created['id']}", json={"payload": new_payload}

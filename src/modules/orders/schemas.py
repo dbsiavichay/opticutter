@@ -17,7 +17,7 @@ from src.shared.schemas import CamelModel
 
 
 class OrderCreate(CamelModel):
-    """Crear una orden: misma forma que ``OptimizeRequest`` + metadatos."""
+    """Create an order: same shape as ``OptimizeRequest`` + metadata."""
 
     materials: List[MaterialInput] = Field(
         ...,
@@ -35,13 +35,13 @@ class OrderCreate(CamelModel):
     price_tier_code: Optional[str] = Field(
         default="consumidor",
         max_length=32,
-        description="Nivel de precio a congelar: consumidor (0%)|carpintero (2%)|efectivo (5%)",
+        description="Price tier to freeze: consumidor (0%)|carpintero (2%)|efectivo (5%)",
     )
     strategy: OptimizationStrategy = Field(
         default=OptimizationStrategy.default,
         description=(
-            "Heurística de acomodo a usar al recalcular y congelar el snapshot "
-            "(default | longOffcuts). Heredada de la pre-orden al confirmar."
+            "Packing heuristic to use when recomputing and freezing the snapshot "
+            "(default | longOffcuts). Inherited from the pre-order on confirmation."
         ),
     )
     notes: Optional[str] = Field(default=None, max_length=512)
@@ -49,43 +49,43 @@ class OrderCreate(CamelModel):
     status: Literal[OrderStatus.confirmed] = Field(
         default=OrderStatus.confirmed,
         description=(
-            "Born status: la orden nace 'confirmed'. La revisión previa del cliente "
-            "(antes 'quoted') vive ahora en la pre-orden."
+            "Born status: the order is born 'confirmed'. The client's prior review "
+            "(formerly 'quoted') now lives in the pre-order."
         ),
     )
 
 
 class OrderPaymentInput(CamelModel):
-    """Forma de pago (informativa) registrada al pasar a ``queued``.
+    """Payment method (informational only), registered when moving to ``queued``.
 
-    Una orden puede pagarse con ambos métodos a la vez; el método usado se
-    infiere de qué monto es > 0. No afecta precios ni el cobro de la orden.
+    An order can be paid with both methods at once; the method used is
+    inferred from which amount is > 0. Doesn't affect pricing or the order's billing.
     """
 
     cash_amount: Optional[float] = Field(
-        default=None, ge=0, description="Monto pagado en efectivo"
+        default=None, ge=0, description="Amount paid in cash"
     )
     credit_amount: Optional[float] = Field(
-        default=None, ge=0, description="Monto pagado a crédito"
+        default=None, ge=0, description="Amount paid on credit"
     )
 
 
 class OrderStatusUpdate(CamelModel):
-    """Transición de estado solicitada."""
+    """Requested state transition."""
 
     status: OrderStatus = Field(..., description="Target status to transition to")
     note: Optional[str] = Field(default=None, max_length=512)
     payment: Optional[OrderPaymentInput] = Field(
         default=None,
         description=(
-            "Forma de pago, obligatoria al pasar de 'confirmed' a 'queued' "
-            "(al menos un monto > 0)"
+            "Payment method, required when moving from 'confirmed' to 'queued' "
+            "(at least one amount > 0)"
         ),
     )
 
 
 class OrderInvoiceUpdate(CamelModel):
-    """Asocia el ID de la factura emitida por el proveedor externo de facturación."""
+    """Associates the invoice ID issued by the external billing provider."""
 
     external_invoice_id: str = Field(
         ...,
@@ -96,7 +96,7 @@ class OrderInvoiceUpdate(CamelModel):
 
 
 class OrderExportLine(CamelModel):
-    """Línea de factura para el proveedor externo (cobro por producto)."""
+    """Invoice line for the external provider (billed by product)."""
 
     description: str = Field(..., description="Human-readable line description")
     product_code: Optional[str] = None
@@ -106,7 +106,7 @@ class OrderExportLine(CamelModel):
 
 
 class OrderExportResponse(CamelModel):
-    """Documento de facturación neutral: lo consume el proveedor de facturación."""
+    """Neutral billing document: consumed by the billing provider."""
 
     order_code: Optional[str] = None
     status: OrderStatus
@@ -114,21 +114,17 @@ class OrderExportResponse(CamelModel):
     currency: str
     client: ClientResponse
     lines: List[OrderExportLine]
-    subtotal: float = Field(
-        ..., description="Suma a precio de lista (antes del descuento)"
-    )
+    subtotal: float = Field(..., description="Sum at list price (before the discount)")
     price_tier_code: Optional[str] = None
-    discount_rate: float = Field(
-        default=0.0, description="Descuento congelado (0.02 = 2%)"
-    )
+    discount_rate: float = Field(default=0.0, description="Frozen discount (0.02 = 2%)")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal menos el descuento")
+    total: float = Field(..., description="Subtotal minus the discount")
     external_invoice_id: Optional[str] = None
 
 
 class OrderLineResponse(CamelModel):
     id: int
-    product_id: Optional[int] = None  # nulo si el material no es de catálogo
+    product_id: Optional[int] = None  # null if the material isn't from the catalog
     product_code: Optional[str] = None
     product_name: Optional[str] = None
     quantity: int = Field(
@@ -149,7 +145,7 @@ class OrderLineResponse(CamelModel):
 
 class OrderPieceResponse(CamelModel):
     id: int
-    product_id: Optional[int] = None  # nulo si el material no es de catálogo
+    product_id: Optional[int] = None  # null if the material isn't from the catalog
     label: Optional[str] = None
     height: int
     width: int
@@ -185,15 +181,11 @@ class OrderResponse(CamelModel):
     branch: BranchRefResponse = Field(..., description="Owning branch")
     status: OrderStatus
     currency: str
-    subtotal: float = Field(
-        ..., description="Suma a precio de lista (antes del descuento)"
-    )
+    subtotal: float = Field(..., description="Sum at list price (before the discount)")
     price_tier_code: str = Field(default="consumidor")
-    discount_rate: float = Field(
-        default=0.0, description="Descuento congelado (0.02 = 2%)"
-    )
+    discount_rate: float = Field(default=0.0, description="Frozen discount (0.02 = 2%)")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal menos el descuento")
+    total: float = Field(..., description="Subtotal minus the discount")
     total_boards_used: int
     optimization_hash: str
     external_invoice_id: Optional[str] = None
@@ -250,7 +242,7 @@ class OrderResponse(CamelModel):
 
 
 class PlacedPieceResponse(CamelModel):
-    """Pieza colocada en un tablero físico, con su estado de corte."""
+    """Piece placed on a physical board, with its cutting status."""
 
     id: int
     piece_id: str = Field(..., description="Instance identity from snapshot (label#N)")
@@ -276,14 +268,14 @@ class PlacedPieceResponse(CamelModel):
 
 
 class CuttingProgress(CamelModel):
-    """Avance de corte: piezas cortadas sobre el total."""
+    """Cutting progress: pieces cut out of the total."""
 
     cut_pieces: int
     total_pieces: int
 
 
 class OrderBoardResponse(CamelModel):
-    """Tablero físico del plan de corte con sus piezas y avance."""
+    """Physical board of the cutting plan, with its pieces and progress."""
 
     id: int
     sheet_number: int = Field(..., description="Global sheet sequence within the order")
@@ -308,7 +300,7 @@ class OrderBoardResponse(CamelModel):
 
 
 class CuttingPlanResponse(CamelModel):
-    """Plan de corte de la orden: tableros físicos para la vista de taller."""
+    """Order's cutting plan: physical boards for the workshop view."""
 
     order_id: int
     order_code: Optional[str] = None
@@ -318,13 +310,13 @@ class CuttingPlanResponse(CamelModel):
 
 
 class PieceCutUpdate(CamelModel):
-    """Marca (o desmarca, con ``cut=false``) una pieza colocada como cortada."""
+    """Marks (or unmarks, with ``cut=false``) a placed piece as cut."""
 
     cut: bool = Field(default=True, description="True = cut, False = undo")
 
 
 class PieceCutResponse(CamelModel):
-    """Resultado de marcar una pieza: estado de la pieza + avance actualizado."""
+    """Result of marking a piece: piece status + updated progress."""
 
     piece: PlacedPieceResponse
     progress: CuttingProgress = Field(..., description="Order-level progress")
@@ -332,7 +324,7 @@ class PieceCutResponse(CamelModel):
 
 
 class BandingUpdate(CamelModel):
-    """Transición de la pista de canteado solicitada por el canteador."""
+    """Banding-track transition requested by the bander."""
 
     status: BandingStatus = Field(
         ..., description="Target banding status: in_progress (start) | done (finish)"
@@ -341,7 +333,7 @@ class BandingUpdate(CamelModel):
 
 
 class BandingStatusResponse(CamelModel):
-    """Vista mínima de canteado para el canteador (sin precios ni detalle de la orden)."""
+    """Minimal banding view for the bander (no prices or order detail)."""
 
     order_id: int
     order_code: Optional[str] = None
@@ -351,7 +343,7 @@ class BandingStatusResponse(CamelModel):
 
 
 class BandingQueueItem(CamelModel):
-    """Ítem de la cola de canteado: lo mínimo para que el canteador identifique la orden."""
+    """Banding queue item: the minimum needed for the bander to identify the order."""
 
     order_id: int
     order_code: Optional[str] = None

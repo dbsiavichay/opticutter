@@ -1,4 +1,4 @@
-"""Fixtures compartidas: app con una base de datos PostgreSQL aislada por test."""
+"""Shared fixtures: app with a PostgreSQL database isolated per test."""
 
 import os
 
@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-# Importar los modelos puebla ``Base.metadata`` antes de ``create_all``.
+# Importing the models populates ``Base.metadata`` before ``create_all``.
 import src.modules.branches.model  # noqa: F401,E402
 import src.modules.clients.model  # noqa: F401,E402
 import src.modules.optimization_drafts.model  # noqa: F401,E402
@@ -27,12 +27,12 @@ from src.shared.cache import cache
 from src.shared.database import Base, get_db
 from src.shared.security import create_access_token
 
-# Credenciales del admin que el cliente autenticado por defecto usa (ver ``client``).
+# Admin credentials used by the default authenticated client (see ``client``).
 _CONFTEST_ADMIN_EMAIL = "conftest-admin@empresa.com"
 _CONFTEST_ADMIN_PWD = "conftest-admin-pwd"
 
-# Sucursal por defecto sembrada en cada base de prueba (primer insert ⇒ id estable).
-# Las suites la referencian al crear órdenes/pre-órdenes/borradores/usuarios staff.
+# Default branch seeded into every test database (first insert => stable id).
+# Suites reference it when creating orders/pre-orders/drafts/staff users.
 DEFAULT_BRANCH_ID = 1
 
 _TEST_DATABASE_URL = os.getenv(
@@ -45,18 +45,19 @@ _test_engine = create_engine(_TEST_DATABASE_URL)
 
 @pytest.fixture(scope="session")
 def _create_schema():
-    """Crea el schema una vez por sesión de pytest (idempotente).
+    """Creates the schema once per pytest session (idempotent).
 
-    No es ``autouse``: solo lo piden los fixtures que tocan la base (``db_session``
-    y, transitivamente, ``client``/``anon_client``). Así los tests unitarios bajo
-    ``tests/unit/`` (marcados ``unit``) corren sin abrir conexión a PostgreSQL.
+    Not ``autouse``: only requested by fixtures that touch the database
+    (``db_session`` and, transitively, ``client``/``anon_client``). This way the
+    unit tests under ``tests/unit/`` (marked ``unit``) run without opening a
+    PostgreSQL connection.
     """
     Base.metadata.create_all(_test_engine)
 
 
 @pytest.fixture
 def db_session(_create_schema):
-    """Sesión PostgreSQL aislada por test: TRUNCATE al inicio + seed de sucursal."""
+    """PostgreSQL session isolated per test: TRUNCATE at start + branch seed."""
     table_names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
     with _test_engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
@@ -71,7 +72,7 @@ def db_session(_create_schema):
 
 
 class _InMemoryRedis:
-    """Doble en memoria de Redis: parea ``get``/``set`` sobre strings JSON."""
+    """In-memory Redis double: mirrors ``get``/``set`` over JSON strings."""
 
     def __init__(self):
         self._store: dict = {}
@@ -86,7 +87,7 @@ class _InMemoryRedis:
 
 @pytest.fixture(autouse=True)
 def isolated_cache():
-    """Aísla la caché de Redis real: cada test usa un doble en memoria limpio."""
+    """Isolates the real Redis cache: each test uses a clean in-memory double."""
     original_client, original_initialized = cache._client, cache._initialized
     cache._client = _InMemoryRedis()
     cache._initialized = True
@@ -98,10 +99,10 @@ def isolated_cache():
 
 @pytest.fixture
 def anon_client(db_session):
-    """TestClient sin autenticación, con ``get_db`` sobre la base aislada del test.
+    """Unauthenticated TestClient, with ``get_db`` over the test's isolated database.
 
-    Para los tests de auth (login, refresh, enforcement por rol), que controlan el
-    header ``Authorization`` por request. El resto de suites usa ``client``.
+    For the auth tests (login, refresh, role enforcement), which control the
+    ``Authorization`` header per request. The rest of the suites use ``client``.
     """
 
     def override_get_db():
@@ -118,12 +119,12 @@ def anon_client(db_session):
 
 @pytest.fixture
 def client(anon_client, db_session):
-    """TestClient autenticado como administrador por defecto.
+    """TestClient authenticated as an administrator by default.
 
-    El enforcement RBAC protege casi todos los endpoints; para que las suites de
-    cada módulo prueben su lógica sin fricción de auth, este cliente adjunta por
-    defecto el Bearer de un admin sembrado. Los tests que necesitan controlar la
-    autenticación (``test_users.py``) usan ``anon_client``.
+    RBAC enforcement protects almost every endpoint; so each module's suite can
+    test its logic without auth friction, this client attaches a seeded admin's
+    Bearer token by default. Tests that need to control authentication
+    (``test_users.py``) use ``anon_client``.
     """
     svc = UserService(db_session)
     admin = svc.get_by_email(_CONFTEST_ADMIN_EMAIL)
@@ -136,21 +137,21 @@ def client(anon_client, db_session):
                 full_name="Conftest Admin",
             )
         )
-    # Minteamos el JWT directo en vez de pegarle a /auth/login: ``get_current_user``
-    # resuelve el rol vivo por ``sub`` (id del usuario), así que no hace falta el
-    # verify de bcrypt ni el round-trip HTTP del login en cada test.
+    # Mint the JWT directly instead of hitting /auth/login: ``get_current_user``
+    # resolves the live role via ``sub`` (user id), so neither the bcrypt verify
+    # nor the login's HTTP round-trip is needed on every test.
     token = create_access_token(admin.id, admin.role)
     anon_client.headers.update({"Authorization": f"Bearer {token}"})
     return anon_client
 
 
 def pytest_collection_modifyitems(config, items):
-    """Auto-marca por ruta: ``tests/unit/`` ⇒ ``unit``; el resto ⇒ ``integration``.
+    """Auto-marks by path: ``tests/unit/`` => ``unit``; everything else => ``integration``.
 
-    Evita anotar a mano los archivos existentes y habilita el bucle rápido
-    ``pytest -m unit`` (sin PostgreSQL) frente a ``pytest -m integration`` (la suite
-    actual de integración). Los marcadores se declaran en ``pyproject.toml``
-    (``--strict-markers`` está activo).
+    Avoids hand-annotating existing files and enables the fast loop
+    ``pytest -m unit`` (no PostgreSQL) versus ``pytest -m integration`` (the
+    current integration suite). Markers are declared in ``pyproject.toml``
+    (``--strict-markers`` is on).
     """
     for item in items:
         parts = item.path.parts

@@ -6,7 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from src.modules.optimizations.patterns import base_label
 
-# Rutas de fuentes a probar en orden (macOS primero, luego Linux/Docker).
+# Font paths to try in order (macOS first, then Linux/Docker).
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
@@ -15,28 +15,28 @@ _FONT_CANDIDATES = [
     "/Library/Fonts/Arial.ttf",
 ]
 
-# Paleta del diagrama (alineada con la marca MADERABLE de la proforma).
+# Diagram palette (aligned with the proforma's MADERABLE branding).
 COLOR_BOARD_OUTLINE = "#1D1D1B"
 COLOR_PIECE_FILL = "#FCE9E6"
 COLOR_PIECE_OUTLINE = "#E8564B"
 COLOR_DIM = "#1D1D1B"
 COLOR_LABEL = "#212121"
 COLOR_EFFICIENCY = "#2E7D32"
-COLOR_WASTE_FILL = "#ECECEC"  # gris neutro: contrasta con el coral de las piezas
+COLOR_WASTE_FILL = "#ECECEC"  # neutral grey: contrasts with the pieces' coral
 COLOR_WASTE_OUTLINE = "#9E9E9E"
 
-# Grosor del borde de la pieza. Los lados canteados se resaltan con una franja más
-# gruesa pegada al borde, por dentro de la pieza.
+# Piece outline thickness. Banded sides are highlighted with a thicker strip
+# along the edge, inside the piece.
 PIECE_OUTLINE_WIDTH = 2
 EDGE_BANDING_WIDTH = PIECE_OUTLINE_WIDTH + 5
-# Paso (px) del rayado diagonal que distingue el canto duro en modo monocromo.
+# Step (px) of the diagonal hatching that distinguishes hard edge banding in mono mode.
 HATCH_STEP = 6
 
 
 @dataclass(frozen=True)
 class _DiagramTheme:
-    """Colores del diagrama. ``brand`` (proforma, con marca) o ``mono`` (hoja de
-    producción, blanco y negro para el taller)."""
+    """Diagram colors. ``brand`` (proforma, branded) or ``mono`` (production
+    sheet, black and white for the workshop)."""
 
     board_outline: str
     piece_fill: str
@@ -46,7 +46,7 @@ class _DiagramTheme:
     efficiency: str
     waste_fill: str
     waste_outline: str
-    edge: str  # color de la franja del canto
+    edge: str  # edge-banding strip color
 
 
 _BRAND_THEME = _DiagramTheme(
@@ -60,8 +60,9 @@ _BRAND_THEME = _DiagramTheme(
     waste_outline=COLOR_WASTE_OUTLINE,
     edge=COLOR_PIECE_OUTLINE,
 )
-# Monocromo: contornos/cotas/etiquetas en negro, pieza en blanco; el retazo gris ya
-# es neutro y sirve igual. El canto se diferencia por relleno (sólido vs. rayado).
+# Monochrome: outlines/dimensions/labels in black, piece in white; the grey
+# offcut is already neutral and works as-is. Edge banding is distinguished by
+# fill (solid vs. hatched).
 _MONO_THEME = _DiagramTheme(
     board_outline="black",
     piece_fill="white",
@@ -82,9 +83,9 @@ def _draw_edge_strip(
     color: str,
     hatched: bool,
 ) -> None:
-    """Pinta la franja de un canto dentro de ``rect``. Sólida (canto suave) o con
-    rayado diagonal (canto duro). El rayado se dibuja en una imagen temporal del
-    tamaño de la franja y se pega, de modo que queda recortado a la franja."""
+    """Paints an edge-banding strip inside ``rect``. Solid (soft edge) or with
+    diagonal hatching (hard edge). The hatching is drawn on a temporary image
+    the size of the strip and pasted, so it ends up clipped to the strip."""
     x0, y0, x1, y1 = rect
     if not hatched:
         draw.rectangle(rect, fill=color)
@@ -112,10 +113,10 @@ def _rotated_rect(
     w: float,
     h: float,
 ) -> Tuple[int, int, int, int]:
-    """Mapea un rect del tablero (mm) a su rect en píxeles tras girar el tablero 90°
-    en sentido horario. El punto de tablero ``(bx, by)`` va a ``(H - by, bx)``, así que
-    el ancho/alto en mm se intercambian: el alto pasa a la extensión horizontal y el
-    ancho a la vertical. Devuelve ``(px, py, pw, ph)``."""
+    """Maps a board rect (mm) to its pixel rect after rotating the board 90°
+    clockwise. The board point ``(bx, by)`` maps to ``(H - by, bx)``, so the
+    width/height in mm are swapped: height becomes the horizontal extent and
+    width the vertical one. Returns ``(px, py, pw, ph)``."""
     px = board_x + int((board_height - y - h) * scale)
     py = board_y + int(x * scale)
     pw = int(h * scale)
@@ -124,7 +125,7 @@ def _rotated_rect(
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    """Carga una fuente TrueType escalable; cae al bitmap por defecto si no hay."""
+    """Loads a scalable TrueType font; falls back to the default bitmap font."""
     for path in _FONT_CANDIDATES:
         try:
             return ImageFont.truetype(path, size)
@@ -134,7 +135,7 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def _text_size(text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
-    """Mide el ancho y alto de un texto con la fuente dada."""
+    """Measures the width and height of a text with the given font."""
     bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
@@ -142,7 +143,7 @@ def _text_size(text: str, font: ImageFont.ImageFont) -> Tuple[int, int]:
 def _text_image(
     text: str, font: ImageFont.ImageFont, fill: str, pad: int = 2
 ) -> Image.Image:
-    """Renderiza el texto en una imagen RGBA transparente (para pegar/rotar)."""
+    """Renders the text onto a transparent RGBA image (for pasting/rotating)."""
     bbox = ImageDraw.Draw(Image.new("RGBA", (1, 1))).textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     img = Image.new("RGBA", (tw + 2 * pad, th + 2 * pad), (0, 0, 0, 0))
@@ -153,7 +154,7 @@ def _text_image(
 def _fit_label(
     text: str, font: ImageFont.ImageFont, max_width: int, max_height: int
 ) -> Optional[str]:
-    """Devuelve la etiqueta (truncada con … si hace falta) o None si no entra."""
+    """Returns the label (truncated with … if needed), or None if it doesn't fit."""
     tw, th = _text_size(text, font)
     if th > max_height or max_width < 24:
         return None
@@ -170,13 +171,13 @@ class VisualizationService:
     def generate_layout_image(
         group: dict, target_long: int = 2000, mono: bool = False
     ) -> Tuple[io.BytesIO, Tuple[int, int]]:
-        """Dibuja un único patrón de corte ocupando todo el lienzo.
+        """Draws a single cutting pattern filling the whole canvas.
 
-        El lienzo adopta el aspecto del tablero para que, incrustado a página
-        completa, lo llene al máximo. El alto de cada pieza se acota sobre el borde
-        izquierdo (texto vertical) y el ancho sobre el borde inferior; la etiqueta va
-        centrada. Devuelve el buffer PNG y sus dimensiones en px para incrustarlo
-        respetando la proporción.
+        The canvas adopts the board's aspect ratio so that, embedded full-page,
+        it fills it to the maximum. Each piece's height is dimensioned along the
+        left edge (vertical text) and its width along the bottom edge; the label
+        is centered. Returns the PNG buffer and its dimensions in px so it can be
+        embedded preserving the aspect ratio.
         """
         layout = group.get("layout", group)
         count = group.get("count", 1)
@@ -187,8 +188,8 @@ class VisualizationService:
         margin = 60
         info_height = 150
 
-        # El tablero se dibuja girado 90° en sentido horario (landscape): el alto del
-        # tablero pasa a ser la extensión horizontal del lienzo y el ancho la vertical.
+        # The board is drawn rotated 90° clockwise (landscape): the board's height
+        # becomes the canvas's horizontal extent and its width the vertical one.
         scale = target_long / max(board_width, board_height)
         scaled_board_width = int(board_height * scale)
         scaled_board_height = int(board_width * scale)
@@ -206,8 +207,8 @@ class VisualizationService:
 
         theme = _MONO_THEME if mono else _BRAND_THEME
 
-        # Tipos de canto presentes en el patrón (para la leyenda). Un canteado sin
-        # tipo conocido (snapshots viejos) se trata como sólido → "Soft".
+        # Edge-banding types present in the pattern (for the legend). A banded
+        # piece with no known type (older snapshots) is treated as solid → "Soft".
         band_types: Set[str] = set()
         for piece in layout.get("placed_pieces", []):
             edges = piece.get("edges") or {}
@@ -307,14 +308,14 @@ class VisualizationService:
         band_types: Optional[Set[str]] = None,
         max_x: Optional[int] = None,
     ) -> None:
-        """Dibuja la leyenda (pieza, retazo y, según el patrón, los cantos).
+        """Draws the legend (piece, offcut and, depending on the pattern, the edges).
 
-        En monocromo desglosa el canto suave (muestra sólida) y el duro (muestra
-        rayada) según los tipos presentes; con marca usa una sola "Lado canteado".
-        Envuelve en una nueva fila cuando una entrada se saldría de ``max_x``.
+        In monochrome it breaks down soft edge banding (solid swatch) and hard
+        (hatched swatch) based on the types present; branded mode uses a single
+        "Lado canteado" entry. Wraps to a new row when an entry would overflow ``max_x``.
         """
         band_types = band_types or set()
-        # entradas: (fill, outline, width, text, hatched)
+        # entries: (fill, outline, width, text, hatched)
         legend = [
             (
                 theme.piece_fill,
@@ -378,9 +379,10 @@ class VisualizationService:
         theme: _DiagramTheme,
         mono: bool = False,
     ) -> None:
-        """Dibuja una pieza (tablero girado 90° horario) con una cota acotada a la
-        izquierda, otra abajo y la etiqueta al centro. Tras el giro el alto en mm es la
-        extensión horizontal del rect y el ancho la vertical."""
+        """Draws a piece (board rotated 90° clockwise) with a dimension on the
+        left, another on the bottom, and the label centered. After the rotation,
+        the height in mm is the rect's horizontal extent and the width the
+        vertical one."""
         px, py, pw, ph = _rotated_rect(
             board_x,
             board_y,
@@ -399,10 +401,10 @@ class VisualizationService:
             width=PIECE_OUTLINE_WIDTH,
         )
 
-        # Lados canteados: franja gruesa pegada al borde, por dentro de la pieza. En
-        # monocromo el canto duro va rayado en diagonal y el suave (o desconocido)
-        # sólido. Se dibujan antes de las cotas para que los números queden encima. Al
-        # girar el tablero 90° horario los lados rotan: left→top, top→right,
+        # Banded sides: thick strip along the edge, inside the piece. In
+        # monochrome, hard edges are hatched diagonally and soft (or unknown) ones
+        # are solid. Drawn before the dimensions so the numbers sit on top. After
+        # rotating the board 90° clockwise the sides rotate: left→top, top→right,
         # right→bottom, bottom→left.
         edges = piece.get("edges") or {}
         sides = set(edges.get("sides") or [])
@@ -425,8 +427,8 @@ class VisualizationService:
 
         pad = 4
 
-        # Tras el giro, el alto (primera medida) es la extensión horizontal: va sobre el
-        # borde inferior con texto horizontal.
+        # After rotation, the height (first dimension) is the horizontal extent:
+        # it goes along the bottom edge with horizontal text.
         alto = _text_image(str(int(piece["height"])), dim_font, theme.dim)
         if alto.width <= pw - 2 * pad and alto.height <= ph - 2 * pad:
             img.paste(
@@ -435,18 +437,19 @@ class VisualizationService:
                 alto,
             )
 
-        # El ancho (segunda medida) es la extensión vertical: va sobre el borde izquierdo
-        # con texto vertical.
+        # The width (second dimension) is the vertical extent: it goes along the
+        # left edge with vertical text.
         ancho = _text_image(str(int(piece["width"])), dim_font, theme.dim).rotate(
             90, expand=True
         )
         if ancho.height <= ph - 2 * pad and ancho.width <= pw - 2 * pad:
             img.paste(ancho, (px + pad, py + (ph - ancho.height) // 2), ancho)
 
-        # Texto centrado: la etiqueta de la pieza (etiqueta base, sin sufijo de
-        # instancia y omitiendo las auto-generadas piece_N) y, debajo, la notación de
-        # cantos (p. ej. "2L1C CS"). Se apilan y se centran como bloque; cada línea se
-        # omite si no cabe, cubriendo etiqueta+notación, solo etiqueta o solo notación.
+        # Centered text: the piece label (base label, without the instance suffix
+        # and omitting the auto-generated piece_N) and, below it, the edge-banding
+        # notation (e.g. "2L1C CS"). They're stacked and centered as a block; each
+        # line is omitted if it doesn't fit, covering label+notation, label only,
+        # or notation only.
         stack = []
         piece_id = base_label(str(piece.get("piece_id", "")))
         if piece_id and not piece_id.startswith("piece_"):

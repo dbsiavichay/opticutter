@@ -1,5 +1,5 @@
-"""Tests de la pista PARALELA de canteado: estado inicial, solapamiento con el
-corte, gate de cierre, guards, idempotencia, cola del canteador y RBAC del rol."""
+"""Tests for the PARALLEL edge-banding track: initial state, overlap with
+cutting, completion gate, guards, idempotency, canteador queue and role RBAC."""
 
 from sqlalchemy.orm import Session
 
@@ -10,11 +10,11 @@ from src.modules.users.schemas import UserCreate
 from src.modules.users.service import UserService
 
 _PWD = "pw-supersecret"
-_BRANCH = 1  # sucursal por defecto sembrada por conftest
+_BRANCH = 1  # default branch seeded by conftest
 
 
 # --------------------------------------------------------------------------- #
-# Helpers de catálogo / órdenes (mismo patrón que test_edge_banding.py)
+# Catalog / order helpers (same pattern as test_edge_banding.py)
 # --------------------------------------------------------------------------- #
 def _create_client(client, identifier="0991112233"):
     return client.post(
@@ -60,14 +60,14 @@ def _create_edge_banding(client, code="TAP22", price=2.0):
 
 
 def _mint_order(client, db_session, payload):
-    """Mintea por el servicio (la creación HTTP se retiró) y lee vía GET."""
+    """Mints via the service (HTTP creation was removed) and reads it back via GET."""
     order = OrderService(db_session).create(OrderCreate.model_validate(payload))
     return client.get(f"/api/v1/orders/{order.id}").json()["data"]
 
 
 def _order_with_banding(client, db_session, branch_id=_BRANCH, identifier="0991112233"):
     c = _create_client(client, identifier=identifier)
-    suffix = identifier[-4:]  # códigos de producto únicos por orden (evita 409)
+    suffix = identifier[-4:]  # unique product codes per order (avoids 409)
     b = _create_board(client, code=f"MEL{suffix}")
     eb = _create_edge_banding(client, code=f"TAP{suffix}")
     return _mint_order(
@@ -121,7 +121,7 @@ def _order_without_banding(client, db_session):
 def _patch_status(client, oid, status, **kw):
     body = {"status": status}
     if status == "queued":
-        # Pasar a cola exige registrar la forma de pago (informativa).
+        # Moving to the queue requires registering the payment method (informational).
         body["payment"] = {"cashAmount": 100.0}
     return client.patch(f"/api/v1/orders/{oid}/status", json=body, **kw)
 
@@ -146,7 +146,7 @@ def _cut_all_pieces(client, oid):
 
 
 def _token_for(client, db_session, role, branch_id=_BRANCH, email=None):
-    """Siembra un usuario del rol y devuelve un header Bearer (login real)."""
+    """Seeds a user with the given role and returns a Bearer header (real login)."""
     email = email or f"{role}@empresa.com"
     svc = UserService(db_session)
     if svc.get_by_email(email) is None:
@@ -166,7 +166,7 @@ def _token_for(client, db_session, role, branch_id=_BRANCH, email=None):
 
 
 # --------------------------------------------------------------------------- #
-# Estado inicial de la pista de canteado
+# Initial state of the edge-banding track
 # --------------------------------------------------------------------------- #
 def test_order_with_edge_banding_starts_pending(client, db_session):
     order = _order_with_banding(client, db_session)
@@ -181,10 +181,10 @@ def test_order_without_edge_banding_is_not_applicable(client, db_session):
 
 
 # --------------------------------------------------------------------------- #
-# Solapamiento: cantear mientras el corte sigue abierto
+# Overlap: banding while cutting is still open
 # --------------------------------------------------------------------------- #
 def test_banding_runs_in_parallel_with_cutting(client, db_session):
-    """El canteado inicia mientras la orden sigue en 'cutting' (sin cerrar el corte)."""
+    """Banding starts while the order is still 'cutting' (without closing the cut)."""
     order = _order_with_banding(client, db_session)
     _to_cutting(client, order["id"])
 
@@ -194,10 +194,10 @@ def test_banding_runs_in_parallel_with_cutting(client, db_session):
     assert data["bandingStatus"] == "in_progress"
     assert data["bandingStartedAt"] is not None
 
-    # La orden sigue en corte y el plan de corte se puede seguir marcando en paralelo.
+    # The order stays in cutting and the cutting plan can keep being marked in parallel.
     detail = client.get(f"/api/v1/orders/{order['id']}").json()["data"]
     assert detail["status"] == "cutting"
-    assert detail["bandingStartedByLabel"]  # actor congelado
+    assert detail["bandingStartedByLabel"]  # frozen actor
 
 
 def test_banding_finish_then_order_completes(client, db_session):
@@ -208,14 +208,14 @@ def test_banding_finish_then_order_completes(client, db_session):
     assert finished.status_code == 200
     assert finished.json()["data"]["bandingFinishedAt"] is not None
 
-    # Cerrar el corte y completar: con el canteado terminado, el gate pasa.
+    # Close the cut and complete: with banding finished, the gate passes.
     _cut_all_pieces(client, order["id"])
     assert _patch_status(client, order["id"], "cut").status_code == 200
     assert _patch_status(client, order["id"], "completed").status_code == 200
 
 
 # --------------------------------------------------------------------------- #
-# Gate de cierre: solo si lleva tapacantos
+# Completion gate: only if the order has edge banding
 # --------------------------------------------------------------------------- #
 def test_complete_blocked_until_banding_done(client, db_session):
     order = _order_with_banding(client, db_session)
@@ -223,19 +223,19 @@ def test_complete_blocked_until_banding_done(client, db_session):
     _cut_all_pieces(client, order["id"])
     assert _patch_status(client, order["id"], "cut").status_code == 200
 
-    # Canteado aún pendiente → no se puede completar.
+    # Banding still pending → can't complete.
     blocked = _patch_status(client, order["id"], "completed")
     assert blocked.status_code == 422
     assert "canteado" in blocked.json()["errors"][0]["message"].lower()
 
-    # Tras terminar el canteado (válido en estado 'cut'), el cierre pasa.
+    # After finishing banding (valid in 'cut' state), completion passes.
     assert _patch_banding(client, order["id"], "in_progress").status_code == 200
     assert _patch_banding(client, order["id"], "done").status_code == 200
     assert _patch_status(client, order["id"], "completed").status_code == 200
 
 
 def test_complete_without_edge_banding_needs_no_banding(client, db_session):
-    """Una orden sin tapacantos (not_applicable) cierra sin paso de canteado."""
+    """An order without edge banding (not_applicable) completes without a banding step."""
     order = _order_without_banding(client, db_session)
     _to_cutting(client, order["id"])
     _cut_all_pieces(client, order["id"])
@@ -244,10 +244,10 @@ def test_complete_without_edge_banding_needs_no_banding(client, db_session):
 
 
 # --------------------------------------------------------------------------- #
-# Guards de la transición de canteado
+# Banding transition guards
 # --------------------------------------------------------------------------- #
 def test_banding_requires_order_in_cutting_or_cut(client, db_session):
-    """Antes de cortar (queued) no hay piezas liberadas que cantear → 422."""
+    """Before cutting (queued) there are no released pieces to band → 422."""
     order = _order_with_banding(client, db_session)
     assert _patch_status(client, order["id"], "queued").status_code == 200
     resp = _patch_banding(client, order["id"], "in_progress")
@@ -256,7 +256,7 @@ def test_banding_requires_order_in_cutting_or_cut(client, db_session):
 
 
 def test_banding_not_applicable_order_rejected(client, db_session):
-    """Una orden sin tapacantos no admite registro de canteado → 422."""
+    """An order without edge banding doesn't accept banding registration → 422."""
     order = _order_without_banding(client, db_session)
     _to_cutting(client, order["id"])
     resp = _patch_banding(client, order["id"], "in_progress")
@@ -267,7 +267,7 @@ def test_banding_not_applicable_order_rejected(client, db_session):
 def test_banding_invalid_transition_skipping_in_progress(client, db_session):
     order = _order_with_banding(client, db_session)
     _to_cutting(client, order["id"])
-    resp = _patch_banding(client, order["id"], "done")  # pending → done (salta inicio)
+    resp = _patch_banding(client, order["id"], "done")  # pending → done (skips start)
     assert resp.status_code == 422
     assert "inválida" in resp.json()["errors"][0]["message"].lower()
 
@@ -277,13 +277,13 @@ def test_banding_in_progress_is_idempotent(client, db_session):
     _to_cutting(client, order["id"])
     first = _patch_banding(client, order["id"], "in_progress").json()["data"]
     again = _patch_banding(client, order["id"], "in_progress").json()["data"]
-    # Re-aplicar no re-sella el inicio.
+    # Re-applying doesn't re-stamp the start time.
     assert again["bandingStartedAt"] == first["bandingStartedAt"]
     assert again["bandingStatus"] == "in_progress"
 
 
 # --------------------------------------------------------------------------- #
-# Cola de canteado + aislamiento por sucursal
+# Banding queue + branch isolation
 # --------------------------------------------------------------------------- #
 def test_banding_queue_lists_pending_orders(client, db_session):
     order = _order_with_banding(client, db_session)
@@ -298,12 +298,12 @@ def test_banding_queue_lists_pending_orders(client, db_session):
 
 
 def test_banding_queue_excludes_finished_and_unstarted(client, db_session):
-    """Solo entran órdenes con canteado pendiente y corte ya iniciado."""
-    # Pendiente pero aún en 'queued' (corte no inició) → fuera.
+    """Only orders with pending banding and cutting already started are included."""
+    # Pending but still 'queued' (cutting hasn't started) → excluded.
     not_cutting = _order_with_banding(client, db_session, identifier="0990000001")
     assert _patch_status(client, not_cutting["id"], "queued").status_code == 200
 
-    # En corte y con canteado terminado → fuera.
+    # Cutting and banding already finished → excluded.
     done = _order_with_banding(client, db_session, identifier="0990000002")
     _to_cutting(client, done["id"])
     _patch_banding(client, done["id"], "in_progress")
@@ -317,12 +317,12 @@ def test_banding_queue_excludes_finished_and_unstarted(client, db_session):
 
 
 def test_banding_queue_is_branch_scoped(client, db_session: Session):
-    """El canteador solo ve la cola de su sucursal."""
-    # Orden con canteado pendiente en la sucursal por defecto (1), en corte.
+    """The canteador only sees their own branch's queue."""
+    # Order with pending banding in the default branch (1), in cutting.
     order = _order_with_banding(client, db_session)
     _to_cutting(client, order["id"])
 
-    # Un canteador de OTRA sucursal no ve esa orden en su cola.
+    # A canteador from ANOTHER branch doesn't see this order in their queue.
     db_session.add(BranchModel(code="SUC2", name="Sucursal Dos", is_active=True))
     db_session.commit()
     branch2 = db_session.query(BranchModel).filter(BranchModel.code == "SUC2").one()
@@ -336,21 +336,21 @@ def test_banding_queue_is_branch_scoped(client, db_session: Session):
     queue = client.get("/api/v1/orders/banding-queue", headers=headers).json()["data"]
     assert order["id"] not in {i["orderId"] for i in queue}
 
-    # El canteador de la sucursal 1 sí la ve.
+    # The canteador from branch 1 does see it.
     h1 = _token_for(client, db_session, "canteador")
     q1 = client.get("/api/v1/orders/banding-queue", headers=h1).json()["data"]
     assert order["id"] in {i["orderId"] for i in q1}
 
 
 # --------------------------------------------------------------------------- #
-# RBAC del rol canteador
+# canteador role RBAC
 # --------------------------------------------------------------------------- #
 def test_canteador_can_band_but_not_read_order_detail(client, db_session):
     order = _order_with_banding(client, db_session)
     _to_cutting(client, order["id"])
     headers = _token_for(client, db_session, "canteador")
 
-    # Puede registrar el canteado y ver su cola...
+    # Can register banding and see their queue...
     assert (
         _patch_banding(client, order["id"], "in_progress", headers=headers).status_code
         == 200
@@ -358,7 +358,7 @@ def test_canteador_can_band_but_not_read_order_detail(client, db_session):
     assert (
         client.get("/api/v1/orders/banding-queue", headers=headers).status_code == 200
     )
-    # ...pero NO el detalle de la orden (sin orders:read).
+    # ...but NOT the order detail (no orders:read).
     assert (
         client.get(f"/api/v1/orders/{order['id']}", headers=headers).status_code == 403
     )

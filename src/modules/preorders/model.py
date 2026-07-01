@@ -10,7 +10,7 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class PreOrderStatus(str, Enum):
-    """Estados de una pre-orden (cotización mutable previa a la orden)."""
+    """States of a pre-order (mutable quote prior to the order)."""
 
     draft = "draft"
     sent = "sent"
@@ -21,16 +21,17 @@ class PreOrderStatus(str, Enum):
     cancelled = "cancelled"
 
 
-# Abiertas (editables): cuentan para el tope antiabuso por cliente y para el
-# barrido perezoso de vigencia. ``changes_requested`` es abierta: el cliente pidió
-# un ajuste desde el enlace y la pelota vuelve al taller, que la edita y reenvía.
+# Open (editable): they count toward the per-client anti-abuse cap and the lazy
+# expiry sweep. ``changes_requested`` is open: the client asked for an
+# adjustment from the link and the ball is back with the workshop, which edits
+# and resends it.
 OPEN_STATUSES = {
     PreOrderStatus.draft,
     PreOrderStatus.sent,
     PreOrderStatus.changes_requested,
 }
 
-# Sin salida: la pre-orden ya no se transforma.
+# No way out: the pre-order no longer transforms.
 TERMINAL_STATUSES = {
     PreOrderStatus.confirmed,
     PreOrderStatus.rejected,
@@ -40,7 +41,7 @@ TERMINAL_STATUSES = {
 
 
 class ReviewLinkStatus(str, Enum):
-    """Estados de un enlace de revisión del cliente."""
+    """States of a client review link."""
 
     active = "active"
     used = "used"
@@ -48,13 +49,13 @@ class ReviewLinkStatus(str, Enum):
 
 
 class PreOrderModel(TimestampMixin, AuditMixin, Base):
-    """Cotización mutable: inputs del optimizador + enlace de revisión del cliente.
+    """Mutable quote: optimizer inputs + the client's review link.
 
-    A diferencia de la Orden (snapshot inmutable congelado), la pre-orden guarda
-    solo los **inputs** (``materials`` + ``requirements``, forma de ``OptimizeRequest``)
-    y recalcula el resultado bajo demanda (cache-first): así puede editarse libremente
-    y sus precios son vivos hasta confirmar. Cuando el cliente da el visto bueno en el
-    enlace de revisión, se materializa la Orden inmutable y se enlaza en ``order_id``.
+    Unlike the Order (a frozen immutable snapshot), the pre-order only stores
+    the **inputs** (``materials`` + ``requirements``, shaped like ``OptimizeRequest``)
+    and recomputes the result on demand (cache-first): this lets it be edited
+    freely with live prices until confirmed. Once the client approves it on the
+    review link, the immutable Order is materialized and linked via ``order_id``.
     """
 
     __tablename__ = "preorders"
@@ -62,33 +63,33 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
-    # Sucursal dueña de la cotización (heredada por la orden al confirmar).
+    # Branch owning the quote (inherited by the order upon confirmation).
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=PreOrderStatus.draft.value)
 
-    # Inputs del optimizador, tal cual, para recalcular (no se guarda snapshot).
+    # Optimizer inputs, as-is, for the recompute (no snapshot is stored).
     materials: Mapped[list] = mapped_column(JSON)
     requirements: Mapped[list] = mapped_column(JSON)
 
-    # Nivel de precio seleccionado (descuento vivo; se congela al confirmar la orden).
+    # Selected price tier (live discount; frozen once the order is confirmed).
     price_tier_code: Mapped[str] = mapped_column(
         String(32), default="consumidor", server_default="consumidor"
     )
 
-    # Heurística de acomodo elegida (afecta la geometría del recálculo): se conserva
-    # para reproducir el mismo resultado en cada lectura y heredarla la orden al
-    # confirmar. Ver OptimizationStrategy (default | longOffcuts).
+    # Chosen packing heuristic (affects the recompute's geometry): kept so each
+    # read reproduces the same result and the order inherits it upon
+    # confirmation. See OptimizationStrategy (default | longOffcuts).
     strategy: Mapped[str] = mapped_column(
         String(32), default="default", server_default="default"
     )
 
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    # Última solicitud de cambios del cliente (texto libre desde el enlace de
-    # revisión); se limpia cuando el taller edita y reenvía la pre-orden.
+    # Latest client change request (free text from the review link); cleared
+    # once the workshop edits and resends the pre-order.
     client_note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
-    # Orden inmutable creada al confirmar (nula mientras la pre-orden esté abierta).
+    # Immutable order created upon confirmation (null while the pre-order is open).
     order_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("orders.id"), nullable=True
     )
@@ -117,11 +118,12 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
 
 
 class PreOrderReviewLinkModel(TimestampMixin, AuditMixin, Base):
-    """Enlace seguro de revisión del cliente (el token es la credencial).
+    """Secure client review link (the token is the credential).
 
-    Solo se persiste el sha256 del token; el token crudo se devuelve una única vez
-    al generarlo y es irrecuperable (perderlo = regenerar, lo que revoca el anterior).
-    Un solo enlace ``active`` por pre-orden, garantizado en el servicio.
+    Only the token's sha256 is persisted; the raw token is returned exactly
+    once at generation time and is unrecoverable (losing it means regenerating
+    it, which revokes the previous one). A single ``active`` link per
+    pre-order, enforced in the service.
     """
 
     __tablename__ = "preorder_review_links"
@@ -132,10 +134,10 @@ class PreOrderReviewLinkModel(TimestampMixin, AuditMixin, Base):
     status: Mapped[str] = mapped_column(
         String(16), default=ReviewLinkStatus.active.value
     )
-    # Espejo de preorder.expires_at al generar (defensa en profundidad).
+    # Mirrors preorder.expires_at at generation time (defense in depth).
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    # Auditoría de la acción del cliente: {"action", "ip", "user_agent", "note"}.
+    # Audit trail of the client's action: {"action", "ip", "user_agent", "note"}.
     used_meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     preorder: Mapped["PreOrderModel"] = relationship(
@@ -144,11 +146,11 @@ class PreOrderReviewLinkModel(TimestampMixin, AuditMixin, Base):
 
 
 class PreOrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
-    """Auditoría de transiciones de estado de una pre-orden (espejo de orders).
+    """Audit trail of a pre-order's status transitions (mirrors orders).
 
-    ``actor`` es el TIPO (``staff``/``client``/``system``); ``actor_user_id`` la FK
-    al usuario de staff (NULL para cliente/sistema) y ``actor_label`` el snapshot
-    legible del nombre al momento del hecho.
+    ``actor`` is the TYPE (``staff``/``client``/``system``); ``actor_user_id`` is
+    the FK to the staff user (NULL for client/system) and ``actor_label`` is the
+    readable name snapshot at the time of the event.
     """
 
     __tablename__ = "preorder_status_history"

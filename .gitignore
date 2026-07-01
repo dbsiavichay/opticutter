@@ -8,31 +8,31 @@ __pycache__/
 build/
 dist/
 
-# Tests y cobertura
+# Tests and coverage
 .pytest_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-# Entornos virtuales
+# Virtual environments
 .venv/
 venv/
 
-# Variables de entorno y datos locales
+# Environment variables and local data
 .env
 *.db
 
-# Editores e IDEs
+# Editors and IDEs
 *~
 *.swp
 .idea/
 .qodo
 
-# Herramientas locales (no compartidas)
+# Local tools (not shared)
 .claude/
 .mcp.json
 
-# Excepciones: estos sí se versionan
+# Exceptions: these are versioned
 !.gitignore
 !.dockerignore
 !.editorconfig

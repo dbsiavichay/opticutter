@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class SplitRule(Enum):
-    """Reglas para dividir los rectángulos sobrantes después de colocar una pieza"""
+    """Rules for splitting leftover rectangles after placing a piece"""
 
     SHORTER_LEFTOVER_AXIS = "shorter_leftover_axis"
     LONGER_LEFTOVER_AXIS = "longer_leftover_axis"
@@ -13,25 +13,25 @@ class SplitRule(Enum):
 
 
 class PackingStrategy(str, Enum):
-    """Perfil de empaquetado: agrupa las tres decisiones del optimizador.
+    """Packing profile: groups the optimizer's three decisions.
 
-    ``MAX_EFFICIENCY`` (default) minimiza la merma total pero la fragmenta:
-    orden por área descendente + selección Best-Area-Fit + split
-    ``SHORTER_LEFTOVER_AXIS``.
+    ``MAX_EFFICIENCY`` (default) minimizes total waste but fragments it:
+    area-decreasing sort + Best-Area-Fit selection + ``SHORTER_LEFTOVER_AXIS``
+    split.
 
-    ``LONG_OFFCUTS`` concentra la merma en una tira continua y reutilizable
-    apegada al eje largo del tablero: orden por alto/ancho descendente (arma
-    columnas) + selección Bottom-Left (pega las piezas a una esquina) + split
-    ``LONGER_AXIS`` (conserva el eje largo del rectángulo). Es la heurística de
-    "retazos aprovechables" (Cutting Stock Problem with Usable Leftovers).
+    ``LONG_OFFCUTS`` concentrates the waste into one continuous, reusable strip
+    along the board's long axis: height/width-decreasing sort (builds columns)
+    + Bottom-Left selection (pushes pieces into a corner) + ``LONGER_AXIS``
+    split (preserves the rectangle's long axis). This is the "usable offcuts"
+    heuristic (Cutting Stock Problem with Usable Leftovers).
     """
 
     MAX_EFFICIENCY = "max_efficiency"
     LONG_OFFCUTS = "long_offcuts"
 
 
-# Única fuente de la regla de split por estrategia. ``GuillotineOptimizer``
-# la usa cuando no se pasa un ``split_rule`` explícito.
+# Single source of truth for the split rule per strategy. ``GuillotineOptimizer``
+# uses it when no explicit ``split_rule`` is passed.
 PACKING_STRATEGY_SPLIT_RULE = {
     PackingStrategy.MAX_EFFICIENCY: SplitRule.SHORTER_LEFTOVER_AXIS,
     PackingStrategy.LONG_OFFCUTS: SplitRule.LONGER_AXIS,

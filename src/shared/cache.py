@@ -1,8 +1,8 @@
-"""Caché compartida sobre Redis con (de)serialización JSON y degradación elegante.
+"""Shared Redis-backed cache with JSON (de)serialization and graceful degradation.
 
-La caché es un *acelerador*, no la fuente de verdad: si Redis no responde,
-``get_json`` devuelve ``None`` y ``set_json`` es un no-op, de modo que el llamador
-simplemente recalcula. El cliente se crea de forma perezosa y puede inyectarse en
+The cache is an *accelerator*, not the source of truth: if Redis doesn't
+respond, ``get_json`` returns ``None`` and ``set_json`` is a no-op, so the
+caller simply recomputes. The client is created lazily and can be injected in
 tests (``CacheService(client=...)``).
 """
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class CacheService:
-    """Envoltorio JSON sobre un cliente Redis tolerante a fallos."""
+    """JSON wrapper over a fault-tolerant Redis client."""
 
     def __init__(self, client: Optional["redis.Redis"] = None):
         self._client = client
@@ -26,7 +26,7 @@ class CacheService:
 
     @property
     def client(self) -> Optional["redis.Redis"]:
-        """Cliente Redis perezoso; ``None`` si no se pudo inicializar."""
+        """Lazy Redis client; ``None`` if it couldn't be initialized."""
         if not self._initialized:
             try:
                 self._client = redis.Redis.from_url(
@@ -36,20 +36,20 @@ class CacheService:
                     decode_responses=True,
                 )
             except (redis.RedisError, ValueError) as exc:  # pragma: no cover
-                logger.warning("No se pudo inicializar Redis: %s", exc)
+                logger.warning("Could not initialize Redis: %s", exc)
                 self._client = None
             self._initialized = True
         return self._client
 
     def get_json(self, key: str) -> Optional[Any]:
-        """Devuelve el valor deserializado, o ``None`` si no existe o Redis falla."""
+        """Returns the deserialized value, or ``None`` if missing or Redis fails."""
         client = self.client
         if client is None:
             return None
         try:
             raw = client.get(key)
         except redis.RedisError as exc:
-            logger.warning("Cache get falló (%s): %s", key, exc)
+            logger.warning("Cache get failed (%s): %s", key, exc)
             return None
         if raw is None:
             return None
@@ -59,7 +59,7 @@ class CacheService:
             return None
 
     def set_json(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """Serializa y guarda ``value`` con expiración; no-op si Redis falla."""
+        """Serializes and stores ``value`` with expiration; no-op if Redis fails."""
         client = self.client
         if client is None:
             return
@@ -67,8 +67,8 @@ class CacheService:
         try:
             client.set(key, json.dumps(value), ex=ttl)
         except redis.RedisError as exc:
-            logger.warning("Cache set falló (%s): %s", key, exc)
+            logger.warning("Cache set failed (%s): %s", key, exc)
 
 
-# Instancia compartida; los servicios importan ``cache`` y lo usan directamente.
+# Shared instance; services import ``cache`` and use it directly.
 cache = CacheService()

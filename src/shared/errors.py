@@ -10,8 +10,8 @@ from src.shared.responses import ErrorDetail, ErrorResponse
 
 logger = logging.getLogger(__name__)
 
-# Nombres de código legibles para errores HTTP que no nacen de un ``AppError``
-# (rutas inexistentes, método no permitido, ``HTTPException`` manual).
+# Readable code names for HTTP errors that don't originate from an ``AppError``
+# (nonexistent routes, method not allowed, manual ``HTTPException``).
 _HTTP_CODE_NAMES = {
     400: "BAD_REQUEST",
     401: "UNAUTHORIZED",
@@ -32,11 +32,11 @@ def _error_response(status_code: int, details: list[ErrorDetail]) -> JSONRespons
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Registra el manejo centralizado de errores con la envoltura ``{errors, meta}``.
+    """Registers centralized error handling with the ``{errors, meta}`` envelope.
 
-    Cubre los cuatro orígenes: errores de aplicación/dominio (``AppError``),
-    validación de request (``RequestValidationError``), ``HTTPException`` del
-    framework y cualquier excepción no controlada (catch-all 500).
+    Covers the four sources: application/domain errors (``AppError``), request
+    validation (``RequestValidationError``), framework ``HTTPException``, and
+    any unhandled exception (catch-all 500).
     """
 
     @app.exception_handler(AppError)
@@ -52,7 +52,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             ErrorDetail(
                 code="VALIDATION_ERROR",
                 message=err["msg"],
-                field=".".join(str(part) for part in err["loc"]),  # p. ej. body.price
+                field=".".join(str(part) for part in err["loc"]),  # e.g. body.price
             )
             for err in exc.errors()
         ]
@@ -68,7 +68,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unhandled_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Excepción no controlada")
+        logger.exception("Unhandled exception")
         detail = ErrorDetail(
             code="INTERNAL_SERVER_ERROR", message="Error interno del servidor"
         )

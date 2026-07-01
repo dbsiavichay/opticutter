@@ -1,8 +1,8 @@
-"""Registro de eventos de login: alimenta la analítica de "hora de entrada".
+"""Login event log: feeds the "arrival time" analytics.
 
-Cada login exitoso en ``/auth/login`` inserta una fila en ``user_login_events``.
-La hora del primer evento del día de un usuario aproxima su hora de llegada. La
-renovación de token (``/auth/refresh``) no pasa por aquí: no es una entrada nueva.
+Each successful login on ``/auth/login`` inserts a row into ``user_login_events``.
+The time of a user's first event of the day approximates their arrival time. Token
+renewal (``/auth/refresh``) doesn't go through here: it's not a new entry.
 """
 
 from typing import Optional
@@ -15,7 +15,7 @@ from src.shared.database import get_db
 
 
 class LoginEventService:
-    """Persiste eventos de login contra la tabla ``user_login_events``."""
+    """Persists login events against the ``user_login_events`` table."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -26,7 +26,7 @@ class LoginEventService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> None:
-        """Registra un login exitoso (hora = ``created_at`` del row)."""
+        """Records a successful login (time = the row's ``created_at``)."""
         self.db.add(
             UserLoginEventModel(
                 user_id=user_id,
@@ -38,5 +38,5 @@ class LoginEventService:
 
 
 def login_event_service(db: Session = Depends(get_db)) -> LoginEventService:
-    """Provider de ``LoginEventService`` para inyección en rutas."""
+    """``LoginEventService`` provider for route injection."""
     return LoginEventService(db)

@@ -1,10 +1,10 @@
-"""Unidad: máquina de estados de ``OrderService.transition`` (sin DB).
+"""Unit: ``OrderService.transition`` state machine (no DB).
 
-Construye un ``OrderModel`` transitorio (sin sesión) y reemplaza la carga por id
-(``get_scoped_or_404``) por el objeto en mano, de modo que se ejercitan los *gates*
-de la transición sin tocar PostgreSQL. Es el patrón de referencia para probar lógica
-de servicio con ``mock_session``: cada camino que rechaza la transición **no** debe
-llamar a ``commit``.
+Builds a transient ``OrderModel`` (no session) and replaces the id lookup
+(``get_scoped_or_404``) with the object in hand, so the transition gates are
+exercised without touching PostgreSQL. This is the reference pattern for testing
+service logic with ``mock_session``: every path that rejects the transition must
+**not** call ``commit``.
 """
 
 from datetime import datetime
@@ -27,7 +27,7 @@ from src.shared.exceptions import (
 def _order(
     status: OrderStatus, *, banding_status: str = "not_applicable"
 ) -> OrderModel:
-    """Orden transitoria (sin sesión) en el estado pedido."""
+    """Transient order (no session) in the requested status."""
     order = OrderModel(status=status.value, banding_status=banding_status)
     order.id = 1
     return order
@@ -35,7 +35,7 @@ def _order(
 
 def _service(mock_session, order: OrderModel) -> OrderService:
     svc = OrderService(mock_session)
-    # La carga por id con scope de sucursal se sustituye por la orden en mano.
+    # The branch-scoped id lookup is replaced with the order in hand.
     svc.get_scoped_or_404 = lambda *a, **k: order
     return svc
 
@@ -44,7 +44,7 @@ def _actor(role: UserRole | None) -> Actor:
     return Actor("staff", user_id=1, label="Tester", role=role.value if role else None)
 
 
-# --- Transiciones inválidas / autorización -----------------------------------
+# --- Invalid transitions / authorization ---------------------------------------
 def test_invalid_transition_raises_and_does_not_commit(mock_session):
     svc = _service(mock_session, _order(OrderStatus.confirmed))
     with pytest.raises(BusinessRuleError):
@@ -54,13 +54,13 @@ def test_invalid_transition_raises_and_does_not_commit(mock_session):
 
 def test_role_gate_blocks_unauthorized_role(mock_session):
     svc = _service(mock_session, _order(OrderStatus.confirmed))
-    # confirmed → queued solo lo pueden hacer admin/vendedor, no el operador.
+    # confirmed -> queued can only be done by admin/seller, not the operator.
     with pytest.raises(AuthorizationError):
         svc.transition(1, OrderStatus.queued, actor=_actor(UserRole.OPERATOR))
     mock_session.commit.assert_not_called()
 
 
-# --- Gate de forma de pago (confirmed → queued) ------------------------------
+# --- Payment-method gate (confirmed -> queued) ----------------------------------
 def test_queued_requires_payment(mock_session):
     svc = _service(mock_session, _order(OrderStatus.confirmed))
     with pytest.raises(ValidationError):
@@ -84,18 +84,18 @@ def test_queued_with_payment_freezes_amount_and_commits(mock_session):
     mock_session.commit.assert_called_once()
 
 
-# --- Gate de producción (cutting → cut) --------------------------------------
+# --- Production gate (cutting -> cut) --------------------------------------------
 def test_cut_blocked_while_pieces_pending(mock_session):
     order = _order(OrderStatus.cutting)
     svc = _service(mock_session, order)
-    svc._ensure_cutting_plan = lambda o: None  # el plan ya está materializado
+    svc._ensure_cutting_plan = lambda o: None  # the plan is already materialized
     mock_session.query.return_value.filter.return_value.count.return_value = 2
     with pytest.raises(BusinessRuleError):
         svc.transition(1, OrderStatus.cut, actor=_actor(UserRole.OPERATOR))
     mock_session.commit.assert_not_called()
 
 
-# --- Gate de cierre (banding pendiente) --------------------------------------
+# --- Closing gate (banding pending) ----------------------------------------------
 def test_completed_blocked_when_banding_pending(mock_session):
     order = _order(OrderStatus.cut, banding_status="in_progress")
     svc = _service(mock_session, order)
@@ -104,7 +104,7 @@ def test_completed_blocked_when_banding_pending(mock_session):
     mock_session.commit.assert_not_called()
 
 
-# --- Helpers puros -----------------------------------------------------------
+# --- Pure helpers -----------------------------------------------------------------
 def test_has_payment_true_only_when_some_amount_positive():
     assert _has_payment(None) is False
     assert _has_payment(OrderPaymentInput(cash_amount=0, credit_amount=0)) is False

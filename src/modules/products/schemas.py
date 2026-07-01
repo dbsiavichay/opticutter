@@ -9,13 +9,13 @@ from src.shared.schemas import CamelModel
 
 
 class ProductBase(CamelModel):
-    """Campos comunes a todos los productos del catálogo."""
+    """Fields common to all catalog products."""
 
-    code: str = Field(..., min_length=1, max_length=32, description="Código único")
-    name: str = Field(..., min_length=1, max_length=128, description="Nombre único")
-    description: Optional[str] = Field(None, max_length=256, description="Descripción")
-    price: confloat(ge=0) = Field(..., description="Precio de venta")
-    is_active: bool = Field(True, description="Si el producto está activo")
+    code: str = Field(..., min_length=1, max_length=32, description="Unique code")
+    name: str = Field(..., min_length=1, max_length=128, description="Unique name")
+    description: Optional[str] = Field(None, max_length=256, description="Description")
+    price: confloat(ge=0) = Field(..., description="Sale price")
+    is_active: bool = Field(True, description="Whether the product is active")
 
 
 class BoardProductCreate(ProductBase):
@@ -28,8 +28,8 @@ class EdgeBandingProductCreate(ProductBase):
     attributes: EdgeBandingAttributes
 
 
-# Unión discriminada por ``type``: FastAPI/Pydantic v2 eligen y validan el esquema
-# de ``attributes`` correcto según el tipo enviado. Un tipo nuevo = una rama más.
+# Union discriminated by ``type``: FastAPI/Pydantic v2 pick and validate the
+# correct ``attributes`` schema based on the type sent. A new type = one more branch.
 ProductCreate = Annotated[
     Union[BoardProductCreate, EdgeBandingProductCreate],
     Field(discriminator="type"),
@@ -37,8 +37,8 @@ ProductCreate = Annotated[
 
 
 class ProductUpdate(CamelModel):
-    """Actualización parcial; ``attributes`` se valida contra el esquema del tipo
-    existente en el servicio (el tipo de un producto no cambia tras crearse)."""
+    """Partial update; ``attributes`` is validated against the existing type's
+    schema in the service (a product's type never changes after creation)."""
 
     code: Optional[str] = Field(None, min_length=1, max_length=32)
     name: Optional[str] = Field(None, min_length=1, max_length=128)
@@ -49,7 +49,7 @@ class ProductUpdate(CamelModel):
 
 
 class ProductResponse(CamelModel):
-    """Respuesta del catálogo: campos comunes + el bag de atributos del tipo."""
+    """Catalog response: common fields + the type's attributes bag."""
 
     id: int
     type: ProductType

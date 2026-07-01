@@ -5,7 +5,7 @@ from src.modules.optimizations.service import OptimizationService, optimization_
 from src.modules.users.dependencies import require_permission
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-# Optimizador: "administrador" y "vendedor" (RESOURCE_ROLES["optimizer"]).
+# Optimizer: "administrador" and "vendedor" (RESOURCE_ROLES["optimizer"]).
 router = APIRouter(
     prefix="/optimize",
     tags=["optimize"],
@@ -19,5 +19,5 @@ def optimize(
     request: OptimizeRequest,
     svc: OptimizationService = Depends(optimization_service),
 ):
-    """Ejecuta una optimización de cortes (cache-first) y devuelve la solución."""
+    """Runs a cutting optimization (cache-first) and returns the solution."""
     return ok(svc.optimize_response(request))

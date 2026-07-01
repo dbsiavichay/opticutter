@@ -1,9 +1,9 @@
-"""Rutas públicas de revisión del cliente: el token es la única credencial.
+"""Public client review routes: the token is the only credential.
 
-Las consume el frontend de Maderable desde la URL del enlace. No exponen
-identificadores internos ni datos de contacto del cliente (ver
-``ReviewPreOrderResponse``); el desglose y los precios se recalculan en vivo y los
-diagramas de corte se entregan vía el PDF de proforma, también gateado por el token.
+Consumed by the Maderable frontend from the link's URL. They don't expose
+internal identifiers or the client's contact details (see
+``ReviewPreOrderResponse``); the breakdown and prices are recomputed live and
+the cutting diagrams are delivered via the proforma PDF, also gated by the token.
 """
 
 from typing import Optional
@@ -30,13 +30,13 @@ router = APIRouter(
 
 _FORMAT_QUERY = Query(
     default="pdf",
-    description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
+    description="Output format: 'pdf' (file) or 'base64' (JSON)",
     pattern="^(pdf|base64)$",
 )
 
 
 def _client_meta(request: Request) -> dict:
-    """IP y user-agent del cliente para auditoría de la acción."""
+    """Client IP and user-agent for action auditing."""
     forwarded = request.headers.get("x-forwarded-for")
     ip = (
         forwarded.split(",")[0].strip()
@@ -49,10 +49,10 @@ def _client_meta(request: Request) -> dict:
 def _to_review_response(
     preorder: PreOrderModel, payload: dict, pricing: dict
 ) -> ReviewPreOrderResponse:
-    """Proyección sanitizada de la pre-orden + su optimización recalculada.
+    """Sanitized projection of the pre-order + its recomputed optimization.
 
-    Las líneas se muestran a precio de lista; el descuento del nivel de precio es un
-    único ajuste a nivel documento (``pricing``).
+    Lines are shown at list price; the price tier discount is a single
+    document-level adjustment (``pricing``).
     """
     client = preorder.client
     client_name = (
@@ -114,7 +114,7 @@ def _to_review_response(
 def get_review(
     token: str, svc: PreOrderReviewService = Depends(preorder_review_service)
 ):
-    """Detalle sanitizado de la cotización asociada al token (precios vivos)."""
+    """Sanitized detail of the quote associated with the token (live prices)."""
     preorder = svc.get_review(token)
     payload, _ = svc.preorders.compute_payload(preorder)
     pricing = svc.preorders.build_pricing_for(preorder, payload)
@@ -128,7 +128,7 @@ def confirm_review(
     data: Optional[ReviewActionRequest] = None,
     svc: PreOrderReviewService = Depends(preorder_review_service),
 ):
-    """El cliente confirma: crea la Orden inmutable; reintento benigno."""
+    """The client confirms: creates the immutable Order; benign retry."""
     note = data.note if data else None
     preorder = svc.confirm(token, note=note, meta=_client_meta(request))
     payload, _ = svc.preorders.compute_payload(preorder)
@@ -143,7 +143,7 @@ def reject_review(
     data: Optional[ReviewActionRequest] = None,
     svc: PreOrderReviewService = Depends(preorder_review_service),
 ):
-    """El cliente rechaza la cotización (``sent → rejected``)."""
+    """The client rejects the quote (``sent → rejected``)."""
     note = data.note if data else None
     preorder = svc.reject(token, note=note, meta=_client_meta(request))
     payload, _ = svc.preorders.compute_payload(preorder)
@@ -159,7 +159,7 @@ def request_changes_review(
     data: Optional[ReviewActionRequest] = None,
     svc: PreOrderReviewService = Depends(preorder_review_service),
 ):
-    """El cliente pide ajustes (``sent → changes_requested``); el enlace sigue vivo."""
+    """The client requests adjustments (``sent → changes_requested``); the link stays alive."""
     note = data.note if data else None
     preorder = svc.request_changes(token, note=note)
     payload, _ = svc.preorders.compute_payload(preorder)
@@ -167,14 +167,14 @@ def request_changes_review(
     return ok(_to_review_response(preorder, payload, pricing))
 
 
-# Exento de la envoltura JSON: transporte de archivo PDF (igual que en preorders).
+# Exempt from the JSON envelope: PDF file transport (same as in preorders).
 @router.get("/{token}/proforma")
 def get_review_proforma(
     token: str,
     format: str = _FORMAT_QUERY,
     svc: PreOrderReviewService = Depends(preorder_review_service),
 ):
-    """Proforma PDF de la cotización, gateada por el token de revisión."""
+    """Proforma PDF of the quote, gated by the review token."""
     preorder = svc.get_review(token)
     carrier = svc.preorders.build_carrier(preorder)
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)

@@ -6,8 +6,8 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-# Importar los modelos de cada módulo puebla ``Base.metadata`` para que
-# ``alembic revision --autogenerate`` detecte las tablas.
+# Importing each module's models populates ``Base.metadata`` so that
+# ``alembic revision --autogenerate`` detects the tables.
 from src.modules.branches.model import BranchModel  # noqa: F401
 from src.modules.clients.model import ClientModel  # noqa: F401
 from src.modules.optimization_drafts.model import (  # noqa: F401
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), ".."
 # access to the values within the .ini file in use.
 config = context.config
 
-# Configurar la URL de la base de datos desde la configuración del proyecto
+# Set the database URL from the project's configuration
 config.set_main_option("sqlalchemy.url", app_config.DATABASE_URL)
 
 # Interpret the config file for Python logging.

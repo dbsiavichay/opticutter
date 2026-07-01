@@ -1,10 +1,10 @@
-"""Identidad del actor para las tablas de historial (append-only).
+"""Actor identity for the (append-only) history tables.
 
-Un ``Actor`` describe quién origina una transición auditada: ``staff`` (con FK al
-usuario + etiqueta congelada), ``client`` (acción pública vía enlace de revisión)
-o ``system`` (automatismos como la expiración). Las tablas de historial guardan
-``actor`` (el tipo), ``actor_user_id`` (FK nullable) y ``actor_label`` (snapshot
-legible que sobrevive a borrados/renombrados del usuario).
+An ``Actor`` describes who originates an audited transition: ``staff`` (with FK
+to the user + frozen label), ``client`` (public action via review link) or
+``system`` (automation such as expiry). History tables store ``actor`` (the
+type), ``actor_user_id`` (nullable FK) and ``actor_label`` (a readable snapshot
+that survives the user being deleted/renamed).
 """
 
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ ACTOR_SYSTEM = "system"
 
 @dataclass(frozen=True)
 class Actor:
-    """Origen de una acción auditada (tipo + atribución opcional)."""
+    """Origin of an audited action (type + optional attribution)."""
 
     type: str
     user_id: Optional[int] = None
@@ -26,7 +26,7 @@ class Actor:
 
 
 def staff_actor(user) -> Actor:
-    """Actor de staff a partir del ``UserModel`` autenticado (FK + snapshot)."""
+    """Staff actor from the authenticated ``UserModel`` (FK + snapshot)."""
     return Actor(
         ACTOR_STAFF,
         user_id=user.id,
@@ -36,10 +36,10 @@ def staff_actor(user) -> Actor:
 
 
 def client_actor(label: Optional[str] = None) -> Actor:
-    """Actor de cliente (acción pública por enlace de revisión)."""
+    """Client actor (public action via review link)."""
     return Actor(ACTOR_CLIENT, label=label or "Cliente")
 
 
 def system_actor() -> Actor:
-    """Actor del sistema (automatismos sin usuario, p. ej. expiración)."""
+    """System actor (automation without a user, e.g. expiry)."""
     return Actor(ACTOR_SYSTEM)

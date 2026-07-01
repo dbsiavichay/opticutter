@@ -1,29 +1,29 @@
-"""Seed de demostración: sucursales, usuarios, clientes, pre-órdenes y órdenes.
+"""Demo seed: branches, users, clients, pre-orders and orders.
 
-Genera un conjunto de datos completo y realista para poblar el dashboard / hacer QA:
+Generates a complete, realistic dataset to populate the dashboard / do QA:
 
-- **Sucursales**: tomadas de ``COMPANY_BRANCHES`` del entorno (.env): Sucúa y Macas.
-- **Usuarios**: 1 administrador global + 1 vendedor, 1 operador y 1 canteador por sucursal
+- **Branches**: taken from ``COMPANY_BRANCHES`` in the environment (.env): Sucúa and Macas.
+- **Users**: 1 global admin + 1 seller, 1 operator and 1 bander per branch
   (``admin@empresa.com``, ``vendedor<slug>@empresa.com``, ``operador<slug>@empresa.com``,
   ``canteador<slug>@empresa.com``).
-- **Clientes**: 5, todos con celular (requisito para emitir proforma/pedido).
-- **Tableros y tapacantos**: reusa el catálogo si existe; si no, crea tableros + tapacantos
-  demo coordinados (insumo del optimizador + pista de canteado).
-- **Pre-órdenes**: una en CADA estado por sucursal (draft, sent, changes_requested,
-  confirmed, rejected, expired, cancelled), recorriendo el flujo real (enlace de
-  revisión + acciones del cliente) donde aplica.
-- **Órdenes**: una en CADA estado por sucursal (confirmed, queued, cutting,
-  cut, completed, cancelled), avanzando la máquina de estados con los actores y
-  roles correctos (el operador se autoasigna en ``cutting``, se marcan todas las
-  piezas cortadas antes de cerrar el corte, etc.). Las órdenes de taller
-  (cutting/cut/completed) incluyen tapacantos y demuestran la pista de canteado
-  con el canteador de cada sucursal.
+- **Clients**: 5, all with a phone number (required to issue a proforma/order).
+- **Boards and edge bandings**: reuses the catalog if present; otherwise creates
+  coordinated demo boards + edge bandings (optimizer input + banding track).
+- **Pre-orders**: one in EVERY status per branch (draft, sent, changes_requested,
+  confirmed, rejected, expired, cancelled), walking the real flow (review link
+  + client actions) where applicable.
+- **Orders**: one in EVERY status per branch (confirmed, queued, cutting,
+  cut, completed, cancelled), advancing the state machine with the correct
+  actors and roles (the operator self-assigns on ``cutting``, all pieces are
+  marked cut before closing the cut, etc.). Workshop orders
+  (cutting/cut/completed) include edge banding and demonstrate the banding
+  track with each branch's bander.
 
-Idempotente para los cimientos (sucursales/usuarios/clientes/tableros: get-or-create).
-Las pre-órdenes/órdenes solo se generan si aún no existen datos de demo (marcados con
-``source="seed"``); usa ``--reset`` para borrarlos y regenerarlos.
+Idempotent for the foundations (branches/users/clients/boards: get-or-create).
+Pre-orders/orders are only generated if no demo data exists yet (flagged with
+``source="seed"``); use ``--reset`` to delete and regenerate them.
 
-Requiere que el esquema ya exista (migraciones aplicadas). Ejemplos:
+Requires the schema to already exist (migrations applied). Examples:
 
     make seed-demo
     DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db \\
@@ -38,10 +38,10 @@ import unicodedata
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Carga el .env ANTES de importar la config (environs no lo lee solo). Así las
-# sucursales (COMPANY_BRANCHES) y demás ajustes salen del .env. ``override=False``:
-# una variable ya presente en el entorno (p. ej. DATABASE_URL pasado por el make
-# target apuntando al Postgres local) gana sobre la del archivo.
+# Load .env BEFORE importing config (environs doesn't read it on its own). This way
+# branches (COMPANY_BRANCHES) and other settings come from .env. ``override=False``:
+# a variable already present in the environment (e.g. DATABASE_URL passed by the
+# make target pointing at the local Postgres) wins over the one in the file.
 from environs import Env  # noqa: E402
 
 Env().read_env(os.path.join(os.path.dirname(__file__), "..", ".env"), recurse=False)
@@ -50,7 +50,11 @@ from datetime import datetime, timedelta  # noqa: E402
 
 from src.modules.branches.model import BranchModel  # noqa: E402
 from src.modules.clients.model import ClientModel  # noqa: E402
-from src.modules.orders.model import BandingStatus, OrderModel, OrderStatus  # noqa: E402
+from src.modules.orders.model import (  # noqa: E402
+    BandingStatus,
+    OrderModel,
+    OrderStatus,
+)
 from src.modules.orders.schemas import OrderCreate, OrderPaymentInput  # noqa: E402
 from src.modules.orders.service import OrderService  # noqa: E402
 from src.modules.preorders.model import (  # noqa: E402
@@ -68,13 +72,13 @@ from src.shared.config import config  # noqa: E402
 from src.shared.database import SessionLocal  # noqa: E402
 from src.shared.security import hash_password  # noqa: E402
 
-# Contraseña única para todos los usuarios sembrados (override con SEED_PASSWORD).
+# Single password for all seeded users (override with SEED_PASSWORD).
 SEED_PASSWORD = os.getenv("SEED_PASSWORD") or config.ADMIN_PASSWORD or "Cutter2026!"
 
-# Marca de origen para identificar (y poder resetear) los datos transaccionales demo.
+# Origin marker to identify (and be able to reset) the demo transactional data.
 SEED_SOURCE = "seed"
 
-# 5 clientes: (identifier, nombre, apellido, celular, email).
+# 5 clients: (identifier, first name, last name, phone, email).
 CLIENTS = [
     ("0102030405", "María", "González", "0991111111", "maria.gonzalez@example.com"),
     ("0203040506", "Carlos", "Pérez", "0992222222", "carlos.perez@example.com"),
@@ -83,22 +87,22 @@ CLIENTS = [
     ("0506070809", "Ana", "Torres", "0995555555", "ana.torres@example.com"),
 ]
 
-# Tableros demo (solo se crean si el catálogo está vacío): (code, name, alto, ancho,
-# grosor, precio). Dimensiones grandes para que las listas de corte demo entren holgadas.
+# Demo boards (only created if the catalog is empty): (code, name, height, width,
+# thickness, price). Large dimensions so the demo cutlists fit comfortably.
 DEMO_BOARDS = [
     ("DEMO-MDP-BLN-15", "Tablero Demo Blanco 15mm", 2440, 1830, 15, 48.00),
     ("DEMO-MDP-NGR-15", "Tablero Demo Negro 15mm", 2440, 1830, 15, 52.00),
     ("DEMO-MDP-ROB-18", "Tablero Demo Roble 18mm", 2440, 1830, 18, 64.00),
 ]
 
-# Tapacantos demo coordinados con los dos primeros tableros (código TAP-* + diseño):
-# (code, name, thickness_mm, width_mm, band_type, precio_por_m).
+# Demo edge bandings coordinated with the first two boards (TAP-* code + design):
+# (code, name, thickness_mm, width_mm, band_type, price_per_m).
 DEMO_EDGE_BANDINGS = [
     ("TAP-MDP-BLN-19", "Tapacanto Demo Blanco 19mm", 0.45, 19, "Soft", 0.35),
     ("TAP-MDP-NGR-19", "Tapacanto Demo Negro 19mm", 0.45, 19, "Soft", 0.35),
 ]
 
-# Estados a sembrar por sucursal.
+# Statuses to seed per branch.
 PREORDER_STATUSES = [
     PreOrderStatus.draft,
     PreOrderStatus.sent,
@@ -118,20 +122,20 @@ ORDER_STATUSES = [
     OrderStatus.cancelled,
 ]
 
-# Contador global: garantiza un hash de optimización único por entidad (vía el
-# ``label`` de las piezas), de modo que la dedupe de órdenes nunca las colapse.
+# Global counter: guarantees a unique optimization hash per entity (via the
+# pieces' ``label``), so order dedupe never collapses them.
 _seq = itertools.count(1)
 
 
 def slugify(name: str) -> str:
-    """Slug ascii en minúsculas y sin acentos: 'Sucúa' -> 'sucua', 'Macas' -> 'macas'."""
+    """Lowercase ascii slug without accents: 'Sucúa' -> 'sucua', 'Macas' -> 'macas'."""
     nfkd = unicodedata.normalize("NFKD", name)
     ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
     return "".join(ch for ch in ascii_str.lower() if ch.isalnum())
 
 
 def make_cutlist(material_key: str) -> list[dict]:
-    """Lista de corte demo con etiquetas únicas (hash de optimización distinto)."""
+    """Demo cutlist with unique labels (distinct optimization hash)."""
     i = next(_seq)
     return [
         {
@@ -162,14 +166,14 @@ def make_cutlist(material_key: str) -> list[dict]:
 
 
 def build_inputs(board: ProductModel) -> tuple[list[dict], list[dict]]:
-    """Materiales (1 tablero de catálogo) + lista de corte única para una entidad."""
+    """Materials (1 catalog board) + unique cutlist for an entity."""
     key = "b1"
     materials = [{"key": key, "source": "catalog", "product_id": board.id}]
     return materials, make_cutlist(key)
 
 
 def make_cutlist_with_banding(material_key: str, edge_band_id: int) -> list[dict]:
-    """Lista de corte con tapacantos en las piezas principales."""
+    """Cutlist with edge banding on the main pieces."""
     i = next(_seq)
     banding = {"product_id": edge_band_id, "sides": ["top", "bottom", "left", "right"]}
     return [
@@ -205,19 +209,19 @@ def make_cutlist_with_banding(material_key: str, edge_band_id: int) -> list[dict
 def build_inputs_with_banding(
     board: ProductModel, edge_band: ProductModel
 ) -> tuple[list[dict], list[dict]]:
-    """Materiales + lista de corte con tapacantos en algunas piezas."""
+    """Materials + cutlist with edge banding on some pieces."""
     key = "b1"
     materials = [{"key": key, "source": "catalog", "product_id": board.id}]
     return materials, make_cutlist_with_banding(key, edge_band.id)
 
 
 # --------------------------------------------------------------------------- #
-# Cimientos (idempotentes)                                                     #
+# Foundations (idempotent)                                                     #
 # --------------------------------------------------------------------------- #
 
 
 def ensure_branches(db) -> list[BranchModel]:
-    """Crea/obtiene las sucursales desde ``COMPANY_BRANCHES`` del entorno."""
+    """Creates/gets the branches from ``COMPANY_BRANCHES`` in the environment."""
     branches = []
     for entry in config.COMPANY_BRANCHES:
         name = entry["name"]
@@ -232,15 +236,15 @@ def ensure_branches(db) -> list[BranchModel]:
             )
             db.add(branch)
             db.flush()
-            print(f"  + Sucursal {code} ({name})")
+            print(f"  + Branch {code} ({name})")
         else:
-            print(f"  = Sucursal {code} ({name}) ya existía")
+            print(f"  = Branch {code} ({name}) already existed")
         branches.append(branch)
     return branches
 
 
 def ensure_user(db, email, full_name, role, branch_id) -> UserModel:
-    """Crea/obtiene un usuario por email."""
+    """Creates/gets a user by email."""
     user = db.query(UserModel).filter(UserModel.email == email).first()
     if user is None:
         user = UserModel(
@@ -253,14 +257,14 @@ def ensure_user(db, email, full_name, role, branch_id) -> UserModel:
         )
         db.add(user)
         db.flush()
-        print(f"  + Usuario {email} ({role})")
+        print(f"  + User {email} ({role})")
     else:
-        print(f"  = Usuario {email} ya existía")
+        print(f"  = User {email} already existed")
     return user
 
 
 def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
-    """Admin global + vendedor, operador y canteador por sucursal. Devuelve staff por sucursal."""
+    """Global admin + seller, operator and bander per branch. Returns staff per branch."""
     ensure_user(
         db, "admin@empresa.com", "Administrador General", UserRole.ADMIN.value, None
     )
@@ -297,7 +301,7 @@ def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
 
 
 def ensure_clients(db) -> list[ClientModel]:
-    """Crea/obtiene los 5 clientes demo (todos con celular)."""
+    """Creates/gets the 5 demo clients (all with a phone number)."""
     clients = []
     for identifier, first, last, phone, email in CLIENTS:
         client = (
@@ -314,15 +318,15 @@ def ensure_clients(db) -> list[ClientModel]:
             )
             db.add(client)
             db.flush()
-            print(f"  + Cliente {identifier} ({first} {last})")
+            print(f"  + Client {identifier} ({first} {last})")
         else:
-            print(f"  = Cliente {identifier} ya existía")
+            print(f"  = Client {identifier} already existed")
         clients.append(client)
     return clients
 
 
 def ensure_boards(db) -> list[ProductModel]:
-    """Reusa hasta 3 tableros del catálogo; si no hay, crea los tableros demo."""
+    """Reuses up to 3 boards from the catalog; if none, creates the demo boards."""
     existing = (
         db.query(ProductModel)
         .filter(ProductModel.type == ProductType.BOARD.value)
@@ -331,7 +335,7 @@ def ensure_boards(db) -> list[ProductModel]:
         .all()
     )
     if existing:
-        print(f"  = Usando {len(existing)} tablero(s) existentes del catálogo")
+        print(f"  = Using {len(existing)} existing board(s) from the catalog")
         return existing
 
     boards = []
@@ -352,13 +356,13 @@ def ensure_boards(db) -> list[ProductModel]:
         )
         db.add(board)
         boards.append(board)
-        print(f"  + Tablero {code} ({name})")
+        print(f"  + Board {code} ({name})")
     db.flush()
     return boards
 
 
 def ensure_edge_bandings(db) -> list[ProductModel]:
-    """Reusa tapacantos demo existentes; si no hay, crea los del catálogo demo."""
+    """Reuses existing demo edge bandings; if none, creates the demo catalog ones."""
     existing = (
         db.query(ProductModel)
         .filter(
@@ -369,7 +373,7 @@ def ensure_edge_bandings(db) -> list[ProductModel]:
         .all()
     )
     if len(existing) == len(DEMO_EDGE_BANDINGS):
-        print(f"  = Usando {len(existing)} tapacanto(s) demo existentes")
+        print(f"  = Using {len(existing)} existing demo edge banding(s)")
         return existing
 
     edge_bands = []
@@ -392,21 +396,21 @@ def ensure_edge_bandings(db) -> list[ProductModel]:
                 },
             )
             db.add(band)
-            print(f"  + Tapacanto {code} ({name})")
+            print(f"  + Edge banding {code} ({name})")
         else:
-            print(f"  = Tapacanto {code} ya existía")
+            print(f"  = Edge banding {code} already existed")
         edge_bands.append(band)
     db.flush()
     return edge_bands
 
 
 # --------------------------------------------------------------------------- #
-# Datos transaccionales (pre-órdenes y órdenes)                                #
+# Transactional data (pre-orders and orders)                                   #
 # --------------------------------------------------------------------------- #
 
 
 def seed_preorder(db, status, branch, client, seller, board):
-    """Crea una pre-orden y la lleva al ``status`` objetivo por el flujo real."""
+    """Creates a pre-order and drives it to the target ``status`` via the real flow."""
     pre_svc = PreOrderService(db)
     review_svc = PreOrderReviewService(db)
     actor = staff_actor(seller)
@@ -422,7 +426,7 @@ def seed_preorder(db, status, branch, client, seller, board):
             notes=f"Pre-orden demo en estado {status.value}",
         ),
         actor=actor,
-        branch_scope=None,  # ruta admin: usa branch_id del body
+        branch_scope=None,  # admin route: uses branch_id from the body
     )
 
     if status == PreOrderStatus.draft:
@@ -446,14 +450,14 @@ def seed_preorder(db, status, branch, client, seller, board):
         review_svc.reject(token, note="El cliente prefirió otra cotización")
 
     elif status == PreOrderStatus.expired:
-        # Vence la vigencia y deja que el barrido perezoso la marque 'expired'.
+        # Expire its validity and let the lazy sweep mark it 'expired'.
         preorder.expires_at = datetime.utcnow() - timedelta(days=1)
         db.commit()
         pre_svc.get_or_404(preorder.id)
 
     elif status == PreOrderStatus.cancelled:
-        # No hay endpoint de cancelación hoy; se registra la transición a mano para
-        # tener el estado representado en la demo.
+        # There's no cancellation endpoint today; the transition is recorded by hand
+        # to have the status represented in the demo.
         pre_svc._record_transition(
             preorder,
             preorder.status,
@@ -469,7 +473,7 @@ def seed_preorder(db, status, branch, client, seller, board):
 
 
 def _mark_all_pieces_cut(svc: OrderService, order_id: int, actor):
-    """Marca como cortadas todas las piezas colocadas (requiere estado 'cutting')."""
+    """Marks all placed pieces as cut (requires 'cutting' status)."""
     order = svc.get_or_404(order_id)
     for board in order.boards:
         for piece in board.pieces:
@@ -477,10 +481,10 @@ def _mark_all_pieces_cut(svc: OrderService, order_id: int, actor):
 
 
 def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_actor=None):
-    """Avanza la orden por la máquina de estados hasta ``target``.
+    """Advances the order through the state machine up to ``target``.
 
-    Si ``bander_actor`` se da, también avanza la pista de canteado según el estado
-    objetivo: ``cutting`` → in_progress; ``cut``/``completed`` → done.
+    If ``bander_actor`` is given, also advances the banding track according to
+    the target status: ``cutting`` → in_progress; ``cut``/``completed`` → done.
     """
     has_banding = bander_actor is not None
 
@@ -492,7 +496,7 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
         )
         return
 
-    # confirmed → queued requiere forma de pago (al menos un monto > 0).
+    # confirmed → queued requires a payment method (at least one amount > 0).
     svc.transition(
         order.id,
         OrderStatus.queued,
@@ -503,7 +507,7 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
     if target == OrderStatus.queued:
         return
 
-    # El operador se autoasigna al tomar el corte.
+    # The operator self-assigns when taking the cut.
     svc.transition(
         order.id,
         OrderStatus.cutting,
@@ -517,12 +521,10 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
             )
         return
 
-    # Para cerrar el corte: marcar todas las piezas y finalizar el canteado primero.
+    # To close the cut: mark all pieces and finish banding first.
     _mark_all_pieces_cut(svc, order.id, operator_actor)
     if has_banding:
-        svc.transition_banding(
-            order.id, BandingStatus.in_progress, actor=bander_actor
-        )
+        svc.transition_banding(order.id, BandingStatus.in_progress, actor=bander_actor)
         svc.transition_banding(order.id, BandingStatus.done, actor=bander_actor)
     svc.transition(
         order.id, OrderStatus.cut, actor=operator_actor, note="Corte finalizado"
@@ -536,19 +538,22 @@ def drive_order_to(svc, order, target, seller_actor, operator_actor, bander_acto
     if target == OrderStatus.completed:
         return
 
-    # completed → despachado: cualquier rol puede despachar.
+    # completed → despachado: any role can dispatch.
     svc.transition(
-        order.id, OrderStatus.dispatched, actor=seller_actor, note="Mercadería entregada"
+        order.id,
+        OrderStatus.dispatched,
+        actor=seller_actor,
+        note="Mercadería entregada",
     )
 
 
 def seed_order(
     db, status, branch, client, seller, operator, board, bander=None, edge_band=None
 ):
-    """Crea una orden y la lleva al ``status`` objetivo por la máquina de estados.
+    """Creates an order and drives it to the target ``status`` via the state machine.
 
-    Si ``bander`` y ``edge_band`` se proporcionan, la orden incluye tapacantos y
-    la pista de canteado se avanza según el estado objetivo.
+    If ``bander`` and ``edge_band`` are provided, the order includes edge banding
+    and the banding track is advanced according to the target status.
     """
     svc = OrderService(db)
     seller_actor = staff_actor(seller)
@@ -579,12 +584,12 @@ def seed_order(
 
 
 def seed_transactional(db, branches, clients, staff, boards, edge_bands):
-    """Una pre-orden y una orden en cada estado, por sucursal.
+    """One pre-order and one order in each status, per branch.
 
-    Las órdenes en estados de taller (cutting/cut/completed) se crean con tapacantos
-    para demostrar la pista de canteado con el canteador de la sucursal.
+    Orders in workshop statuses (cutting/cut/completed) are created with edge
+    banding to demonstrate the banding track with the branch's bander.
     """
-    # Estados que deben incluir tapacantos para demostrar el flujo de canteado.
+    # Statuses that must include edge banding to demonstrate the banding flow.
     BANDING_STATUSES = {
         OrderStatus.cutting,
         OrderStatus.cut,
@@ -596,13 +601,13 @@ def seed_transactional(db, branches, clients, staff, boards, edge_bands):
         seller = staff[branch.id]["seller"]
         operator = staff[branch.id]["operator"]
         bander = staff[branch.id]["bander"]
-        print(f"\n  Sucursal {branch.name}:")
+        print(f"\n  Branch {branch.name}:")
 
         for i, status in enumerate(PREORDER_STATUSES):
             client = clients[i % len(clients)]
             board = boards[i % len(boards)]
             preorder = seed_preorder(db, status, branch, client, seller, board)
-            print(f"    + Pre-orden {preorder.code} [{preorder.status}]")
+            print(f"    + Pre-order {preorder.code} [{preorder.status}]")
 
         for i, status in enumerate(ORDER_STATUSES):
             client = clients[(i + 2) % len(clients)]
@@ -621,12 +626,12 @@ def seed_transactional(db, branches, clients, staff, boards, edge_bands):
                 edge_band=edge_band,
             )
             banding_note = f" (canteado: {order.banding_status})" if use_banding else ""
-            print(f"    + Orden {order.code} [{order.status}]{banding_note}")
+            print(f"    + Order {order.code} [{order.status}]{banding_note}")
 
 
 def reset_demo(db):
-    """Borra las pre-órdenes/órdenes demo (``source='seed'``). Pre-órdenes primero
-    (referencian a la orden vía ``order_id``)."""
+    """Deletes the demo pre-orders/orders (``source='seed'``). Pre-orders first
+    (they reference the order via ``order_id``)."""
     pres = db.query(PreOrderModel).filter(PreOrderModel.source == SEED_SOURCE).all()
     for p in pres:
         db.delete(p)
@@ -635,15 +640,17 @@ def reset_demo(db):
     for o in orders:
         db.delete(o)
     db.commit()
-    print(f"Reset: borradas {len(pres)} pre-órdenes y {len(orders)} órdenes demo.\n")
+    print(
+        f"Reset: deleted {len(pres)} demo pre-orders and {len(orders)} demo orders.\n"
+    )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Seed de demostración de Cutter.")
+    parser = argparse.ArgumentParser(description="Cutter demo seed.")
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Borra las pre-órdenes/órdenes demo previas antes de regenerarlas.",
+        help="Delete previous demo pre-orders/orders before regenerating them.",
     )
     args = parser.parse_args()
 
@@ -652,13 +659,13 @@ def main():
         if args.reset:
             reset_demo(db)
 
-        print("Sucursales:")
+        print("Branches:")
         branches = ensure_branches(db)
-        print("Usuarios:")
+        print("Users:")
         staff = ensure_users(db, branches)
-        print("Clientes:")
+        print("Clients:")
         clients = ensure_clients(db)
-        print("Tableros y tapacantos:")
+        print("Boards and edge bandings:")
         boards = ensure_boards(db)
         edge_bands = ensure_edge_bandings(db)
         db.commit()
@@ -668,19 +675,17 @@ def main():
         )
         if existing_demo and not args.reset:
             print(
-                f"\nYa existen {existing_demo} pre-órdenes demo; omito la generación "
-                "transaccional. Usa --reset para regenerarlas."
+                f"\n{existing_demo} demo pre-orders already exist; skipping transactional "
+                "generation. Use --reset to regenerate them."
             )
         else:
-            print("\nPre-órdenes y órdenes (una por estado, por sucursal):")
+            print("\nPre-orders and orders (one per status, per branch):")
             seed_transactional(db, branches, clients, staff, boards, edge_bands)
             db.commit()
 
-        print("\n✅ Seed completado.")
-        print(
-            "   Usuarios: admin@empresa.com + vendedor/operador/canteador por sucursal"
-        )
-        print(f"   Contraseña de todos los usuarios: {SEED_PASSWORD}")
+        print("\n✅ Seed complete.")
+        print("   Users: admin@empresa.com + seller/operator/bander per branch")
+        print(f"   Password for all users: {SEED_PASSWORD}")
     except Exception as e:
         db.rollback()
         print(f"\n❌ Error: {e}")

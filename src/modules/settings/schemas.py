@@ -5,22 +5,22 @@ from pydantic import Field
 from src.shared.schemas import CamelModel
 
 
-# --- Parámetros de corte ------------------------------------------------------
+# --- Cutting parameters --------------------------------------------------------
 class CuttingSettingsResponse(CamelModel):
-    """Parámetros de corte vigentes (mm) que alimentan al optimizador."""
+    """Current cutting parameters (mm) that feed the optimizer."""
 
-    kerf: float = Field(..., ge=0, description="Ancho de sierra (kerf) en mm")
-    top_trim: float = Field(..., ge=0, description="Recorte superior en mm")
-    bottom_trim: float = Field(..., ge=0, description="Recorte inferior en mm")
-    left_trim: float = Field(..., ge=0, description="Recorte izquierdo en mm")
-    right_trim: float = Field(..., ge=0, description="Recorte derecho en mm")
+    kerf: float = Field(..., ge=0, description="Saw blade width (kerf) in mm")
+    top_trim: float = Field(..., ge=0, description="Top trim in mm")
+    bottom_trim: float = Field(..., ge=0, description="Bottom trim in mm")
+    left_trim: float = Field(..., ge=0, description="Left trim in mm")
+    right_trim: float = Field(..., ge=0, description="Right trim in mm")
     edge_banding_waste_factor: float = Field(
-        ..., ge=0, description="Merma de tapacanto sobre el metraje neto (0.10 = +10%)"
+        ..., ge=0, description="Edge banding waste over net length (0.10 = +10%)"
     )
 
 
 class CuttingSettingsUpdate(CamelModel):
-    """Actualización parcial de los parámetros de corte."""
+    """Partial update of the cutting parameters."""
 
     kerf: Optional[float] = Field(None, ge=0)
     top_trim: Optional[float] = Field(None, ge=0)
@@ -30,56 +30,56 @@ class CuttingSettingsUpdate(CamelModel):
     edge_banding_waste_factor: Optional[float] = Field(None, ge=0)
 
 
-# --- Pre-órdenes (cotización mutable) -----------------------------------------
+# --- Pre-orders (mutable quote) -------------------------------------------------
 class PreOrderSettingsResponse(CamelModel):
-    """Config de pre-órdenes vigente: vigencia y tope de abiertas por cliente."""
+    """Current pre-order config: validity period and open-orders cap per client."""
 
     preorder_validity_days: int = Field(
-        ..., ge=1, description="Días de vigencia de una pre-orden (cotización)"
+        ..., ge=1, description="Validity period of a pre-order (quote), in days"
     )
     max_open_preorders_per_client: int = Field(
-        ..., ge=1, description="Tope de pre-órdenes abiertas por cliente (antiabuso)"
+        ..., ge=1, description="Cap on open pre-orders per client (anti-abuse)"
     )
 
 
 class PreOrderSettingsUpdate(CamelModel):
-    """Actualización parcial de la config de pre-órdenes."""
+    """Partial update of the pre-order config."""
 
     preorder_validity_days: Optional[int] = Field(None, ge=1)
     max_open_preorders_per_client: Optional[int] = Field(None, ge=1)
 
 
-# --- Niveles de precio (descuento por tipo de cliente) ------------------------
+# --- Price tiers (discount by client type) --------------------------------------
 class PriceTier(CamelModel):
-    """Un nivel de precio: descuento (rate) sobre el precio base de los tableros.
+    """A price tier: a discount (rate) over the boards' base price.
 
-    ``code`` es la identidad estable que el cliente del API envía (``priceTierCode``);
-    ``rate`` es la fracción de descuento (0.02 = 2%). ``consumidor`` (0%) es la base.
+    ``code`` is the stable identity the API client sends (``priceTierCode``);
+    ``rate`` is the discount fraction (0.02 = 2%). ``consumidor`` (0%) is the base.
     """
 
     code: str = Field(..., min_length=1, max_length=32)
     name: str = Field(..., min_length=1, max_length=64)
-    rate: float = Field(..., ge=0, le=1, description="Descuento (0.02 = 2%)")
+    rate: float = Field(..., ge=0, le=1, description="Discount (0.02 = 2%)")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0, ge=0)
 
 
 class PriceTiersUpdate(CamelModel):
-    """Reemplaza la lista completa de niveles de precio (solo admin)."""
+    """Replaces the entire price-tier list (admin only)."""
 
     price_tiers: List[PriceTier] = Field(..., min_length=1)
 
 
-# --- Datos de la empresa ------------------------------------------------------
+# --- Company data -----------------------------------------------------------------
 class Branch(CamelModel):
-    """Sucursal mostrada en el membrete de la proforma."""
+    """A branch shown on the proforma letterhead."""
 
     name: str = Field(..., min_length=1, max_length=128)
     address: str = Field(..., min_length=1, max_length=256)
 
 
 class CompanySettingsResponse(CamelModel):
-    """Datos de la empresa vigentes (membrete de la proforma)."""
+    """Current company data (proforma letterhead)."""
 
     name: str = Field(..., max_length=128)
     tagline: str = Field(..., max_length=256)
@@ -89,7 +89,7 @@ class CompanySettingsResponse(CamelModel):
 
 
 class CompanySettingsUpdate(CamelModel):
-    """Actualización parcial de los datos de la empresa."""
+    """Partial update of the company data."""
 
     name: Optional[str] = Field(None, max_length=128)
     tagline: Optional[str] = Field(None, max_length=256)

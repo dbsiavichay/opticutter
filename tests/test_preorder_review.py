@@ -1,8 +1,8 @@
-"""Tests del flujo de revisión del cliente sobre pre-órdenes (enlace seguro).
+"""Tests for the client review flow on pre-orders (secure link).
 
-El enlace y la confirmación viven en la pre-orden (mutable); confirmar mintea la
-Orden inmutable y la enlaza. Cubre la criptografía del enlace, los endpoints
-públicos token-gated y la creación idempotente de la orden.
+The link and confirmation live on the pre-order (mutable); confirming mints the
+immutable Order and links it. Covers the link cryptography, the token-gated
+public endpoints, and idempotent order creation.
 """
 
 from datetime import datetime, timedelta
@@ -33,7 +33,7 @@ def _generate_link(client, preorder_id):
 
 
 # ---------------------------------------------------------------------------
-# Generación del enlace de revisión
+# Review link generation
 # ---------------------------------------------------------------------------
 
 
@@ -101,7 +101,7 @@ def test_regenerate_revokes_previous_link(client):
 
 
 # ---------------------------------------------------------------------------
-# Endpoints públicos (token como credencial)
+# Public endpoints (token as credential)
 # ---------------------------------------------------------------------------
 
 
@@ -123,7 +123,7 @@ def test_public_review_detail_is_sanitized(client):
     assert len(data["pieces"]) == 1
     assert data["pieces"][0]["height"] == 800
 
-    # Sanitización: nada de contacto, identificadores internos ni inputs crudos.
+    # Sanitization: no contact info, internal identifiers, or raw inputs.
     assert "0991112233" not in resp.text
     for leaked in ("identifier", "phone", "email", "clientId", "materials"):
         assert leaked not in data
@@ -160,7 +160,7 @@ def test_confirm_creates_immutable_order(client):
 
 
 def test_confirm_inherits_preorder_strategy(client, db_session):
-    """Al confirmar, la orden hereda y congela la estrategia de la pre-orden."""
+    """On confirmation, the order inherits and freezes the pre-order's strategy."""
     pre = _setup_preorder(client, strategy="longOffcuts")
     assert pre["strategy"] == "longOffcuts"
     link = _generate_link(client, pre["id"])
@@ -183,7 +183,7 @@ def test_reconfirm_is_benign_and_does_not_duplicate_order(client):
     assert again.status_code == 200
     assert again.json()["data"]["orderCode"] == first["orderCode"]
 
-    # No se creó una segunda orden para el cliente.
+    # No second order was created for the client.
     orders = client.get("/api/v1/orders/").json()
     assert orders["meta"]["pagination"]["total"] == 1
 
@@ -198,7 +198,7 @@ def test_reject_via_token(client):
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "rejected"
 
-    # Rechazo repetido: benigno.
+    # Repeated rejection: benign.
     assert (
         client.post(f"/api/v1/public/review/{link['token']}/reject").status_code == 200
     )
@@ -215,7 +215,7 @@ def test_reject_after_confirm_conflicts(client):
 
 
 # ---------------------------------------------------------------------------
-# Solicitar cambios (lazo de edición sin descartar la cotización)
+# Request changes (edit loop without discarding the quote)
 # ---------------------------------------------------------------------------
 
 
@@ -232,12 +232,12 @@ def test_request_changes_keeps_link_alive_and_records_note(client):
     assert data["status"] == "changes_requested"
     assert data["clientNote"] == "Cámbiame el alto a 450"
 
-    # El enlace sigue vivo: el cliente puede volver a abrirlo.
+    # The link stays alive: the client can reopen it.
     again = client.get(f"/api/v1/public/review/{link['token']}")
     assert again.status_code == 200
     assert again.json()["data"]["status"] == "changes_requested"
 
-    # El taller ve la solicitud en el detalle interno.
+    # The shop sees the request in the internal detail.
     detail = client.get(f"/api/v1/preorders/{pre['id']}").json()["data"]
     assert detail["status"] == "changes_requested"
     assert detail["clientNote"] == "Cámbiame el alto a 450"
@@ -272,7 +272,7 @@ def test_shop_edit_after_request_returns_to_sent_and_clears_note(client):
     assert data["status"] == "sent"
     assert data["clientNote"] is None
 
-    # El mismo enlace muestra la versión editada (precios/medidas vivos).
+    # The same link shows the edited version (live prices/measurements).
     review = client.get(f"/api/v1/public/review/{link['token']}").json()["data"]
     assert review["status"] == "sent"
     assert review["pieces"][0]["height"] == 450
@@ -311,7 +311,7 @@ def test_confirm_expired_quote_fails(client, db_session):
     assert resp.status_code == 422
     assert "expiró" in resp.json()["errors"][0]["message"]
 
-    # GET con token válido sobre cotización vencida NO es 404: página amigable.
+    # GET with a valid token on an expired quote is NOT a 404: friendly page.
     detail = client.get(f"/api/v1/public/review/{link['token']}")
     assert detail.status_code == 200
     assert detail.json()["data"]["status"] == "expired"
@@ -330,7 +330,7 @@ def test_public_proforma_by_token(client):
 
 
 def test_confirmed_order_continues_state_machine(client):
-    """Tras la confirmación del cliente, la orden sigue el flujo operativo normal."""
+    """After client confirmation, the order continues the normal operational flow."""
     pre = _setup_preorder(client)
     link = _generate_link(client, pre["id"])
     client.post(f"/api/v1/public/review/{link['token']}/confirm")

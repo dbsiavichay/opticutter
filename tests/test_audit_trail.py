@@ -1,9 +1,9 @@
-"""Tests de la auditoría transversal: atribución de usuario (quién hizo qué).
+"""Tests for cross-cutting audit: user attribution (who did what).
 
-Cubre el estampado genérico ``created_by``/``updated_by`` (vía contexto del request),
-la atribución real del actor en los historiales de estado de orders y preorders, y
-el registro de quién cortó cada pieza. El fixture ``client`` autentica como el admin
-sembrado en ``conftest`` (``Conftest Admin``), que es el actor esperado.
+Covers the generic ``created_by``/``updated_by`` stamping (via request context),
+actor attribution in orders/preorders status history, and recording who cut each
+piece. The ``client`` fixture authenticates as the admin seeded by ``conftest``
+(``Conftest Admin``), which is the expected actor.
 """
 
 from src.modules.clients.model import ClientModel
@@ -26,7 +26,7 @@ def _admin(db_session):
 
 
 # ---------------------------------------------------------------------------
-# created_by / updated_by genéricos (CRUDService + contexto del request)
+# Generic created_by / updated_by (CRUDService + request context)
 # ---------------------------------------------------------------------------
 
 
@@ -65,7 +65,7 @@ def test_client_update_stamps_updated_by_only(client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# Atribución del actor en transiciones de orden
+# Actor attribution in order transitions
 # ---------------------------------------------------------------------------
 
 
@@ -111,7 +111,7 @@ def test_mark_piece_cut_records_cut_by(client, db_session):
     assert piece["cutBy"] == admin.id
     assert piece["cutByLabel"] == _ADMIN_NAME
 
-    # Desmarcar limpia la atribución junto con cut_at.
+    # Unmarking clears the attribution along with cut_at.
     undo = client.patch(
         f"/api/v1/orders/{order.id}/cutting-plan/pieces/{piece_id}", json={"cut": False}
     )
@@ -122,7 +122,7 @@ def test_mark_piece_cut_records_cut_by(client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# Historial de pre-órdenes + atribución de cliente al confirmar
+# Pre-order history + client attribution on confirm
 # ---------------------------------------------------------------------------
 
 
@@ -152,9 +152,9 @@ def test_preorder_client_confirm_attributes_to_client(client, db_session):
     b = _create_board(client)
     pre = _create_preorder(client, c, b)
 
-    # Staff envía el enlace (transición a 'sent' por staff)...
+    # Staff sends the link (transition to 'sent' by staff)...
     link = client.post(f"/api/v1/preorders/{pre['id']}/review-link").json()["data"]
-    # ...y el cliente confirma desde el enlace público.
+    # ...and the client confirms from the public link.
     confirmed = client.post(f"/api/v1/public/review/{link['token']}/confirm")
     assert confirmed.status_code == 200
 
@@ -164,7 +164,7 @@ def test_preorder_client_confirm_attributes_to_client(client, db_session):
     assert by_status["confirmed"]["actor"] == "client"
     assert by_status["confirmed"]["actorUserId"] is None
 
-    # La orden minteada por la confirmación nace atribuida al cliente.
+    # The order minted by the confirmation is born attributed to the client.
     order = client.get(f"/api/v1/orders/{detail['orderId']}").json()["data"]
     assert order["history"][0]["actor"] == "client"
     assert order["history"][0]["actorUserId"] is None

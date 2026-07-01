@@ -1,4 +1,4 @@
-"""Seed script: borra tableros y tapacantos existentes e inserta la colección Trend 2026."""
+"""Seed script: deletes existing boards and edge bandings and inserts the Trend 2026 collection."""
 
 import os
 import sys
@@ -22,19 +22,19 @@ TEXTURE_DESC = {
 
 # (abbr, display_name, category, grain_direction, texture)
 DESIGNS = [
-    # Sólidos
+    # Solids
     ("CSH", "Cashmere", "SL", None, "BS"),
     ("GRT", "Gris Ratón", "SL", None, "SU"),
     ("ANT", "Antracita", "SL", None, "PE"),
     ("NGR", "Negro", "SL", None, "PE"),
     ("BNV", "Blanco Nieve", "SL", None, "BS"),
-    # Robles
+    # Oaks
     ("COE", "Costa Evoke", "RO", "H", "PW"),
     ("ARD", "Artesanal Dorado", "RO", "H", "PW"),
     ("BRD", "Barroco Dorado", "RO", "H", "RW"),
     ("BRA", "Barroco Ámbar", "RO", "H", "RW"),
     ("BRR", "Barroco Ristretto", "RO", "H", "RW"),
-    # Claros
+    # Lights
     ("IBZ", "Ibiza Lineal", "CL", "H", "SN"),
     ("CHA", "Chantillí", "CL", "H", "SN"),
     ("JAP", "Japandi", "CL", "H", "SN"),
@@ -88,7 +88,7 @@ def make_board(
         "description": description[:256],
         "price": PRICES[(cat, thickness, rh)],
         "is_active": True,
-        # Atributos en la forma canónica camelCase del catálogo de productos.
+        # Attributes in the products catalog's canonical camelCase shape.
         "attributes": {
             "height": height,
             "width": width,
@@ -106,7 +106,7 @@ def build_boards():
                 boards.append(
                     make_board(abbr, name, cat, grain, texture, thickness, rh)
                 )
-    # Blanco Nieve formato especial 2440 mm
+    # Blanco Nieve special 2440 mm format
     for thickness in (15, 36):
         for rh in (False, True):
             boards.append(
@@ -126,24 +126,24 @@ def build_boards():
     return boards
 
 
-# --- Tapacantos -----------------------------------------------------------
+# --- Edge bandings ---------------------------------------------------------
 #
-# Cada diseño de tablero tiene su tapacanto de PVC coordinado (mapeo 1:1 con
-# DESIGNS). Salvo el Blanco, todos vienen en las 3 medidas estándar. El "tipo" es
-# la etiqueta en español que ve el cliente en el nombre/descripción; el valor que
-# se guarda en attributes.bandType es su equivalente canónico en inglés (ver
-# BAND_TYPE_VALUE), que es lo que filtra el endpoint.
-#   (tipo, espesor_mm, ancho_mm)
+# Each board design has a coordinated PVC edge banding (1:1 mapping with
+# DESIGNS). Except for Blanco, all come in the 3 standard sizes. The "type" is
+# the Spanish label the client sees in the name/description; the value stored
+# in attributes.bandType is its canonical English equivalent (see
+# BAND_TYPE_VALUE), which is what the endpoint filters on.
+#   (type, thickness_mm, width_mm)
 EDGE_BAND_VARIANTS = [
     ("Suave", 0.45, 19),
     ("Duro", 1.00, 40),
     ("Duro", 1.50, 19),
 ]
 
-# Etiqueta español (visible al cliente) -> valor canónico inglés del enum BandType.
+# Spanish label (client-facing) -> canonical English value of the BandType enum.
 BAND_TYPE_VALUE = {"Suave": "Soft", "Duro": "Hard"}
 
-# TODO: precios PLACEHOLDER (no provistos). Reemplazar con los reales.
+# TODO: PLACEHOLDER prices (not provided). Replace with the real ones.
 EDGE_PRICES = {
     (0.45, 19): 12.00,
     (1.00, 40): 22.00,
@@ -152,8 +152,8 @@ EDGE_PRICES = {
 
 
 def edge_label(abbr, name, cat):
-    """Etiqueta comercial del tapacanto según la categoría del diseño."""
-    if abbr == "BNV":  # el tapacanto se llama "Blanco", no "Blanco Nieve"
+    """Commercial label of the edge banding based on the design's category."""
+    if abbr == "BNV":  # the edge banding is named "Blanco", not "Blanco Nieve"
         name = "Blanco"
     if cat == "RO":
         return f"Roble {name}"
@@ -164,8 +164,8 @@ def edge_label(abbr, name, cat):
 
 def make_edge_banding(abbr, name, cat, band_type, thickness, width):
     label = edge_label(abbr, name, cat)
-    thick_txt = f"{thickness:g}"  # 0.45, 1, 1.5 (sin ceros sobrantes)
-    band_value = BAND_TYPE_VALUE[band_type]  # valor canónico inglés (Soft/Hard)
+    thick_txt = f"{thickness:g}"  # 0.45, 1, 1.5 (no trailing zeros)
+    band_value = BAND_TYPE_VALUE[band_type]  # canonical English value (Soft/Hard)
     description = (
         f"Tapacanto PVC {label}, tipo {band_type}, {thick_txt}mm x {width}mm, "
         f"coordinado con tablero MDP {label}"
@@ -177,7 +177,7 @@ def make_edge_banding(abbr, name, cat, band_type, thickness, width):
         "description": description[:256],
         "price": EDGE_PRICES[(thickness, width)],
         "is_active": True,
-        # Atributos en la forma canónica camelCase del catálogo de productos.
+        # Attributes in the products catalog's canonical camelCase shape.
         "attributes": {
             "bandType": band_value,
             "thickness": thickness,
@@ -190,7 +190,7 @@ def make_edge_banding(abbr, name, cat, band_type, thickness, width):
 def build_edge_bandings():
     bands = []
     for abbr, name, cat, _grain, _texture in DESIGNS:
-        # El Blanco no se ofrece en las 3 medidas coordinadas; solo el Suave estándar.
+        # Blanco isn't offered in all 3 coordinated sizes; only the standard Suave.
         variants = [EDGE_BAND_VARIANTS[0]] if abbr == "BNV" else EDGE_BAND_VARIANTS
         for band_type, thickness, width in variants:
             bands.append(
@@ -211,11 +211,11 @@ def main():
                 .filter(ProductModel.type == product_type.value)
                 .delete()
             )
-            print(f"Eliminados {deleted} {label} existentes.")
+            print(f"Deleted {deleted} existing {label}.")
 
             items = [ProductModel(**data) for data in builder()]
             db.add_all(items)
-            print(f"Insertados {len(items)} {label} nuevos.")
+            print(f"Inserted {len(items)} new {label}.")
         db.commit()
     except Exception as e:
         db.rollback()

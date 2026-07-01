@@ -1,31 +1,32 @@
-"""Notación de taller para los cantos (tapacantos) de una pieza."""
+"""Workshop notation for a piece's edge banding (tapacantos)."""
 
 from typing import Iterable, Optional
 
-# Abreviatura del tipo de canto: Suave→CS, Duro→CD (valores canónicos de BandType).
+# Edge-type abbreviation: Soft→CS, Hard→CD (BandType canonical values).
 _BAND_TYPE_ABBR = {"Soft": "CS", "Hard": "CD"}
 
-# Etiqueta legible del tipo de canto para tablas/leyendas (valores canónicos de BandType).
+# Readable edge-type label for tables/legends (BandType canonical values).
 BAND_TYPE_LABEL = {"Soft": "Suave", "Hard": "Duro"}
 
 
 def edge_banding_notation(sides: Iterable[str], band_type: Optional[str] = None) -> str:
-    """Notación de taller de los lados canteados: ``'2L1C CS'`` (largos/cortos + tipo).
+    """Workshop notation for the banded sides: ``'2L1C CS'`` (long/short + type).
 
-    Clasifica por la medida del lado **nominal**: ``left``/``right`` son los lados del
-    alto (primera medida) → ``L`` (largo); ``top``/``bottom`` son los del ancho →
-    ``C`` (corto). Se omite el conteo en cero (``1L``, ``2C``) y, sin tipo de canto
-    conocido, se omite el sufijo. Cuando los 4 lados están canteados se nota ``4L``.
-    Devuelve ``''`` si no hay lados canteados.
+    Classifies by the **nominal** side measurement: ``left``/``right`` are the
+    height sides (first dimension) → ``L`` (largo/long); ``top``/``bottom`` are
+    the width sides → ``C`` (corto/short). A zero count is omitted (``1L``,
+    ``2C``), and the suffix is omitted when the edge type is unknown. When all 4
+    sides are banded it's noted as ``4L``. Returns ``''`` if no sides are banded.
 
-    Importante: usar siempre los lados **nominales** (los del ``EdgeBandingSpec``), no
-    los geométricos remapeados por rotación; así el conteo es estable bajo rotación.
+    Important: always use the **nominal** sides (the ones from
+    ``EdgeBandingSpec``), not the geometric ones remapped by rotation; this keeps
+    the count stable under rotation.
     """
     sides = list(sides or [])
     if not sides:
         return ""
-    long_count = sum(1 for s in sides if s in ("left", "right"))  # alto = Largo
-    short_count = sum(1 for s in sides if s in ("top", "bottom"))  # ancho = Corto
+    long_count = sum(1 for s in sides if s in ("left", "right"))  # height = Long
+    short_count = sum(1 for s in sides if s in ("top", "bottom"))  # width = Short
     if long_count == 2 and short_count == 2:
         parts = "4L"
     else:

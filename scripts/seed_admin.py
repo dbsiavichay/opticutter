@@ -1,4 +1,4 @@
-"""Siembra el primer administrador desde ADMIN_EMAIL / ADMIN_PASSWORD en .env."""
+"""Seeds the first administrator from ADMIN_EMAIL / ADMIN_PASSWORD in .env."""
 
 import sys
 
@@ -11,14 +11,14 @@ from src.shared.database import SessionLocal
 from src.shared.security import hash_password
 
 if not config.ADMIN_EMAIL or not config.ADMIN_PASSWORD:
-    print("ERROR: define ADMIN_EMAIL y ADMIN_PASSWORD en .env")
+    print("ERROR: set ADMIN_EMAIL and ADMIN_PASSWORD in .env")
     sys.exit(1)
 
 db = SessionLocal()
 try:
     exists = db.query(UserModel).filter(UserModel.email == config.ADMIN_EMAIL).first()
     if exists:
-        print(f"El usuario ya existe: {config.ADMIN_EMAIL}")
+        print(f"User already exists: {config.ADMIN_EMAIL}")
         sys.exit(0)
     db.add(
         UserModel(
@@ -29,6 +29,6 @@ try:
         )
     )
     db.commit()
-    print(f"Admin creado: {config.ADMIN_EMAIL}")
+    print(f"Admin created: {config.ADMIN_EMAIL}")
 finally:
     db.close()

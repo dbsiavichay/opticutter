@@ -1,9 +1,9 @@
-"""Tests del estado 'despachado' (entrega al cliente) y la hoja de despacho.
+"""Tests for the 'despachado' (delivered to client) status and the dispatch sheet.
 
-El despacho es el cierre real del ciclo: ``completed → despachado`` (terminal) y lo
-puede registrar CUALQUIER rol (quien entregue la mercadería), a diferencia del resto
-de transiciones acotadas por ``TRANSITION_ROLES``. La hoja de despacho es un PDF con
-las piezas (sin precios), el descargo de responsabilidad y las líneas de firma.
+Dispatch is the real close of the cycle: ``completed → despachado`` (terminal) and it
+can be registered by ANY role (whoever hands over the goods), unlike the rest of the
+transitions narrowed by ``TRANSITION_ROLES``. The dispatch sheet is a PDF with the
+pieces (no prices), the liability disclaimer, and the signature lines.
 """
 
 from src.modules.orders.schemas import OrderCreate
@@ -12,7 +12,7 @@ from src.modules.users.schemas import UserCreate
 from src.modules.users.service import UserService
 
 _PWD = "pw-supersecret"
-_BRANCH = 1  # sucursal por defecto sembrada por conftest
+_BRANCH = 1  # default branch seeded by conftest
 
 
 def _create_client(client, identifier="0991112233"):
@@ -60,7 +60,7 @@ def _order_payload(client_id, product_id, width=600):
 
 
 def _mint_order(client, db_session, identifier="0991112233", code="MEL18", width=600):
-    """Mintea por el servicio (la creación HTTP se retiró) y lee vía GET."""
+    """Mints through the service (HTTP creation was removed) and reads it back via GET."""
     c = _create_client(client, identifier=identifier)
     b = _create_board(client, code=code)
     order = OrderService(db_session).create(
@@ -72,13 +72,13 @@ def _mint_order(client, db_session, identifier="0991112233", code="MEL18", width
 def _patch_status(client, oid, status, **kw):
     body = {"status": status}
     if status == "queued":
-        # Pasar a cola exige registrar la forma de pago (informativa).
+        # Moving to the queue requires recording the (informational) payment method.
         body["payment"] = {"cashAmount": 100.0}
     return client.patch(f"/api/v1/orders/{oid}/status", json=body, **kw)
 
 
 def _to_completed(client, oid):
-    """Lleva la orden (sin tapacantos) hasta 'completed' como admin."""
+    """Drives the order (no edge banding) up to 'completed' as admin."""
     assert _patch_status(client, oid, "queued").status_code == 200
     assert _patch_status(client, oid, "cutting").status_code == 200
     plan = client.get(f"/api/v1/orders/{oid}/cutting-plan").json()["data"]
@@ -93,7 +93,7 @@ def _to_completed(client, oid):
 
 
 def _token_for(client, db_session, role, branch_id=_BRANCH, email=None):
-    """Siembra un usuario del rol y devuelve un header Bearer (login real)."""
+    """Seeds a user with the given role and returns a Bearer header (real login)."""
     email = email or f"{role}@empresa.com"
     svc = UserService(db_session)
     if svc.get_by_email(email) is None:
@@ -113,7 +113,7 @@ def _token_for(client, db_session, role, branch_id=_BRANCH, email=None):
 
 
 # --------------------------------------------------------------------------- #
-# Transición a 'despachado'
+# Transition to 'despachado'
 # --------------------------------------------------------------------------- #
 def test_dispatch_from_completed_freezes_metadata(client, db_session):
     order = _mint_order(client, db_session)
@@ -123,16 +123,16 @@ def test_dispatch_from_completed_freezes_metadata(client, db_session):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["status"] == "despachado"
-    # El despacho congela fecha y responsable (los muestra la hoja de despacho).
+    # Dispatch freezes date and the responsible user (shown on the dispatch sheet).
     assert data["dispatchedAt"] is not None
     assert data["dispatchedByLabel"] == "Conftest Admin"
-    # Historial: la última entrada registra completed → despachado.
+    # History: the last entry records completed → despachado.
     assert data["history"][-1]["fromStatus"] == "completed"
     assert data["history"][-1]["toStatus"] == "despachado"
 
 
 def test_any_role_can_dispatch(client, db_session):
-    """operador y canteador (roles que normalmente no cierran la orden) sí despachan."""
+    """operador and canteador (roles that normally don't close the order) can still dispatch."""
     for idx, role in enumerate(("operador", "canteador")):
         order = _mint_order(
             client,
@@ -153,14 +153,14 @@ def test_dispatched_is_terminal(client, db_session):
     _to_completed(client, order["id"])
     assert _patch_status(client, order["id"], "despachado").status_code == 200
 
-    # Sin salidas: cualquier transición posterior es inválida.
+    # No outgoing transitions: anything after this is invalid.
     bad = _patch_status(client, order["id"], "cancelled")
     assert bad.status_code == 422
     assert "inválida" in bad.json()["errors"][0]["message"]
 
 
 def test_cannot_dispatch_before_completed(client, db_session):
-    """Solo se despacha lo ya completado: desde 'confirmed' la transición es inválida."""
+    """Only completed orders can be dispatched: from 'confirmed' the transition is invalid."""
     order = _mint_order(client, db_session)
     bad = _patch_status(client, order["id"], "despachado")
     assert bad.status_code == 422
@@ -168,7 +168,7 @@ def test_cannot_dispatch_before_completed(client, db_session):
 
 
 # --------------------------------------------------------------------------- #
-# Hoja de despacho (PDF)
+# Dispatch sheet (PDF)
 # --------------------------------------------------------------------------- #
 def test_dispatch_sheet_pdf_and_base64(client, db_session):
     order = _mint_order(client, db_session)
@@ -192,7 +192,7 @@ def test_dispatch_sheet_pdf_and_base64(client, db_session):
 
 
 def test_dispatch_sheet_renders_before_dispatch(client, db_session):
-    """La hoja se puede emitir aun antes de despachar (fecha cae a 'hoy')."""
+    """The sheet can be issued even before dispatch (date falls back to 'today')."""
     order = _mint_order(client, db_session)
     sheet = client.get(f"/api/v1/orders/{order['id']}/dispatch-sheet")
     assert sheet.status_code == 200

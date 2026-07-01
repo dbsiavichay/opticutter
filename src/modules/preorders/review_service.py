@@ -1,18 +1,18 @@
-"""Enlaces de revisión del cliente sobre pre-órdenes: generación y confirmación.
+"""Client review links over pre-orders: generation and confirmation.
 
-El enlace y la decisión del cliente viven en la **pre-orden** (mutable); la Orden
-inmutable se crea recién al confirmar. Seguridad del enlace (el token ES la
-credencial; los endpoints públicos no tienen otra autenticación):
+The link and the client's decision live on the **pre-order** (mutable); the
+immutable Order is only created upon confirmation. Link security (the token IS
+the credential; the public endpoints have no other authentication):
 
-- Token de 256 bits CSPRNG (``secrets.token_urlsafe(32)``); adivinarlo es
-  infactible, por lo que actúa como capacidad de acceso a una sola pre-orden.
-- En reposo solo se guarda su sha256 (un dump de la DB o fuga de logs no produce
-  nada reutilizable). Sin salt: un token aleatorio de 256 bits es su propio salt.
-- Token desconocido o revocado → 404 uniforme (no se distingue "no existe" de
-  "revocado" ni se hace eco del token), para no dar un oráculo de enumeración.
-- Un solo enlace activo por pre-orden: regenerar revoca el anterior.
-- Notas de despliegue: el token viaja en la URL, el frontend debe usar
-  ``Referrer-Policy: no-referrer``; rate limiting en el reverse proxy.
+- 256-bit CSPRNG token (``secrets.token_urlsafe(32)``); guessing it is
+  infeasible, so it acts as a capability granting access to a single pre-order.
+- Only its sha256 is stored at rest (a DB dump or a log leak yields nothing
+  reusable). No salt: a random 256-bit token is its own salt.
+- Unknown or revoked token → uniform 404 (it doesn't distinguish "doesn't exist"
+  from "revoked", nor does it echo the token back), to avoid an enumeration oracle.
+- A single active link per pre-order: regenerating revokes the previous one.
+- Deployment notes: the token travels in the URL, the frontend must use
+  ``Referrer-Policy: no-referrer``; rate limiting belongs on the reverse proxy.
 """
 
 import hashlib
@@ -46,7 +46,7 @@ from src.shared.exceptions import (
 
 
 class ReviewLinkNotFoundError(AppError):
-    """404 uniforme: no distingue token inexistente de revocado."""
+    """Uniform 404: doesn't distinguish a nonexistent token from a revoked one."""
 
     status_code = 404
     code = "NOT_FOUND"
@@ -60,7 +60,7 @@ def _hash(token: str) -> str:
 
 
 class PreOrderReviewService:
-    """Gestiona el ciclo de vida del enlace y las acciones del cliente."""
+    """Manages the link lifecycle and the client's actions."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -73,12 +73,12 @@ class PreOrderReviewService:
         actor: Optional[Actor] = None,
         branch_scope: Optional[int] = None,
     ) -> Tuple[PreOrderReviewLinkModel, str]:
-        """Crea un enlace nuevo (revocando el activo previo) y devuelve el token.
+        """Creates a new link (revoking the previous active one) and returns the token.
 
-        Solo para pre-órdenes abiertas (``draft``/``sent``); exige que el cliente
-        tenga celular (no se envía una cotización a quien no se puede facturar).
-        Transiciona la pre-orden a ``sent`` y refresca su vigencia. Devuelve
-        ``(link, token_crudo)``; el token solo existe en esta respuesta.
+        Only for open pre-orders (``draft``/``sent``); requires the client to have
+        a phone number (a quote isn't sent to someone who can't be invoiced).
+        Transitions the pre-order to ``sent`` and refreshes its validity. Returns
+        ``(link, raw_token)``; the token only ever exists in this response.
         """
         actor = actor or system_actor()
         preorder = self.preorders.get_scoped_or_404(preorder_id, branch_scope)
@@ -123,27 +123,27 @@ class PreOrderReviewService:
     def get_latest_info(
         self, preorder_id: int, branch_scope: Optional[int] = None
     ) -> PreOrderReviewLinkModel:
-        """Último enlace de la pre-orden (metadatos; nunca expone el token)."""
+        """Latest link of the pre-order (metadata only; never exposes the token)."""
         preorder = self.preorders.get_scoped_or_404(preorder_id, branch_scope)
         if not preorder.review_links:
             raise EntityNotFoundError("ReviewLink de la pre-orden", preorder_id)
         return preorder.review_links[-1]
 
     def get_review(self, token: str) -> PreOrderModel:
-        """Pre-orden asociada al token para la vista pública (dispara expiración)."""
+        """Pre-order associated with the token for the public view (triggers expiry)."""
         link = self._get_by_token_or_404(token)
         return self.preorders.get_or_404(link.preorder_id)
 
     def confirm(
         self, token: str, note: Optional[str] = None, meta: Optional[dict] = None
     ) -> PreOrderModel:
-        """El cliente confirma: mintea la Orden inmutable y enlaza ``order_id``.
+        """The client confirms: mints the immutable Order and links ``order_id``.
 
-        La Orden se crea desde los inputs vigentes (precios vivos del catálogo).
-        Idempotente: si la pre-orden ya está confirmada, un reintento devuelve su
-        estado actual sin error. La dedupe por ``(client_id, hash)`` de
-        ``OrderService.create`` evita órdenes duplicadas ante doble clic o un
-        reintento tras una caída entre los dos commits.
+        The Order is created from the current inputs (live catalog prices).
+        Idempotent: if the pre-order is already confirmed, a retry returns its
+        current state without error. The ``(client_id, hash)`` dedupe in
+        ``OrderService.create`` prevents duplicate orders from a double click or
+        a retry after a crash between the two commits.
         """
         link = self._get_by_token_or_404(token)
         preorder = self.preorders.get_or_404(link.preorder_id)
@@ -154,7 +154,7 @@ class PreOrderReviewService:
         if status in {PreOrderStatus.rejected, PreOrderStatus.cancelled}:
             raise BusinessRuleError("La cotización fue retirada; solicita una nueva.")
         if status == PreOrderStatus.confirmed:
-            return preorder  # ya confirmada: reintento benigno
+            return preorder  # already confirmed: benign retry
 
         actor = client_actor()
         order = self.orders.create(
@@ -186,17 +186,18 @@ class PreOrderReviewService:
     def reject(
         self, token: str, note: Optional[str] = None, meta: Optional[dict] = None
     ) -> PreOrderModel:
-        """El cliente rechaza la cotización: pre-orden ``sent → rejected``.
+        """The client rejects the quote: pre-order ``sent → rejected``.
 
-        Libera de inmediato el cupo de abiertas. Si ya confirmó, el rechazo
-        contradictorio pasa por ventas (409): la orden puede estar en producción.
+        Immediately frees up the open-pre-orders slot. If already confirmed, the
+        contradictory rejection routes through sales (409): the order may already
+        be in production.
         """
         link = self._get_by_token_or_404(token)
         preorder = self.preorders.get_or_404(link.preorder_id)
         status = PreOrderStatus(preorder.status)
 
         if status in {PreOrderStatus.rejected, PreOrderStatus.cancelled}:
-            return preorder  # ya retirada: reintento benigno
+            return preorder  # already withdrawn: benign retry
         if status == PreOrderStatus.expired:
             raise BusinessRuleError("La cotización expiró; no hay nada que rechazar.")
         if status == PreOrderStatus.confirmed:
@@ -219,12 +220,13 @@ class PreOrderReviewService:
         return preorder
 
     def request_changes(self, token: str, note: Optional[str] = None) -> PreOrderModel:
-        """El cliente pide un ajuste: pre-orden ``sent → changes_requested``.
+        """The client requests an adjustment: pre-order ``sent → changes_requested``.
 
-        Ni descarta (a diferencia de ``reject``) ni compromete: la pelota vuelve al
-        taller, que editará la pre-orden. **No consume el enlace** (sigue activo): el
-        cliente usará el mismo token para ver la versión editada y luego confirmar o
-        rechazar. La nota (qué cambiar) queda en ``client_note``.
+        Neither discards it (unlike ``reject``) nor commits to it: the ball goes
+        back to the workshop, which will edit the pre-order. **Doesn't consume the
+        link** (it stays active): the client will use the same token to see the
+        edited version and then confirm or reject. The note (what to change) is
+        stored in ``client_note``.
         """
         link = self._get_by_token_or_404(token)
         preorder = self.preorders.get_or_404(link.preorder_id)
@@ -239,8 +241,8 @@ class PreOrderReviewService:
                 "La cotización ya fue confirmada; para cambios contacta a ventas."
             )
 
-        # 'sent' o 'changes_requested': registra/actualiza la solicitud y mantiene
-        # el enlace activo (sin marcarlo usado).
+        # 'sent' or 'changes_requested': records/updates the request and keeps
+        # the link active (without marking it used).
         if preorder.status != PreOrderStatus.changes_requested.value:
             self.preorders._record_transition(
                 preorder,
@@ -256,7 +258,7 @@ class PreOrderReviewService:
         return preorder
 
     def build_url(self, raw_token: str) -> str:
-        """URL completa de revisión que abre el cliente (frontend de Maderable)."""
+        """Full review URL the client opens (Maderable frontend)."""
         return f"{config.FRONTEND_BASE_URL.rstrip('/')}/review/{raw_token}"
 
     def _mark_used(
@@ -272,10 +274,10 @@ class PreOrderReviewService:
         link.used_meta = {"action": action, "note": note, **(meta or {})}
 
     def _get_by_token_or_404(self, token: str) -> PreOrderReviewLinkModel:
-        """Busca por hash del token; 404 uniforme si no existe o fue revocado.
+        """Looks up by token hash; uniform 404 if it doesn't exist or was revoked.
 
-        Un enlace ``used`` sigue siendo legible: el cliente puede volver a la
-        página después de confirmar y ver el estado real de su cotización.
+        A ``used`` link remains readable: the client can return to the page after
+        confirming and see the actual state of their quote.
         """
         link = (
             self.db.query(PreOrderReviewLinkModel)
@@ -288,5 +290,5 @@ class PreOrderReviewService:
 
 
 def preorder_review_service(db: Session = Depends(get_db)) -> PreOrderReviewService:
-    """Provider de ``PreOrderReviewService`` para inyección en rutas."""
+    """Provider for ``PreOrderReviewService`` injection in routes."""
     return PreOrderReviewService(db)

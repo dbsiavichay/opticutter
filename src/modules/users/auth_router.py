@@ -28,7 +28,7 @@ router = APIRouter(prefix="/auth", tags=["auth"], responses=ERROR_RESPONSES)
 
 
 def _token_response(user: UserModel, refresh_token: str) -> TokenResponse:
-    """Arma el par de tokens (access JWT + refresh) y los datos del usuario."""
+    """Builds the token pair (access JWT + refresh) and the user's data."""
     return TokenResponse(
         access_token=create_access_token(user.id, user.role),
         refresh_token=refresh_token,
@@ -45,12 +45,12 @@ def login(
     refresh_svc: RefreshTokenService = Depends(refresh_token_service),
     login_event_svc: LoginEventService = Depends(login_event_service),
 ):
-    """Valida email + contraseña y emite un par access/refresh."""
+    """Validates email + password and issues an access/refresh pair."""
     user = svc.authenticate(data.email, data.password)
     if user is None:
-        # Mensaje genérico: no revela si el email existe o si fue la contraseña.
+        # Generic message: doesn't reveal whether the email exists or it was the password.
         raise AuthenticationError("Email o contraseña incorrectos")
-    # Registra la entrada (referencia de "hora de entrada"); solo en login, no refresh.
+    # Records the entry ("arrival time" reference); only on login, not refresh.
     login_event_svc.record(
         user.id,
         ip_address=request.client.host if request.client else None,
@@ -64,7 +64,7 @@ def refresh(
     data: RefreshRequest,
     refresh_svc: RefreshTokenService = Depends(refresh_token_service),
 ):
-    """Canjea un refresh token por un par nuevo (rota el presentado)."""
+    """Exchanges a refresh token for a new pair (rotates the presented one)."""
     user, new_refresh = refresh_svc.rotate(data.refresh_token)
     return ok(_token_response(user, new_refresh))
 
@@ -74,13 +74,13 @@ def logout(
     data: RefreshRequest,
     refresh_svc: RefreshTokenService = Depends(refresh_token_service),
 ):
-    """Cierra la sesión revocando el refresh token presentado (idempotente)."""
+    """Closes the session by revoking the presented refresh token (idempotent)."""
     refresh_svc.revoke(data.refresh_token)
 
 
 @router.get("/me", response_model=DataResponse[UserResponse])
 def me(current_user: UserModel = Depends(get_current_user)):
-    """Devuelve el usuario autenticado."""
+    """Returns the authenticated user."""
     return ok(current_user)
 
 
@@ -90,7 +90,7 @@ def update_me(
     current_user: UserModel = Depends(get_current_user),
     svc: UserService = Depends(user_service),
 ):
-    """Autoservicio: el propio usuario edita su perfil (solo ``fullName``)."""
+    """Self-service: the user edits their own profile (``fullName`` only)."""
     return ok(svc.update_profile(current_user, data))
 
 
@@ -101,6 +101,6 @@ def change_password(
     svc: UserService = Depends(user_service),
     refresh_svc: RefreshTokenService = Depends(refresh_token_service),
 ):
-    """Autoservicio: cambia la propia contraseña y revoca las sesiones abiertas."""
+    """Self-service: changes the own password and revokes open sessions."""
     svc.change_password(current_user, data.current_password, data.new_password)
     refresh_svc.revoke_all_for_user(current_user.id)

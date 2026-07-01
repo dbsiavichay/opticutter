@@ -1,11 +1,11 @@
-"""Rango de fechas y bucketing temporal.
+"""Date range and time bucketing.
 
-``DateRange`` es una dependencia inyectable (como ``PageParams``) que parsea y valida
-los query params ``from``/``to``. El bucketing se hace en Python (no en SQL) para
-mantener la lógica en el dominio sin dependencias de funciones específicas del dialecto.
+``DateRange`` is an injectable dependency (like ``PageParams``) that parses and
+validates the ``from``/``to`` query params. Bucketing is done in Python (not SQL)
+to keep the logic in the domain, free of dialect-specific function dependencies.
 
-Todos los timestamps del dominio son naive UTC (``datetime.utcnow()``); aquí se tratan
-como tales, sin conversión de zona.
+All domain timestamps are naive UTC (``datetime.utcnow()``); they're treated as
+such here, with no timezone conversion.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -19,10 +19,10 @@ _DEFAULT_WINDOW_DAYS = 30
 
 
 class DateRange:
-    """Ventana ``[start, end)`` medio-abierta sobre ``created_at``.
+    """Half-open ``[start, end)`` window over ``created_at``.
 
-    Defaults: últimos 30 días terminando hoy (UTC). El borde superior es exclusivo
-    (``end = to + 1 día``) para evitar el bug del límite ``23:59:59``.
+    Defaults: last 30 days ending today (UTC). The upper bound is exclusive
+    (``end = to + 1 day``) to avoid the ``23:59:59`` boundary bug.
     """
 
     def __init__(
@@ -48,16 +48,16 @@ class DateRange:
 
 
 def bucket_key(d: date, granularity: Granularity) -> date:
-    """Fecha de inicio del bucket al que pertenece ``d``."""
+    """Start date of the bucket ``d`` belongs to."""
     if granularity is Granularity.day:
         return d
     if granularity is Granularity.week:
-        return d - timedelta(days=d.weekday())  # lunes ISO
+        return d - timedelta(days=d.weekday())  # ISO Monday
     return d.replace(day=1)  # month
 
 
 def _advance(d: date, granularity: Granularity) -> date:
-    """Siguiente fecha de bucket."""
+    """Next bucket date."""
     if granularity is Granularity.day:
         return d + timedelta(days=1)
     if granularity is Granularity.week:
@@ -70,7 +70,7 @@ def _advance(d: date, granularity: Granularity) -> date:
 def iter_buckets(
     date_from: date, date_to: date, granularity: Granularity
 ) -> list[date]:
-    """Eje denso de fechas de bucket que cubre ``[date_from, date_to]`` (sin huecos)."""
+    """Dense axis of bucket dates covering ``[date_from, date_to]`` (no gaps)."""
     keys: list[date] = []
     cur = bucket_key(date_from, granularity)
     last = bucket_key(date_to, granularity)

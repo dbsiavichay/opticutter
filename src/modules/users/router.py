@@ -14,7 +14,7 @@ from src.shared.responses import (
     page,
 )
 
-# Gestión de usuarios: solo "administrador" (RESOURCE_ROLES["users:manage"]).
+# User management: "administrador" only (RESOURCE_ROLES["users:manage"]).
 router = APIRouter(
     prefix="/users",
     tags=["users"],
@@ -25,17 +25,17 @@ router = APIRouter(
 
 @router.post("/", response_model=DataResponse[UserResponse], status_code=201)
 def create_user(data: UserCreate, svc: UserService = Depends(user_service)):
-    """Crea un nuevo usuario."""
+    """Creates a new user."""
     return ok(svc.create(data))
 
 
 @router.get("/", response_model=PaginatedResponse[UserResponse])
 def list_users(
     paging: PageParams = Depends(),
-    search: Optional[str] = Query(None, description="Búsqueda por email o nombre"),
+    search: Optional[str] = Query(None, description="Search by email or name"),
     svc: UserService = Depends(user_service),
 ):
-    """Lista usuarios con búsqueda y paginación opcionales."""
+    """Lists users with optional search and pagination."""
     if search:
         items, total = svc.search_paginated(search, paging.limit, paging.offset)
     else:
@@ -45,7 +45,7 @@ def list_users(
 
 @router.get("/{user_id}", response_model=DataResponse[UserResponse])
 def get_user(user_id: int, svc: UserService = Depends(user_service)):
-    """Obtiene un usuario por ID."""
+    """Gets a user by ID."""
     return ok(svc.get_or_404(user_id))
 
 
@@ -53,11 +53,11 @@ def get_user(user_id: int, svc: UserService = Depends(user_service)):
 def update_user(
     user_id: int, data: UserUpdate, svc: UserService = Depends(user_service)
 ):
-    """Actualiza un usuario (incluye cambio de contraseña y baja lógica)."""
+    """Updates a user (includes password change and logical deactivation)."""
     return ok(svc.update(user_id, data))
 
 
 @router.delete("/{user_id}", status_code=204)
 def delete_user(user_id: int, svc: UserService = Depends(user_service)):
-    """Elimina un usuario."""
+    """Deletes a user."""
     svc.delete(user_id)

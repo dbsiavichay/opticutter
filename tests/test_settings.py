@@ -1,4 +1,4 @@
-"""Tests del módulo settings: configuración única persistida y editable vía API."""
+"""Tests for the settings module: a single configuration, persisted and editable via API."""
 
 from datetime import datetime
 
@@ -28,7 +28,7 @@ def _create_board(client, code="MEL18"):
 def _optimize_payload(client_id, product_id):
     return {
         "clientId": client_id,
-        "branchId": 1,  # sucursal por defecto sembrada por conftest
+        "branchId": 1,  # default branch seeded by conftest
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {
@@ -44,9 +44,9 @@ def _optimize_payload(client_id, product_id):
     }
 
 
-# --- Parámetros de corte ------------------------------------------------------
+# --- Cutting parameters --------------------------------------------------------
 def test_get_cutting_seeds_from_config(client):
-    """El primer GET siembra la fila singleton con los defaults de ``config``."""
+    """The first GET seeds the singleton row with ``config`` defaults."""
     resp = client.get("/api/v1/settings/cutting")
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -56,7 +56,7 @@ def test_get_cutting_seeds_from_config(client):
 
 
 def test_patch_cutting_persists_and_is_partial(client):
-    """El PATCH parcial persiste solo lo enviado y no pisa el resto."""
+    """A partial PATCH persists only what was sent and doesn't overwrite the rest."""
     before = client.get("/api/v1/settings/cutting").json()["data"]
 
     resp = client.patch("/api/v1/settings/cutting", json={"kerf": 4.0})
@@ -65,20 +65,20 @@ def test_patch_cutting_persists_and_is_partial(client):
 
     after = client.get("/api/v1/settings/cutting").json()["data"]
     assert after["kerf"] == 4.0
-    # Los demás parámetros quedan intactos.
+    # The rest of the parameters stay intact.
     assert after["topTrim"] == before["topTrim"]
     assert after["rightTrim"] == before["rightTrim"]
 
 
 def test_patch_cutting_rejects_negative(client):
-    """Validación: los parámetros de corte no pueden ser negativos (422)."""
+    """Validation: cutting parameters cannot be negative (422)."""
     assert (
         client.patch("/api/v1/settings/cutting", json={"kerf": -1}).status_code == 422
     )
 
 
 def test_cutting_settings_drive_optimization(client):
-    """Cambiar el kerf en BD cambia el hash de la optimización (lo usa el optimizador)."""
+    """Changing the kerf in the DB changes the optimization hash (used by the optimizer)."""
     created_client = _create_client(client)
     board = _create_board(client)
     payload = _optimize_payload(created_client["id"], board["id"])
@@ -91,9 +91,9 @@ def test_cutting_settings_drive_optimization(client):
     assert first["optimizationHash"] != second["optimizationHash"]
 
 
-# --- Pre-órdenes (cotización mutable) -----------------------------------------
+# --- Pre-orders (mutable quote) -------------------------------------------------
 def test_get_preorders_seeds_from_config(client):
-    """El primer GET siembra la sección preorders con los defaults de ``config``."""
+    """The first GET seeds the preorders section with ``config`` defaults."""
     resp = client.get("/api/v1/settings/preorders")
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -102,7 +102,7 @@ def test_get_preorders_seeds_from_config(client):
 
 
 def test_patch_preorders_persists_and_is_partial(client):
-    """El PATCH parcial persiste solo lo enviado y no pisa el resto."""
+    """A partial PATCH persists only what was sent and doesn't overwrite the rest."""
     before = client.get("/api/v1/settings/preorders").json()["data"]
 
     resp = client.patch("/api/v1/settings/preorders", json={"preorderValidityDays": 30})
@@ -111,12 +111,12 @@ def test_patch_preorders_persists_and_is_partial(client):
 
     after = client.get("/api/v1/settings/preorders").json()["data"]
     assert after["preorderValidityDays"] == 30
-    # El tope queda intacto.
+    # The cap stays intact.
     assert after["maxOpenPreordersPerClient"] == before["maxOpenPreordersPerClient"]
 
 
 def test_patch_preorders_rejects_below_one(client):
-    """Validación: vigencia y tope deben ser ≥ 1 (422)."""
+    """Validation: validity and cap must be ≥ 1 (422)."""
     assert (
         client.patch(
             "/api/v1/settings/preorders", json={"preorderValidityDays": 0}
@@ -132,7 +132,7 @@ def test_patch_preorders_rejects_below_one(client):
 
 
 def test_preorder_validity_comes_from_settings(client):
-    """La pre-orden toma su vigencia de settings (no de env): el gap = días config."""
+    """The pre-order takes its validity from settings (not env): the gap = config days."""
     created_client = _create_client(client)
     board = _create_board(client)
 
@@ -146,9 +146,9 @@ def test_preorder_validity_comes_from_settings(client):
     assert (expires - created).days == 7
 
 
-# --- Datos de la empresa ------------------------------------------------------
+# --- Company data -----------------------------------------------------------
 def test_get_company_seeds_from_config(client):
-    """El primer GET expone los datos de empresa sembrados desde ``config``."""
+    """The first GET exposes the company data seeded from ``config``."""
     resp = client.get("/api/v1/settings/company")
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -158,7 +158,7 @@ def test_get_company_seeds_from_config(client):
 
 
 def test_patch_company_persists(client):
-    """El PATCH de empresa persiste teléfono y sucursales (lista de objetos)."""
+    """The company PATCH persists phone and branches (list of objects)."""
     resp = client.patch(
         "/api/v1/settings/company",
         json={
@@ -177,10 +177,10 @@ def test_patch_company_persists(client):
 
 
 def test_company_settings_render_in_proforma(client):
-    """La proforma de la cotización usa los datos de empresa vigentes (membrete vivo).
+    """The quote proforma uses the current company data (live letterhead).
 
-    El optimizador ya no emite documento: la proforma vive en la cotización (precios
-    vivos) y en la orden. Aquí se ejercita vía la pre-orden.
+    The optimizer no longer emits a document: the proforma lives in the quote
+    (live prices) and in the order. Here it's exercised via the pre-order.
     """
     created_client = _create_client(client)
     board = _create_board(client)

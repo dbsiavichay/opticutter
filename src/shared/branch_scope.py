@@ -1,18 +1,19 @@
-"""Aislamiento por sucursal a nivel de servicio (infraestructura genérica).
+"""Branch isolation at the service level (generic infrastructure).
 
-El *branch scope* expresa qué filas puede ver/tocar un usuario:
+The *branch scope* expresses which rows a user can see/touch:
 
-- ``None`` → rol global (administrador o vendedor): ve y opera **todas** las
-  sucursales (sin filtro).
-- ``int``  → operador atado a esa sucursal: solo ve/opera la suya.
+- ``None`` → global role (administrador or vendedor): sees and operates on
+  **all** branches (no filter).
+- ``int``  → operador bound to that branch: only sees/operates on their own.
 
-Se resuelve una vez por request (``users.dependencies.get_branch_scope``) y se
-propaga a los servicios. Este mixin centraliza el filtro de listado y la verificación
-de pertenencia para no repetirlo —ni arriesgar fugas— en cada servicio. Es ortogonal
-a ``require_permission`` (rol → *qué acciones*); el scope decide *qué filas*.
+Resolved once per request (``users.dependencies.get_branch_scope``) and
+propagated to the services. This mixin centralizes the listing filter and the
+ownership check so it isn't repeated — or leaked — in every service. It's
+orthogonal to ``require_permission`` (role → *which actions*); the scope
+decides *which rows*.
 
-Sin import de ningún módulo de dominio: opera sobre ``self.model`` (que debe tener
-una columna ``branch_id``) y ``self.get_or_404``, igual que ``CRUDService``.
+No import from any domain module: it operates on ``self.model`` (which must
+have a ``branch_id`` column) and ``self.get_or_404``, same as ``CRUDService``.
 """
 
 from typing import Optional
@@ -23,10 +24,10 @@ from src.shared.exceptions import EntityNotFoundError
 
 
 class BranchScopedMixin:
-    """Filtro y guardia de pertenencia por sucursal para servicios con ``branch_id``.
+    """Branch filter and ownership guard for services with ``branch_id``.
 
-    La subclase define ``model`` (el modelo ORM con ``branch_id``) y aporta
-    ``get_or_404`` (vía ``CRUDService`` o propio).
+    The subclass defines ``model`` (the ORM model with ``branch_id``) and
+    provides ``get_or_404`` (via ``CRUDService`` or its own).
     """
 
     model = None  # type: ignore[assignment]
@@ -37,11 +38,11 @@ class BranchScopedMixin:
         branch_scope: Optional[int],
         branch_filter: Optional[int] = None,
     ) -> Query:
-        """Aplica el aislamiento a un listado.
+        """Applies isolation to a listing.
 
-        - scoped (``branch_scope`` no None, p. ej. operador): bloqueado a su sucursal.
-        - global (``branch_scope`` None, admin/vendedor): sin filtro, salvo que pida
-          estrechar a una sucursal concreta con ``branch_filter``.
+        - scoped (``branch_scope`` not None, e.g. operador): locked to their branch.
+        - global (``branch_scope`` None, admin/vendedor): no filter, unless it asks
+          to narrow to a specific branch via ``branch_filter``.
         """
         if branch_scope is not None:
             return query.filter(self.model.branch_id == branch_scope)
@@ -50,10 +51,10 @@ class BranchScopedMixin:
         return query
 
     def get_scoped_or_404(self, id: int, branch_scope: Optional[int]):
-        """Obtiene por id verificando que pertenezca a la sucursal del usuario.
+        """Gets by id verifying it belongs to the user's branch.
 
-        Un recurso de otra sucursal devuelve **404 uniforme** (no 403): no se revela
-        que existe, igual que los enlaces de revisión públicos.
+        A resource from another branch returns a **uniform 404** (not 403): it
+        doesn't reveal that it exists, same as the public review links.
         """
         obj = self.get_or_404(id)
         if branch_scope is not None and obj.branch_id != branch_scope:

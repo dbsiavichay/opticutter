@@ -27,7 +27,7 @@ from src.shared.responses import (
     page,
 )
 
-# Borradores del optimizador: "administrador" y "vendedor" (RESOURCE_ROLES["optimizer"]).
+# Optimizer drafts: "administrador" and "vendedor" (RESOURCE_ROLES["optimizer"]).
 router = APIRouter(
     prefix="/optimization-drafts",
     tags=["optimization-drafts"],
@@ -43,10 +43,11 @@ def create_draft(
     current_user: UserModel = Depends(get_current_user),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Crea un borrador del optimizador.
+    """Creates an optimizer draft.
 
-    El operador lo crea en su sucursal; el vendedor lo predetermina en su sucursal base
-    (puede sobrescribirla con ``branchId``); el admin debe indicar ``branchId``.
+    The operator creates it in their own branch; the seller defaults to their
+    base branch (can override it with ``branchId``); the admin must provide
+    ``branchId``.
     """
     return ok(
         svc.create_scoped(
@@ -62,17 +63,17 @@ def list_drafts(
     branch_id: Optional[int] = Query(
         default=None,
         alias="branchId",
-        description="Solo roles globales (admin/vendedor): estrecha el listado a una "
-        "sucursal (vacío = todas)",
+        description="Global roles only (admin/seller): narrows the listing to a "
+        "branch (empty = all)",
     ),
     paging: PageParams = Depends(),
     svc: OptimizationDraftService = Depends(optimization_draft_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Lista borradores (resumen liviano, sin ``payload``) con paginación.
+    """Lists drafts (lightweight summary, without ``payload``) with pagination.
 
-    El operador solo ve los de su sucursal; los roles globales (admin/vendedor) ven
-    todos (o filtran con ``branchId``).
+    The operator only sees the ones in their branch; global roles (admin/seller)
+    see all of them (or filter with ``branchId``).
     """
     items, total = svc.list_scoped(
         branch_scope=branch_scope,
@@ -89,7 +90,7 @@ def get_draft(
     svc: OptimizationDraftService = Depends(optimization_draft_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Obtiene un borrador por ID (incluye el ``payload`` completo)."""
+    """Gets a draft by ID (includes the full ``payload``)."""
     return ok(svc.get_scoped_or_404(draft_id, branch_scope))
 
 
@@ -100,7 +101,7 @@ def update_draft(
     svc: OptimizationDraftService = Depends(optimization_draft_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Actualiza (sobrescribe) un borrador."""
+    """Updates (overwrites) a draft."""
     return ok(svc.update_scoped(draft_id, data, branch_scope=branch_scope))
 
 
@@ -110,5 +111,5 @@ def delete_draft(
     svc: OptimizationDraftService = Depends(optimization_draft_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Elimina un borrador."""
+    """Deletes a draft."""
     svc.delete_scoped(draft_id, branch_scope=branch_scope)

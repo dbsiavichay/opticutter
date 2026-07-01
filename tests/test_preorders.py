@@ -1,4 +1,4 @@
-"""Tests del módulo preorders: CRUD mutable, recálculo, tope y expiración."""
+"""Tests for the preorders module: mutable CRUD, recompute, cap, and expiration."""
 
 from datetime import datetime, timedelta
 
@@ -27,12 +27,12 @@ def test_create_preorder_is_draft_with_live_optimization(client):
     assert data["code"].startswith("PRE-")
     assert data["orderId"] is None
     assert data["client"]["id"] == c["id"]
-    # La pre-orden expone su sucursal dueña (referencia compacta).
+    # The pre-order exposes its owning branch (compact reference).
     assert data["branch"]["id"] == 1
     assert data["branch"]["code"] == "MATRIZ"
     assert data["expiresAt"] is not None
 
-    # Inputs crudos editables (lo que el formulario del optimizador re-renderiza).
+    # Raw editable inputs (what the optimizer form re-renders).
     assert len(data["materials"]) == 1
     assert data["materials"][0]["key"] == "b1"
     assert data["materials"][0]["source"] == "catalog"
@@ -41,7 +41,7 @@ def test_create_preorder_is_draft_with_live_optimization(client):
     assert data["requirements"][0]["materialKey"] == "b1"
     assert data["requirements"][0]["height"] == 800
 
-    # Optimización recalculada embebida (precios vivos, nada congelado).
+    # Embedded recomputed optimization (live prices, nothing frozen).
     opt = data["optimization"]
     assert opt["totalBoardsUsed"] >= 1
     assert len(opt["materialsSummary"]) == 1
@@ -77,7 +77,7 @@ def test_update_blocked_when_not_open(client, db_session):
     c, b = _setup(client)
     pre = _create_preorder(client, c, b).json()["data"]
 
-    # Vence la pre-orden: al leerla se marca 'expired' y ya no se puede editar.
+    # Expire the pre-order: reading it marks it 'expired' and it can no longer be edited.
     db_pre = db_session.get(PreOrderModel, pre["id"])
     db_pre.expires_at = datetime.utcnow() - timedelta(days=1)
     db_session.commit()
@@ -88,7 +88,7 @@ def test_update_blocked_when_not_open(client, db_session):
 
 
 def test_open_cap_enforced(client):
-    # El tope se lee de settings (no de env): bajarlo a 2 vía la API de configuración.
+    # The cap is read from settings (not env): lower it to 2 via the settings API.
     patched = client.patch(
         "/api/v1/settings/preorders", json={"maxOpenPreordersPerClient": 2}
     )
@@ -108,7 +108,7 @@ def test_list_filter_and_summary_omits_optimization(client):
     listed = client.get("/api/v1/preorders/?status=draft").json()
     assert listed["meta"]["pagination"]["total"] >= 1
     assert all(item["status"] == "draft" for item in listed["data"])
-    # El resumen liviano no trae la optimización completa.
+    # The lightweight summary doesn't include the full optimization.
     assert "optimization" not in listed["data"][0]
 
 
@@ -135,18 +135,18 @@ def test_preorder_proforma_pdf(client):
 
 
 def test_preorder_persists_strategy_and_recomputes_with_it(client):
-    """La estrategia se guarda y el recálculo (cache-first) la usa en cada lectura."""
+    """The strategy is saved and the recompute (cache-first) uses it on every read."""
     c, b = _setup(client)
     data = _create_preorder(client, c, b, strategy="longOffcuts").json()["data"]
     assert data["strategy"] == "longOffcuts"
     assert data["optimization"]["strategy"] == "longOffcuts"
 
-    # Re-leer la pre-orden vuelve a recalcular y conserva la estrategia.
+    # Re-reading the pre-order recomputes again and keeps the strategy.
     reread = client.get(f"/api/v1/preorders/{data['id']}").json()["data"]
     assert reread["strategy"] == "longOffcuts"
     assert reread["optimization"]["strategy"] == "longOffcuts"
 
-    # Omitir la estrategia cae al comportamiento por defecto.
+    # Omitting the strategy falls back to the default behavior.
     other = _create_preorder(client, c, b, width=500).json()["data"]
     assert other["strategy"] == "default"
     assert other["optimization"]["strategy"] == "default"

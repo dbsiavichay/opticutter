@@ -1,9 +1,9 @@
-"""Tests del módulo orders: creación (snapshot), idempotencia, estados.
+"""Tests for the orders module: creation (snapshot), idempotency, statuses.
 
-Las órdenes ya no se crean por HTTP (``POST /orders`` se retiró): nacen al confirmar
-una pre-orden. Aquí se mintan directamente por ``OrderService.create`` (la vía interna
-que conserva el flujo) reusando la sesión del fixture ``client``, y se leen vía GET para
-verificar la proyección API en camelCase.
+Orders are no longer created via HTTP (``POST /orders`` was removed): they're born
+when a pre-order is confirmed. Here they're minted directly via ``OrderService.create``
+(the internal path that preserves the flow) reusing the ``client`` fixture's session,
+and read back via GET to verify the camelCase API projection.
 """
 
 from datetime import datetime
@@ -40,16 +40,16 @@ def _create_board(client, code="MEL18"):
     ).json()["data"]
 
 
-# Sucursal por defecto sembrada por conftest (id=1).
+# Default branch seeded by conftest (id=1).
 _BRANCH = 1
 
 
 def _order_payload(
     client_id, product_id, height=800, width=700, quantity=2, strategy=None
 ):
-    # Default no-halvable (ambos lados > medio ancho de 610): el cobro por tablero
-    # completo se prueba con un trabajo que no cabe en medio tablero. Los tests de
-    # medio tablero pasan dimensiones chicas explícitas.
+    # Default non-halvable (both sides > half-width of 610): full-board charging is
+    # tested with a job that doesn't fit in half a board. Half-board tests pass
+    # explicit small dimensions.
     payload = {
         "clientId": client_id,
         "branchId": _BRANCH,
@@ -72,12 +72,12 @@ def _order_payload(
 
 
 def _mint_order(db_session, payload):
-    """Crea la orden por el servicio y devuelve el ``OrderModel``."""
+    """Creates the order via the service and returns the ``OrderModel``."""
     return OrderService(db_session).create(OrderCreate.model_validate(payload))
 
 
 def _create_order(client, db_session, payload):
-    """Mintea la orden y devuelve su proyección API (GET) en camelCase."""
+    """Mints the order and returns its camelCase API projection (GET)."""
     order = _mint_order(db_session, payload)
     return client.get(f"/api/v1/orders/{order.id}").json()["data"]
 
@@ -91,38 +91,38 @@ def test_create_order_freezes_snapshot_and_charges_boards(client, db_session):
     assert data["status"] == "confirmed"
     assert data["code"] == f"ORD-{datetime.utcnow().year}-{data['id']:04d}"
     assert data["client"]["id"] == c["id"]
-    # La orden expone su sucursal dueña (referencia compacta) para el dashboard.
+    # The order exposes its owning branch (compact reference) for the dashboard.
     assert data["branch"]["id"] == _BRANCH
     assert data["branch"]["code"] == "MATRIZ"
     assert data["branch"]["name"] == "Casa Matriz"
     assert len(data["optimizationHash"]) == 64
 
-    # Cobro = tableros: una línea por tipo de tablero (desde materials_summary).
+    # Charge = boards: one line per board type (from materials_summary).
     assert len(data["lines"]) == 1
     line = data["lines"][0]
     assert line["productCode"] == "MEL18"
     assert line["quantity"] == data["totalBoardsUsed"]
     assert line["lineTotal"] == line["quantity"] * 45.5
 
-    # Totales inmutables = suma por tableros.
+    # Immutable totals = sum across boards.
     assert data["total"] == data["subtotal"] == line["lineTotal"]
 
-    # La orden ya no lleva vigencia (la cotización mutable vive en la pre-orden).
+    # The order no longer carries validity (the mutable quote lives in the pre-order).
     assert "expiresAt" not in data
 
-    # Lista de corte = piezas (insumo de producción, no se cobra).
+    # Cutting list = pieces (production input, not charged).
     assert len(data["pieces"]) == 1
     piece = data["pieces"][0]
     assert piece["height"] == 800 and piece["width"] == 700
     assert piece["quantity"] == 2
 
-    # Historial inicial registra la creación.
+    # Initial history records the creation.
     assert data["history"][0]["toStatus"] == "confirmed"
     assert data["history"][0]["fromStatus"] is None
 
 
 def test_create_order_blocked_without_client_phone(client, db_session):
-    """Regla de negocio: sin celular registrado no se crea el pedido (422)."""
+    """Business rule: without a registered phone, the order isn't created (422)."""
     b = _create_board(client)
     no_phone = client.post(
         "/api/v1/clients/",
@@ -132,12 +132,12 @@ def test_create_order_blocked_without_client_phone(client, db_session):
     with pytest.raises(BusinessRuleError) as exc:
         _mint_order(db_session, _order_payload(no_phone["id"], b["id"]))
     assert "celular" in str(exc.value).lower()
-    # No se persistió ninguna orden.
+    # No order was persisted.
     assert client.get("/api/v1/orders/").json()["data"] == []
 
 
 def test_create_order_unknown_client_returns_404(client, db_session):
-    """Un ``clientId`` inexistente da 404 limpio antes de congelar nada."""
+    """A nonexistent ``clientId`` gives a clean 404 before freezing anything."""
     b = _create_board(client)
     with pytest.raises(EntityNotFoundError) as exc:
         _mint_order(db_session, _order_payload(99999, b["id"]))
@@ -154,7 +154,7 @@ def test_create_order_is_idempotent(client, db_session):
 
     assert first.id == second.id
     assert first.code == second.code
-    # No se crean dos órdenes para el mismo (cliente, hash).
+    # Two orders aren't created for the same (client, hash) pair.
     assert len(client.get("/api/v1/orders/").json()["data"]) == 1
 
 
@@ -174,10 +174,10 @@ def test_status_transitions_valid_and_invalid(client, db_session):
     ok2 = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "cutting"})
     assert ok2.status_code == 200
     assert ok2.json()["data"]["status"] == "cutting"
-    # Historial acumulado: creación + 2 transiciones.
+    # Accumulated history: creation + 2 transitions.
     assert len(ok2.json()["data"]["history"]) == 3
 
-    # cutting → completed no es una transición válida.
+    # cutting → completed is not a valid transition.
     bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "completed"})
     assert bad.status_code == 422
     assert "inválida" in bad.json()["errors"][0]["message"]
@@ -187,7 +187,7 @@ def test_invalid_transition_from_confirmed(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
-    # confirmed → completed (salta estados) no es válido.
+    # confirmed → completed (skips states) is not valid.
     bad = client.patch(
         f"/api/v1/orders/{order['id']}/status", json={"status": "completed"}
     )
@@ -195,7 +195,7 @@ def test_invalid_transition_from_confirmed(client, db_session):
 
 
 def test_queued_requires_payment(client, db_session):
-    """confirmed → queued sin forma de pago se bloquea y la orden no avanza."""
+    """confirmed → queued without a payment method is blocked and the order doesn't advance."""
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
@@ -204,10 +204,10 @@ def test_queued_requires_payment(client, db_session):
     bad = client.patch(f"/api/v1/orders/{oid}/status", json={"status": "queued"})
     assert bad.status_code == 422
     assert "forma de pago" in bad.json()["errors"][0]["message"].lower()
-    # La orden sigue en confirmed (la transición no se aplicó).
+    # The order stays confirmed (the transition wasn't applied).
     assert client.get(f"/api/v1/orders/{oid}").json()["data"]["status"] == "confirmed"
 
-    # Un pago presente pero con montos en cero tampoco vale.
+    # A payment present but with zero amounts isn't valid either.
     zero = client.patch(
         f"/api/v1/orders/{oid}/status",
         json={"status": "queued", "payment": {"cashAmount": 0, "creditAmount": 0}},
@@ -216,7 +216,7 @@ def test_queued_requires_payment(client, db_session):
 
 
 def test_queued_records_payment(client, db_session):
-    """Registra ambos métodos y los congela en la orden (informativos)."""
+    """Registers both methods and freezes them on the order (informational)."""
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
@@ -235,14 +235,14 @@ def test_queued_records_payment(client, db_session):
     assert data["paymentCashAmount"] == 30.5
     assert data["paymentCreditAmount"] == 15.0
 
-    # Persistido: se relee igual.
+    # Persisted: reads back the same.
     reread = client.get(f"/api/v1/orders/{oid}").json()["data"]
     assert reread["paymentCashAmount"] == 30.5
     assert reread["paymentCreditAmount"] == 15.0
 
 
 def test_queued_payment_single_method(client, db_session):
-    """Un solo método (solo crédito) es válido; el otro queda en None."""
+    """A single method (credit only) is valid; the other stays None."""
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
@@ -259,7 +259,7 @@ def test_queued_payment_single_method(client, db_session):
 
 
 def test_payment_reflected_in_documents(client, db_session):
-    """Tras registrar el pago, el documento y la hoja de despacho se renderizan."""
+    """After registering the payment, the document and dispatch sheet render."""
     c = _create_client(client)
     b = _create_board(client)
     order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
@@ -287,7 +287,7 @@ def test_list_orders_filter_by_status(client, db_session):
     o1 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=600))
     _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
 
-    # Enviar la primera a producción.
+    # Send the first one to production.
     client.patch(
         f"/api/v1/orders/{o1['id']}/status",
         json={"status": "queued", "payment": {"cashAmount": 100.0}},
@@ -309,13 +309,13 @@ def test_list_orders_filter_by_multiple_statuses(client, db_session):
     o2 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
     o3 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=400))
 
-    # o1: confirmed → queued → cutting; o2: queda confirmed; o3: queued.
+    # o1: confirmed → queued → cutting; o2: stays confirmed; o3: queued.
     _pay = {"payment": {"cashAmount": 100.0}}
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "queued", **_pay})
     client.patch(f"/api/v1/orders/{o1['id']}/status", json={"status": "cutting"})
     client.patch(f"/api/v1/orders/{o3['id']}/status", json={"status": "queued", **_pay})
 
-    # Repetir el parámetro filtra por varios estados a la vez.
+    # Repeating the parameter filters by several statuses at once.
     resp = client.get(
         "/api/v1/orders/", params={"status": ["confirmed", "cutting"]}
     ).json()
@@ -340,7 +340,7 @@ def test_order_document_pdf_and_base64(client, db_session):
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 
-    # PDF/base64 exentos de la envoltura (transporte de archivo).
+    # PDF/base64 are exempt from the envelope (file transport).
     b64 = client.get(f"/api/v1/orders/{oid}/document", params={"format": "base64"})
     assert b64.status_code == 200
     body = b64.json()
@@ -381,7 +381,7 @@ def test_order_export_document(client, db_session):
     assert data["issuedAt"] is not None
     assert data["externalInvoiceId"] is None
 
-    # Cobro por producto: una línea con descripción legible y el código.
+    # Charge by product: one line with a readable description and the code.
     assert len(data["lines"]) == 1
     line = data["lines"][0]
     assert line["productCode"] == "MEL18"
@@ -404,13 +404,13 @@ def test_set_external_invoice_id_and_reflect_in_export(client, db_session):
     assert resp.status_code == 200
     assert resp.json()["data"]["externalInvoiceId"] == "FAC-001-42"
 
-    # Idempotente con el mismo ID.
+    # Idempotent with the same ID.
     again = client.post(
         f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
     )
     assert again.status_code == 200
 
-    # El export refleja la factura asociada.
+    # The export reflects the associated invoice.
     exported = client.get(f"/api/v1/orders/{oid}/export").json()["data"]
     assert exported["externalInvoiceId"] == "FAC-001-42"
 
@@ -424,7 +424,7 @@ def test_set_external_invoice_id_conflict_on_different_id(client, db_session):
     client.post(
         f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-001-42"}
     )
-    # Otro ID sobre una orden ya facturada → 409 (no pisa la factura emitida).
+    # A different ID on an already-invoiced order → 409 (doesn't overwrite the issued invoice).
     conflict = client.post(
         f"/api/v1/orders/{oid}/invoice", json={"externalInvoiceId": "FAC-999-00"}
     )
@@ -442,7 +442,7 @@ def test_billing_seam_404(client):
 
 
 def _manual_material_payload(client_id):
-    """Orden con un único material 'manual' (fuera del catálogo)."""
+    """Order with a single 'manual' material (outside the catalog)."""
     return {
         "clientId": client_id,
         "branchId": _BRANCH,
@@ -470,12 +470,12 @@ def _manual_material_payload(client_id):
 
 
 def test_create_order_with_non_catalog_material(client, db_session):
-    """Un material 'manual' se congela tal cual el snapshot: línea sin productId."""
+    """A 'manual' material freezes as-is in the snapshot: line without productId."""
     c = _create_client(client)
 
     data = _create_order(client, db_session, _manual_material_payload(c["id"]))
 
-    # Cobro = el material manual, identificado por code/name (sin productId).
+    # Charge = the manual material, identified by code/name (no productId).
     assert len(data["lines"]) == 1
     line = data["lines"][0]
     assert line["productId"] is None
@@ -485,16 +485,16 @@ def test_create_order_with_non_catalog_material(client, db_session):
     assert line["lineTotal"] == 30.0 * line["quantity"]
     assert data["total"] == data["subtotal"] == 30.0 * data["totalBoardsUsed"]
 
-    # La pieza cortada del material manual también queda sin productId.
+    # The piece cut from the manual material also has no productId.
     assert len(data["pieces"]) == 1
     assert data["pieces"][0]["productId"] is None
 
-    # Se persistió la orden.
+    # The order was persisted.
     assert len(client.get("/api/v1/orders/").json()["data"]) == 1
 
 
 def test_create_mixed_catalog_and_offcut_order(client, db_session):
-    """Orden mixta: tablero de catálogo + retazo de empresa (costo 0)."""
+    """Mixed order: catalog board + company offcut (cost 0)."""
     c = _create_client(client)
     b = _create_board(client)
 
@@ -537,17 +537,17 @@ def test_create_mixed_catalog_and_offcut_order(client, db_session):
     assert catalog_line["productId"] == b["id"]
     assert catalog_line["productCode"] == "MEL18"
     assert offcut_line["productCode"] == "r1"
-    # El retazo a costo 0 no suma al total; este = solo el tablero de catálogo.
+    # The zero-cost offcut doesn't add to the total; it = only the catalog board.
     assert offcut_line["lineTotal"] == 0
     assert data["total"] == catalog_line["lineTotal"]
 
-    # Cada pieza referencia su material: catálogo → productId, retazo → None.
+    # Each piece references its material: catalog → productId, offcut → None.
     piece_product_ids = {p["productId"] for p in data["pieces"]}
     assert piece_product_ids == {b["id"], None}
 
 
 def test_non_catalog_order_renders_document_and_production_sheet(client, db_session):
-    """Orden de pedido y hoja de producción se renderizan del snapshot, sin catálogo."""
+    """The order document and production sheet render from the snapshot, without the catalog."""
     c = _create_client(client)
     order = _create_order(client, db_session, _manual_material_payload(c["id"]))
 
@@ -563,7 +563,7 @@ def test_non_catalog_order_renders_document_and_production_sheet(client, db_sess
 
 
 def test_order_freezes_chosen_packing_strategy(client, db_session):
-    """La estrategia elegida se congela en el snapshot inmutable de la orden."""
+    """The chosen strategy freezes into the order's immutable snapshot."""
     b = _create_board(client)
     c1 = _create_client(client, identifier="0991110001", phone="0991110001")
     order = _mint_order(
@@ -571,22 +571,22 @@ def test_order_freezes_chosen_packing_strategy(client, db_session):
     )
     assert order.optimization_snapshot["strategy"] == "longOffcuts"
 
-    # Omitir la estrategia congela el comportamiento por defecto.
+    # Omitting the strategy freezes the default behavior.
     c2 = _create_client(client, identifier="0991110002", phone="0991110002")
     order_default = _mint_order(db_session, _order_payload(c2["id"], b["id"]))
     assert order_default.optimization_snapshot["strategy"] == "default"
 
 
 def test_order_freezes_half_board_line_and_plan(client, db_session):
-    """Un trabajo chico de catálogo congela la línea y el tablero como medio."""
+    """A small catalog job freezes the line and the board as a half."""
     c = _create_client(client)
-    b = _create_board(client)  # 2440×1220, precio 45.5
+    b = _create_board(client)  # 2440×1220, price 45.5
 
-    # Una sola pieza chica → cabe en un medio tablero (ancho 610).
+    # A single small piece → fits in a half board (width 610).
     payload = _order_payload(c["id"], b["id"], height=300, width=300, quantity=1)
     data = _create_order(client, db_session, payload)
 
-    # Cobro a la mitad, etiquetado como medio tablero.
+    # Charged at half price, labeled as half board.
     assert len(data["lines"]) == 1
     line = data["lines"][0]
     assert line["halfBoard"] is True
@@ -596,14 +596,14 @@ def test_order_freezes_half_board_line_and_plan(client, db_session):
     assert line["productName"].endswith("(medio tablero)")
     assert data["total"] == data["subtotal"] == 22.75
 
-    # Plan de corte: el tablero físico es un medio (ancho/2), marcado.
+    # Cutting plan: the physical board is a half (width/2), flagged.
     plan = client.get(f"/api/v1/orders/{data['id']}/cutting-plan").json()["data"]
     assert len(plan["boards"]) == 1
     board = plan["boards"][0]
     assert board["halfBoard"] is True
     assert board["width"] == 610
 
-    # El documento (ORDEN DE PEDIDO) se genera con la línea de medio tablero.
+    # The document (ORDEN DE PEDIDO) is generated with the half-board line.
     doc = client.get(f"/api/v1/orders/{data['id']}/document")
     assert doc.status_code == 200
     assert doc.headers["content-type"] == "application/pdf"

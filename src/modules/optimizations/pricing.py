@@ -1,28 +1,28 @@
-"""Descuento por nivel de precio aplicado sobre un payload ya optimizado.
+"""Price-tier discount applied on top of an already-optimized payload.
 
-Capa pura (sin DB ni framework): la geometría del corte se cachea por hash y es
-agnóstica al precio; el descuento se aplica **después** de ``compute()`` como un
-transform determinista, manteniendo la caché de optimización compartida entre niveles.
+Pure layer (no DB or framework): cut geometry is cached by hash and is
+price-agnostic; the discount is applied **after** ``compute()`` as a
+deterministic transform, keeping the optimization cache shared across tiers.
 
-Reglas de negocio (decididas con el usuario):
-- A **nivel de documento**: las líneas se quedan a precio de lista; el descuento es un
-  único ajuste ``subtotal → discount_amount → total``.
-- **Solo tableros de catálogo**: la base del descuento son los tableros del catálogo
-  (``materials_summary`` con ``product_id`` no nulo). Tapacantos, retazos y medidas
-  manuales se cobran a precio de lista.
+Business rules (decided with the user):
+- **Document-level**: line items stay at list price; the discount is a single
+  ``subtotal → discount_amount → total`` adjustment.
+- **Catalog boards only**: the discount base is the catalog boards
+  (``materials_summary`` entries with a non-null ``product_id``). Edge banding,
+  offcuts and manual measurements are charged at list price.
 """
 
 
 def build_pricing(payload: dict, tier: dict) -> dict:
-    """Calcula el bloque de precios (descuento a nivel documento) para un ``tier``.
+    """Computes the pricing block (document-level discount) for a given ``tier``.
 
-    ``tier`` es una tarifa resuelta ``{code, name, rate, ...}`` (ver
-    ``SettingsService.resolve_price_tier``). Devuelve un dict serializable que se
-    expone en la respuesta y se congela en el snapshot/columnas de la orden.
+    ``tier`` is a resolved price tier ``{code, name, rate, ...}`` (see
+    ``SettingsService.resolve_price_tier``). Returns a serializable dict that is
+    exposed in the response and frozen into the order's snapshot/columns.
     """
     rate = float(tier.get("rate", 0.0))
-    # Base = tableros de catálogo (product_id no nulo). Excluye retazos/manual
-    # (product_id None) y tapacantos (otra colección).
+    # Base = catalog boards (non-null product_id). Excludes offcuts/manual
+    # (product_id None) and edge banding (a separate collection).
     discount_base = round(
         sum(
             m.get("total_cost", 0.0)

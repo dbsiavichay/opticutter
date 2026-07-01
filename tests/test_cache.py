@@ -1,4 +1,4 @@
-"""Tests del helper de caché: round-trip JSON y degradación elegante."""
+"""Tests for the cache helper: JSON round-trip and graceful degradation."""
 
 import redis
 
@@ -6,7 +6,7 @@ from src.shared.cache import CacheService
 
 
 class _FakeRedis:
-    """Doble en memoria que parea ``get``/``set`` (como ``decode_responses=True``)."""
+    """In-memory double pairing ``get``/``set`` (like ``decode_responses=True``)."""
 
     def __init__(self):
         self._store = {}
@@ -20,7 +20,7 @@ class _FakeRedis:
 
 
 class _BrokenRedis:
-    """Doble que simula Redis caído: toda operación lanza ``ConnectionError``."""
+    """Double simulating Redis being down: every operation raises ``ConnectionError``."""
 
     def get(self, key):
         raise redis.ConnectionError("redis down")
@@ -48,5 +48,5 @@ def test_get_json_degrades_on_redis_error():
 
 def test_set_json_degrades_on_redis_error():
     svc = CacheService(client=_BrokenRedis())
-    # No debe propagar la excepción: la caché es acelerador, no fuente de verdad.
+    # Must not propagate the exception: the cache is an accelerator, not a source of truth.
     svc.set_json("k", {"x": 1})
