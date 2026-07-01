@@ -1,9 +1,9 @@
-"""Primitivas de seguridad: hash de contraseñas y JWT.
+"""Security primitives: password hashing and JWT.
 
-Infraestructura sin dependencias de FastAPI/SQLAlchemy. El módulo de usuarios
-(``src/modules/users``) construye sobre estos helpers el login y la dependencia
-``get_current_user``. Lee la configuración (``SECRET_KEY``, algoritmo y vigencia)
-de ``shared.config``.
+Infrastructure with no FastAPI/SQLAlchemy dependencies. The users module
+(``src/modules/users``) builds login and the ``get_current_user`` dependency
+on top of these helpers. Reads its configuration (``SECRET_KEY``, algorithm
+and lifetimes) from ``shared.config``.
 """
 
 import hashlib
@@ -17,8 +17,8 @@ import jwt
 from src.shared.config import config
 from src.shared.exceptions import AuthenticationError
 
-# bcrypt opera sobre, como mucho, 72 bytes: truncamos para que contraseñas largas
-# no exploten ni cambien de comportamiento entre versiones de la librería.
+# bcrypt operates on at most 72 bytes: we truncate so long passwords don't
+# error out or change behavior across library versions.
 _BCRYPT_MAX_BYTES = 72
 
 
@@ -27,24 +27,24 @@ def _encode_password(plain: str) -> bytes:
 
 
 def hash_password(plain: str) -> str:
-    """Devuelve el hash bcrypt de una contraseña en claro (almacenable como texto)."""
+    """Returns the bcrypt hash of a plaintext password (storable as text)."""
     salt = bcrypt.gensalt(rounds=config.BCRYPT_ROUNDS)
     return bcrypt.hashpw(_encode_password(plain), salt).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Compara una contraseña en claro contra su hash bcrypt."""
+    """Compares a plaintext password against its bcrypt hash."""
     try:
         return bcrypt.checkpw(_encode_password(plain), hashed.encode("utf-8"))
     except ValueError:
-        # Hash con formato inválido (datos corruptos): trátalo como no coincidente.
+        # Malformed hash (corrupted data): treat it as a non-match.
         return False
 
 
 def create_access_token(
     subject: str | int, role: str, expires_minutes: Optional[int] = None
 ) -> str:
-    """Emite un JWT firmado con ``sub`` (id del usuario), ``role``, ``iat`` y ``exp``."""
+    """Issues a JWT signed with ``sub`` (user id), ``role``, ``iat`` and ``exp``."""
     minutes = (
         expires_minutes
         if expires_minutes is not None
@@ -61,7 +61,7 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict:
-    """Decodifica y valida un JWT; lanza ``AuthenticationError`` si no es válido."""
+    """Decodes and validates a JWT; raises ``AuthenticationError`` if invalid."""
     try:
         return jwt.decode(token, config.SECRET_KEY, algorithms=[config.JWT_ALGORITHM])
     except jwt.ExpiredSignatureError as exc:
@@ -71,18 +71,20 @@ def decode_access_token(token: str) -> dict:
 
 
 def generate_refresh_token() -> str:
-    """Genera un refresh token opaco de 256 bits (CSPRNG).
+    """Generates an opaque 256-bit refresh token (CSPRNG).
 
-    Es la credencial que canjea ``/auth/refresh`` por un nuevo access token. Opaco
-    (no JWT) para poder revocarlo: en reposo solo se guarda su ``hash_token``.
+    This is the credential that ``/auth/refresh`` exchanges for a new access
+    token. Opaque (not a JWT) so it can be revoked: only its ``hash_token`` is
+    persisted at rest.
     """
     return secrets.token_urlsafe(32)
 
 
 def hash_token(raw: str) -> str:
-    """sha256 hex de un token opaco. Se persiste el hash, nunca el token en claro.
+    """sha256 hex digest of an opaque token. The hash is persisted, never the
+    raw token.
 
-    Un token aleatorio de 256 bits es su propio salt, por eso sha256 sin salt basta
-    (mismo criterio que los enlaces de revisión de pre-órdenes).
+    A random 256-bit token is its own salt, so unsalted sha256 is enough (same
+    criterion as the pre-order review links).
     """
     return hashlib.sha256(raw.encode()).hexdigest()

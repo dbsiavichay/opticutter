@@ -21,13 +21,13 @@ def _product_payload(code="MEL18"):
 
 
 def test_app_mappers_configure_without_extra_model_imports():
-    """Regresión: la app debe configurar los mappers de SQLAlchemy solo con los
-    modelos que importa ``main`` (vía routers). No debe depender de que algo más
-    importe ``optimizations.model``.
+    """Regression: the app must configure SQLAlchemy mappers using only the
+    models that ``main`` imports (via routers). It must not depend on something
+    else importing ``optimizations.model``.
 
-    Se corre en un subproceso aislado porque ``conftest`` importa TODOS los modelos
-    y enmascararía el problema: el 500 ``failed to locate 'OptimizationModel'`` solo
-    aparecía en el runtime real de la app (p. ej. ``GET /clients/identifier/...``).
+    Runs in an isolated subprocess because ``conftest`` imports ALL models and
+    would mask the problem: the 500 ``failed to locate 'OptimizationModel'`` only
+    showed up in the real app runtime (e.g. ``GET /clients/identifier/...``).
     """
     code = (
         "import main; "
@@ -45,14 +45,14 @@ def test_app_mappers_configure_without_extra_model_imports():
 
 
 def test_root_redirect():
-    """Test que la ruta raíz redirige a /docs"""
+    """Test that the root route redirects to /docs"""
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
     assert response.headers["location"] == "/docs"
 
 
 def test_health_check():
-    """Test del endpoint de health check básico"""
+    """Test of the basic health check endpoint"""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -62,7 +62,7 @@ def test_health_check():
 
 
 def test_api_health_check():
-    """Test del endpoint de health check de la API"""
+    """Test of the API health check endpoint"""
     response = client.get("/api/v1/health/")
     assert response.status_code == 200
     data = response.json()
@@ -72,7 +72,7 @@ def test_api_health_check():
 
 
 def test_readiness_check():
-    """Test del endpoint de readiness check"""
+    """Test of the readiness check endpoint"""
     response = client.get("/api/v1/health/ready")
     assert response.status_code == 200
     data = response.json()
@@ -81,7 +81,7 @@ def test_readiness_check():
 
 
 def test_cutter_info():
-    """Test del endpoint de información de Cutter"""
+    """Test of the Cutter info endpoint"""
     response = client.get("/api/v1/cutter/")
     assert response.status_code == 200
     data = response.json()
@@ -92,7 +92,7 @@ def test_cutter_info():
 
 
 def test_cutter_status():
-    """Test del endpoint de estado de Cutter"""
+    """Test of the Cutter status endpoint"""
     response = client.get("/api/v1/cutter/status")
     assert response.status_code == 200
     data = response.json()
@@ -102,7 +102,7 @@ def test_cutter_status():
 
 
 def test_success_response_has_meta_and_request_id_header(client):
-    """Toda respuesta de éxito trae ``meta`` y ecoa el requestId en el header."""
+    """Every success response carries ``meta`` and echoes the requestId in the header."""
     resp = client.post("/api/v1/products/", json=_product_payload())
     assert resp.status_code == 201
     body = resp.json()
@@ -114,7 +114,7 @@ def test_success_response_has_meta_and_request_id_header(client):
 
 
 def test_incoming_request_id_is_propagated(client):
-    """Un ``X-Request-ID`` entrante se conserva (continuidad de traza) y va en meta."""
+    """An incoming ``X-Request-ID`` is preserved (trace continuity) and lands in meta."""
     resp = client.get("/api/v1/products/999999", headers={"X-Request-ID": "trace-123"})
     assert resp.status_code == 404
     assert resp.headers["x-request-id"] == "trace-123"
@@ -122,9 +122,9 @@ def test_incoming_request_id_is_propagated(client):
 
 
 def test_validation_error_includes_field_path(client):
-    """Validación de request → 422 con ``code`` y ``field`` tipo ``body.<campo>``."""
-    # ``type`` válido (discriminador) con el resto de campos faltantes: el error
-    # apunta a los subcampos del producto (``body.board.<campo>``).
+    """Request validation → 422 with ``code`` and ``field`` shaped like ``body.<field>``."""
+    # Valid ``type`` (discriminator) with the rest of the fields missing: the error
+    # points to the product's subfields (``body.board.<field>``).
     resp = client.post("/api/v1/products/", json={"type": "board"})
     assert resp.status_code == 422
     errors = resp.json()["errors"]
@@ -133,7 +133,7 @@ def test_validation_error_includes_field_path(client):
 
 
 def test_unknown_route_returns_404_envelope(client):
-    """Una ruta inexistente también responde con la envoltura ``{errors, meta}``."""
+    """A nonexistent route also responds with the ``{errors, meta}`` envelope."""
     resp = client.get("/api/v1/nope")
     assert resp.status_code == 404
     body = resp.json()
@@ -142,7 +142,7 @@ def test_unknown_route_returns_404_envelope(client):
 
 
 def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
-    """Una excepción no controlada se traduce a un 500 con envoltura, sin filtrar."""
+    """An unhandled exception is translated into a wrapped 500, without leaking details."""
 
     def _boom(self, id):
         raise RuntimeError("boom")
@@ -159,8 +159,8 @@ def test_unhandled_exception_returns_500_envelope(db_session, monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app, raise_server_exceptions=False) as test_client:
-            # El endpoint exige auth: autentica como admin para llegar al handler
-            # (donde el monkeypatch dispara la excepción no controlada).
+            # The endpoint requires auth: authenticate as admin to reach the handler
+            # (where the monkeypatch triggers the unhandled exception).
             UserService(db_session).create(
                 UserCreate(
                     email="boom-admin@empresa.com",

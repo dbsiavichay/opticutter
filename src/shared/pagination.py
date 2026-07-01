@@ -1,19 +1,19 @@
-"""Dependencia reusable de paginación (``limit``/``offset``).
+"""Reusable pagination dependency (``limit``/``offset``).
 
-Alinea los listados con el contrato ``meta.pagination``. Reemplaza el par
-``skip``/``limit`` previo (``skip`` -> ``offset``).
+Aligns listings with the ``meta.pagination`` contract. Replaces the previous
+``skip``/``limit`` pair (``skip`` -> ``offset``).
 """
 
 from fastapi import Query
 
 
 class PageParams:
-    """Parámetros de paginación inyectables vía ``Depends()``."""
+    """Pagination parameters injectable via ``Depends()``."""
 
     def __init__(
         self,
-        limit: int = Query(20, ge=1, le=100, description="Máximo de registros"),
-        offset: int = Query(0, ge=0, description="Registros a omitir"),
+        limit: int = Query(20, ge=1, le=100, description="Maximum number of records"),
+        offset: int = Query(0, ge=0, description="Number of records to skip"),
     ):
         self.limit = limit
         self.offset = offset

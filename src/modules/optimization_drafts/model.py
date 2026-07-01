@@ -8,22 +8,22 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class OptimizationDraftModel(TimestampMixin, AuditMixin, Base):
-    """Borrador del optimizador: trabajo en progreso, durable y mutable.
+    """Optimizer draft: durable, mutable work in progress.
 
-    A diferencia de la optimización (cómputo efímero, cache-only) y de la orden
-    (salida inmutable congelada), un borrador es la **entrada cruda editable** del
-    optimizador guardada para retomarla luego. ``payload`` es un bag JSON opaco con
-    el estado del formulario tal cual lo envía el frontend (incluidas filas a medio
-    llenar): el backend lo persiste sin validar su esquema interno.
+    Unlike the optimization (ephemeral, cache-only computation) and the order
+    (frozen immutable output), a draft is the optimizer's **raw editable
+    input** saved to resume later. ``payload`` is an opaque JSON bag holding
+    the form state exactly as the frontend sends it (including half-filled
+    rows): the backend persists it without validating its internal shape.
 
-    Es global del taller (no hay usuarios); ``client_id`` es opcional, solo metadato.
+    It's workshop-wide (no per-user scoping); ``client_id`` is optional, just metadata.
     """
 
     __tablename__ = "optimization_drafts"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128))
-    # Sucursal dueña del borrador: aísla el trabajo en progreso entre sucursales.
+    # Branch owning the draft: isolates work in progress between branches.
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     client_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("clients.id"), nullable=True

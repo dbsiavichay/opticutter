@@ -1,4 +1,4 @@
-"""Tests del módulo products (catálogo multi-tipo: CRUD + validación por tipo)."""
+"""Tests for the products module (multi-type catalog: CRUD + per-type validation)."""
 
 
 def _board_payload(code="MEL18", name="Melamina 18mm"):
@@ -34,7 +34,7 @@ def test_create_and_get_board_product(client):
     assert created["type"] == "board"
     assert created["code"] == "MEL18"
     assert created["price"] == 45.5
-    # Los atributos se persisten/devuelven en la forma canónica camelCase.
+    # Attributes are persisted/returned in their canonical camelCase form.
     assert created["attributes"]["height"] == 2440
     assert created["attributes"]["grainDirection"] == "v"
 
@@ -53,7 +53,7 @@ def test_create_edge_banding_product(client):
 
 
 def test_board_missing_required_attribute_returns_422(client):
-    """El discriminador valida los ``attributes`` según el tipo (board sin alto)."""
+    """The discriminator validates ``attributes`` per type (board without height)."""
     payload = _board_payload()
     del payload["attributes"]["height"]
     resp = client.post("/api/v1/products/", json=payload)
@@ -139,7 +139,7 @@ def test_delete_product(client):
     assert client.get(f"/api/v1/products/{created['id']}").status_code == 404
 
 
-# --- Emparejamiento tablero -> tapacanto coordinado --------------------------
+# --- Board -> coordinated edge-banding matching --------------------------------
 
 
 def _seed_board(client, code, name, thickness):
@@ -174,7 +174,7 @@ def _seed_edge(client, code, name, band_type, thickness, width, color):
 
 
 def _seed_cashmere_catalog(client):
-    """Tablero Cashmere 15 y 36 + sus tapacantos coordinados (estilo seed real)."""
+    """Cashmere board 15 and 36 + their coordinated edge bandings (real-seed style)."""
     _seed_board(client, "MDP-SL-CSH-15", "MDP 15mm Cashmere", 15)
     _seed_board(client, "MDP-SL-CSH-36", "MDP 36mm Cashmere", 36)
     _seed_edge(
@@ -213,12 +213,12 @@ def test_edge_bandings_for_15mm_board(client):
     resp = client.get(f"/api/v1/products/{board['id']}/edge-bandings")
     assert resp.status_code == 200
     bands = resp.json()["data"]
-    # 15mm -> ancho 19: Soft 0.45 y Hard 1.5 (ordenados por grosor)
+    # 15mm -> width 19: Soft 0.45 and Hard 1.5 (sorted by thickness)
     assert [b["attributes"]["width"] for b in bands] == [19, 19]
     assert [b["attributes"]["bandType"] for b in bands] == ["Soft", "Hard"]
 
-    # El enum BandType acepta la entrada sin distinguir mayúsculas ("soft") y el
-    # alias en español ("suave"), ambos normalizados al valor canónico inglés.
+    # The BandType enum accepts case-insensitive input ("soft") and the Spanish
+    # alias ("suave"), both normalized to the canonical English value.
     for value in ("soft", "suave"):
         soft = client.get(
             f"/api/v1/products/{board['id']}/edge-bandings",
@@ -233,12 +233,12 @@ def test_edge_bandings_for_36mm_board_only_hard(client):
     board = client.get("/api/v1/products/code/MDP-SL-CSH-36").json()["data"]
 
     bands = client.get(f"/api/v1/products/{board['id']}/edge-bandings").json()["data"]
-    # 36mm -> ancho 40: solo existe el Duro 1.0x40
+    # 36mm -> width 40: only the Hard 1.0x40 exists
     assert len(bands) == 1
     assert bands[0]["code"] == "TAP-SL-CSH-100"
     assert bands[0]["attributes"]["width"] == 40
 
-    # No hay canto suave (Soft) para 36mm: hueco real del catálogo -> lista vacía
+    # No Soft banding for 36mm: real catalog gap -> empty list
     soft = client.get(
         f"/api/v1/products/{board['id']}/edge-bandings", params={"band_type": "Soft"}
     ).json()["data"]
@@ -246,9 +246,9 @@ def test_edge_bandings_for_36mm_board_only_hard(client):
 
 
 def test_edge_bandings_excludes_other_designs(client):
-    """No debe traer tapacantos de otro diseño aunque compartan tokens de nombre."""
+    """Must not return edge bandings from a different design even if they share name tokens."""
     _seed_cashmere_catalog(client)
-    # Otro diseño con nombre que comparte token pero distinto code (abreviatura)
+    # Different design with a name sharing a token but a different code (abbreviation)
     _seed_board(client, "MDP-RO-BRD-15", "MDP 15mm Barroco Dorado", 15)
     _seed_edge(
         client,
@@ -262,12 +262,12 @@ def test_edge_bandings_excludes_other_designs(client):
     board = client.get("/api/v1/products/code/MDP-RO-BRD-15").json()["data"]
 
     bands = client.get(f"/api/v1/products/{board['id']}/edge-bandings").json()["data"]
-    # BRD no tiene tapacanto coordinado sembrado; BRR no debe colarse
+    # BRD has no coordinated edge banding seeded; BRR must not leak in
     assert bands == []
 
 
 def test_edge_bandings_invalid_band_type_returns_422(client):
-    """El query param está cerrado al enum BandType: un valor fuera de él falla."""
+    """The query param is closed to the BandType enum: an out-of-range value fails."""
     _seed_cashmere_catalog(client)
     board = client.get("/api/v1/products/code/MDP-SL-CSH-15").json()["data"]
     resp = client.get(
@@ -278,7 +278,7 @@ def test_edge_bandings_invalid_band_type_returns_422(client):
 
 
 def test_edge_banding_invalid_band_type_on_create_returns_422(client):
-    """El atributo band_type también queda cerrado al enum al crear el producto."""
+    """The band_type attribute is also closed to the enum when creating the product."""
     resp = client.post(
         "/api/v1/products/",
         json={

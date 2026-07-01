@@ -9,12 +9,12 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class RefreshTokenModel(TimestampMixin, AuditMixin, Base):
-    """Refresh token emitido al iniciar sesión: par renovable del access JWT.
+    """Refresh token issued at login: renewable pair of the access JWT.
 
-    Solo se guarda el ``token_hash`` (sha256), nunca el token en claro. La rotación
-    revoca el actual y emite otro (``revoked_at``); la revocación masiva (cambio de
-    contraseña, detección de reúso) marca ``revoked_at`` en lote. Un token sirve si
-    no está revocado y no ha expirado.
+    Only the ``token_hash`` (sha256) is stored, never the plain-text token. Rotation
+    revokes the current one and issues another (``revoked_at``); bulk revocation
+    (password change, reuse detection) marks ``revoked_at`` in batch. A token is
+    valid if it's not revoked and hasn't expired.
     """
 
     __tablename__ = "refresh_tokens"

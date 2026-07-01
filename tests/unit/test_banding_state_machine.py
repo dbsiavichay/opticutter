@@ -1,9 +1,9 @@
-"""Unidad: pista de canteado de ``OrderService.transition_banding`` (sin DB).
+"""Unit: edge-banding track of ``OrderService.transition_banding`` (no DB).
 
-Pista paralela e independiente del corte: avanza ``pending → in_progress → done``,
-es forward-only e idempotente. Mismo patrón que la máquina de estados de corte:
-``OrderModel`` transitorio + ``get_scoped_or_404`` reemplazado; los caminos que
-rechazan no deben llamar a ``commit``.
+A track parallel to and independent from cutting: advances ``pending ->
+in_progress -> done``, forward-only and idempotent. Same pattern as the cutting
+state machine: transient ``OrderModel`` + ``get_scoped_or_404`` replaced; paths
+that reject must not call ``commit``.
 """
 
 import pytest

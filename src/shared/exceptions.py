@@ -1,9 +1,9 @@
 class AppError(Exception):
-    """Error de aplicación traducible a una respuesta HTTP.
+    """Application error translatable to an HTTP response.
 
-    Las capas de aplicación/dominio lanzan estas excepciones; el handler
-    registrado en ``shared.errors`` las traduce a la envoltura ``{errors, meta}``
-    usando ``status_code`` (HTTP) y ``code`` (legible por máquina).
+    Application/domain layers raise these exceptions; the handler registered
+    in ``shared.errors`` translates them into the ``{errors, meta}`` envelope
+    using ``status_code`` (HTTP) and ``code`` (machine-readable).
     """
 
     status_code = 400
@@ -18,7 +18,7 @@ class AppError(Exception):
 
 
 class EntityNotFoundError(AppError):
-    """No se encontró la entidad solicitada."""
+    """The requested entity was not found."""
 
     status_code = 404
     code = "NOT_FOUND"
@@ -28,35 +28,35 @@ class EntityNotFoundError(AppError):
 
 
 class ConflictError(AppError):
-    """Violación de una restricción de unicidad/integridad."""
+    """A uniqueness/integrity constraint was violated."""
 
     status_code = 409
     code = "CONFLICT"
 
 
 class AuthenticationError(AppError):
-    """Credenciales ausentes o inválidas (no autenticado)."""
+    """Missing or invalid credentials (not authenticated)."""
 
     status_code = 401
     code = "UNAUTHORIZED"
 
 
 class AuthorizationError(AppError):
-    """Autenticado pero sin permiso para la acción (rol insuficiente)."""
+    """Authenticated but without permission for the action (insufficient role)."""
 
     status_code = 403
     code = "FORBIDDEN"
 
 
 class BusinessRuleError(AppError):
-    """Se violó una regla de negocio."""
+    """A business rule was violated."""
 
     status_code = 422
     code = "BUSINESS_RULE_ERROR"
 
 
 class ValidationError(AppError):
-    """Error de validación de dominio."""
+    """Domain validation error."""
 
     status_code = 422
     code = "VALIDATION_ERROR"

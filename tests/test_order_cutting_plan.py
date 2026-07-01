@@ -1,4 +1,4 @@
-"""Tests del plan de corte por orden: materialización, marcado táctil y gate."""
+"""Tests for the per-order cutting plan: materialization, touch marking, and the gate."""
 
 from src.modules.orders.model import OrderBoardModel, OrderPlacedPieceModel
 from src.modules.orders.schemas import OrderCreate
@@ -30,12 +30,12 @@ def _create_board(client, code="MEL18"):
     ).json()["data"]
 
 
-# Default no-halvable (ambos lados > medio ancho de 610) para que el plan use tablero
-# completo; los tests de medio tablero viven en test_optimizations/test_orders.
+# Default not halvable (both sides > half-width of 610) so the plan uses a full
+# board; half-board tests live in test_optimizations/test_orders.
 def _order_payload(client_id, product_id, height=800, width=700, quantity=3):
     return {
         "clientId": client_id,
-        "branchId": 1,  # sucursal por defecto sembrada por conftest
+        "branchId": 1,  # default branch seeded by conftest
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
         "requirements": [
             {
@@ -52,7 +52,7 @@ def _order_payload(client_id, product_id, height=800, width=700, quantity=3):
 
 
 def _mint(client, db_session, payload):
-    """Mintea una orden por el servicio (la creación HTTP se retiró) y la lee vía GET."""
+    """Mints an order through the service (HTTP creation was removed) and reads it back via GET."""
     order = OrderService(db_session).create(OrderCreate.model_validate(payload))
     return client.get(f"/api/v1/orders/{order.id}").json()["data"]
 
@@ -65,11 +65,11 @@ def _create_order(client, db_session, quantity=3, width=700):
 
 
 def _to_cutting(client, order_id):
-    """Avanza la orden recién creada (confirmed) hasta cutting."""
+    """Advances a freshly created order (confirmed) up to cutting."""
     for status in ("queued", "cutting"):
         body = {"status": status}
         if status == "queued":
-            # Pasar a cola exige registrar la forma de pago (informativa).
+            # Moving to the queue requires recording the (informational) payment method.
             body["payment"] = {"cashAmount": 100.0}
         resp = client.patch(f"/api/v1/orders/{order_id}/status", json=body)
         assert resp.status_code == 200
@@ -83,7 +83,7 @@ def _get_plan(client, order_id):
 
 
 def test_create_order_materializes_cutting_plan(client, db_session):
-    """Crear la orden expande el snapshot en tableros físicos y piezas colocadas."""
+    """Creating the order expands the snapshot into physical boards and placed pieces."""
     order = _create_order(client, db_session, quantity=3)
     plan = _get_plan(client, order["id"])
 
@@ -92,7 +92,7 @@ def test_create_order_materializes_cutting_plan(client, db_session):
     assert plan["status"] == "confirmed"
     assert plan["progress"] == {"cutPieces": 0, "totalPieces": 3}
 
-    # 3 piezas de 800×700 caben en un solo tablero de 2440×1220.
+    # 3 pieces of 800x700 fit in a single 2440x1220 board.
     assert len(plan["boards"]) == 1
     board = plan["boards"][0]
     assert board["sheetNumber"] == 1
@@ -101,7 +101,7 @@ def test_create_order_materializes_cutting_plan(client, db_session):
     assert board["width"] == 1220 and board["height"] == 2440
     assert board["progress"] == {"cutPieces": 0, "totalPieces": 3}
 
-    # quantity=3 → 3 instancias individuales con identidad propia (label#N).
+    # quantity=3 → 3 individual instances with their own identity (label#N).
     assert len(board["pieces"]) == 3
     assert {p["pieceId"] for p in board["pieces"]} == {
         "Puerta#1",
@@ -111,11 +111,11 @@ def test_create_order_materializes_cutting_plan(client, db_session):
     for piece in board["pieces"]:
         assert piece["label"] == "Puerta"
         assert piece["cut"] is False and piece["cutAt"] is None
-        # Geometría lista para dibujar + dims nominales para agrupar.
+        # Geometry ready to draw + nominal dims for grouping.
         assert {piece["originalWidth"], piece["originalHeight"]} == {700, 800}
 
-    # Sobrantes y cortes de guillotina del snapshot, para dibujar el tablero
-    # completo en el taller (zonas libres + líneas de sierra).
+    # Remainders and guillotine cuts from the snapshot, to draw the full
+    # board in the workshop (free zones + saw lines).
     assert board["remainders"], "3 piezas chicas en 2440×1220 dejan sobrantes"
     for rem in board["remainders"]:
         assert set(rem) == {"x", "y", "width", "height"}
@@ -130,7 +130,7 @@ def test_cutting_plan_unknown_order_returns_404(client):
 
 
 def test_mark_piece_requires_cutting_state(client, db_session):
-    """Solo en estado 'cutting' se pueden marcar piezas: antes da 422."""
+    """Pieces can only be marked while in 'cutting' state: before that it returns 422."""
     order = _create_order(client, db_session)
     piece_id = _get_plan(client, order["id"])["boards"][0]["pieces"][0]["id"]
 
@@ -154,19 +154,19 @@ def test_mark_and_unmark_piece_updates_progress(client, db_session):
     assert marked["progress"] == {"cutPieces": 1, "totalPieces": 3}
     assert marked["boardProgress"] == {"cutPieces": 1, "totalPieces": 3}
 
-    # Idempotente: re-marcar no cambia el momento del corte.
+    # Idempotent: re-marking doesn't change the cut timestamp.
     again = client.patch(url, json={"cut": True}).json()["data"]
     assert again["piece"]["cutAt"] == marked["piece"]["cutAt"]
     assert again["progress"] == {"cutPieces": 1, "totalPieces": 3}
 
-    # Deshacer: la pieza vuelve a pendiente.
+    # Undo: the piece goes back to pending.
     undone = client.patch(url, json={"cut": False}).json()["data"]
     assert undone["piece"]["cut"] is False and undone["piece"]["cutAt"] is None
     assert undone["progress"] == {"cutPieces": 0, "totalPieces": 3}
 
 
 def test_mark_piece_of_another_order_returns_404(client, db_session):
-    """Una pieza ajena a la orden no existe para ella (404, sin filtrar datos)."""
+    """A piece belonging to another order doesn't exist for this one (404, no data leakage)."""
     c = _create_client(client)
     b = _create_board(client)
     first = _mint(client, db_session, _order_payload(c["id"], b["id"], width=600))
@@ -182,12 +182,12 @@ def test_mark_piece_of_another_order_returns_404(client, db_session):
 
 
 def test_transition_to_cut_blocked_until_all_pieces_marked(client, db_session):
-    """Gate de corte: cutting → cut exige el plan de corte completo."""
+    """Cutting gate: cutting → cut requires the full cutting plan to be marked."""
     order = _create_order(client, db_session, quantity=3)
     _to_cutting(client, order["id"])
     pieces = _get_plan(client, order["id"])["boards"][0]["pieces"]
 
-    # Con 1 de 3 cortadas, la transición se rechaza informando lo pendiente.
+    # With 1 of 3 cut, the transition is rejected and reports what's pending.
     client.patch(
         f"/api/v1/orders/{order['id']}/cutting-plan/pieces/{pieces[0]['id']}",
         json={"cut": True},
@@ -198,7 +198,7 @@ def test_transition_to_cut_blocked_until_all_pieces_marked(client, db_session):
     assert blocked.status_code == 422
     assert "Faltan 2 pieza(s) por cortar" in blocked.json()["errors"][0]["message"]
 
-    # Con todo cortado, la transición pasa.
+    # With everything cut, the transition succeeds.
     for piece in pieces[1:]:
         client.patch(
             f"/api/v1/orders/{order['id']}/cutting-plan/pieces/{piece['id']}",
@@ -210,10 +210,10 @@ def test_transition_to_cut_blocked_until_all_pieces_marked(client, db_session):
 
 
 def test_lazy_materialization_for_legacy_orders(client, db_session):
-    """Órdenes previas a la feature reconstruyen el plan desde el snapshot."""
+    """Orders predating the feature rebuild the plan from the snapshot."""
     order = _create_order(client, db_session, quantity=2)
 
-    # Simula una orden creada antes de la feature: sin filas de plan de corte.
+    # Simulates an order created before the feature: no cutting plan rows.
     db_session.query(OrderPlacedPieceModel).delete()
     db_session.query(OrderBoardModel).delete()
     db_session.commit()
@@ -222,6 +222,6 @@ def test_lazy_materialization_for_legacy_orders(client, db_session):
     assert plan["progress"]["totalPieces"] == 2
     assert len(plan["boards"]) == 1
     assert len(plan["boards"][0]["pieces"]) == 2
-    # El snapshot conserva sobrantes y cortes: la reconstrucción los trae.
+    # The snapshot keeps remainders and cuts: the rebuild brings them back.
     assert plan["boards"][0]["remainders"]
     assert plan["boards"][0]["cuts"]

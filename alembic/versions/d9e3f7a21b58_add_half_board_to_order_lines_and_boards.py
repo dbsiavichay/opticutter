@@ -4,9 +4,9 @@ Revision ID: d9e3f7a21b58
 Revises: 000000000001
 Create Date: 2026-06-30
 
-Medios tableros: las planchas de catálogo cuyo contenido cabe en un medio tablero
-se cobran a la mitad y se materializan como medio en el plan de corte. Marca cada
-línea de cobro y cada tablero físico como medio (``half_board``).
+Half boards: catalog sheets whose content fits in a half board are billed at
+half price and materialized as a half in the cutting plan. Flags each billing
+line and each physical board as a half (``half_board``).
 """
 
 from typing import Sequence, Union

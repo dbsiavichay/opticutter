@@ -1,8 +1,8 @@
-"""Tests del sistema de niveles de precio (descuento por tipo de cliente).
+"""Tests for the price tier system (discount by client type).
 
-Cubre: el transform puro ``build_pricing``, la config en settings (GET/PATCH), la
-selección en la pre-orden (cotización), el congelado + dedupe en la orden y la
-proyección pública de revisión.
+Covers: the pure ``build_pricing`` transform, the settings config (GET/PATCH), the
+selection in the pre-order (quote), the freeze + dedupe in the order, and the
+public review projection.
 """
 
 from src.modules.optimizations.pricing import build_pricing
@@ -13,9 +13,9 @@ from src.modules.orders.service import OrderService
 from .test_orders import _create_board, _create_client, _order_payload
 
 
-# --- build_pricing (capa pura) -----------------------------------------------
+# --- build_pricing (pure layer) -----------------------------------------------
 def _payload(*, catalog_boards=100.0, offcut_boards=0.0, edge=0.0):
-    """Payload mínimo con un tablero de catálogo y (opcional) uno fuera de catálogo."""
+    """Minimal payload with one catalog board and (optionally) one off-catalog board."""
     materials_summary = [
         {"product_id": 5, "total_cost": catalog_boards},
     ]
@@ -38,14 +38,14 @@ def test_build_pricing_consumidor_is_no_discount():
 
 
 def test_build_pricing_discounts_only_catalog_boards():
-    # 100 catálogo + 50 retazo (product_id None) + 20 tapacanto. El 2% aplica solo
-    # sobre los 100 de catálogo => 2.0 de descuento.
+    # 100 catalog + 50 offcut (product_id None) + 20 edge banding. The 2% applies
+    # only to the 100 catalog amount => 2.0 discount.
     tier = {"code": "carpintero", "name": "Precio Carpintero", "rate": 0.02}
     p = build_pricing(
         _payload(catalog_boards=100.0, offcut_boards=50.0, edge=20.0), tier
     )
     assert p["discount_base"] == 100.0
-    assert p["subtotal"] == 170.0  # todo a precio de lista
+    assert p["subtotal"] == 170.0  # everything at list price
     assert p["discount_amount"] == 2.0
     assert p["total"] == 168.0
 
@@ -57,7 +57,7 @@ def test_build_pricing_efectivo_rounds_to_cents():
     assert p["total"] == round(45.5 - p["discount_amount"], 2)
 
 
-# --- Config de niveles en settings -------------------------------------------
+# --- Tier config in settings -------------------------------------------
 def test_get_price_tiers_lists_active_sorted(client):
     resp = client.get("/api/v1/settings/price-tiers")
     assert resp.status_code == 200
@@ -93,10 +93,10 @@ def test_patch_price_tiers_changes_rate(client):
     }
 
 
-# --- Pre-orden (cotización): selección viva ----------------------------------
+# --- Pre-order (quote): live selection ----------------------------------
 def test_preorder_create_applies_discount_to_optimization(client):
     c = _create_client(client)
-    b = _create_board(client)  # price 45.5, 1 tablero usado
+    b = _create_board(client)  # price 45.5, 1 board used
     payload = _order_payload(c["id"], b["id"])
     payload["priceTierCode"] = "carpintero"
 
@@ -108,7 +108,7 @@ def test_preorder_create_applies_discount_to_optimization(client):
     pricing = data["optimization"]["pricing"]
     assert pricing["priceTierCode"] == "carpintero"
     assert pricing["discountRate"] == 0.02
-    assert pricing["subtotal"] == 45.5  # a precio de lista
+    assert pricing["subtotal"] == 45.5  # at list price
     assert pricing["discountAmount"] == 0.91
     assert pricing["total"] == 44.59
 
@@ -124,7 +124,7 @@ def test_preorder_create_rejects_unknown_tier(client):
     assert "Nivel de precio" in resp.json()["errors"][0]["message"]
 
 
-# --- Orden: congelado + auditoría + dedupe -----------------------------------
+# --- Order: freeze + audit + dedupe -----------------------------------
 def test_order_freezes_discount(client, db_session):
     c = _create_client(client)
     b = _create_board(client)
@@ -139,7 +139,7 @@ def test_order_freezes_discount(client, db_session):
     assert data["subtotal"] == 45.5
     assert data["discountAmount"] == 0.91
     assert data["total"] == 44.59  # subtotal != total
-    # Las líneas quedan a precio de lista (descuento solo a nivel documento).
+    # Lines stay at list price (discount applies only at document level).
     assert data["lines"][0]["unitPriceSnapshot"] == 45.5
 
 
@@ -150,7 +150,7 @@ def test_order_discount_rate_frozen_against_settings_change(client, db_session):
     payload["priceTierCode"] = "carpintero"
     order = OrderService(db_session).create(OrderCreate.model_validate(payload))
 
-    # Cambiar la tarifa de carpintero a 10% NO debe alterar la orden ya creada.
+    # Changing the carpintero rate to 10% must NOT alter the already-created order.
     client.patch(
         "/api/v1/settings/price-tiers",
         json={
@@ -180,12 +180,12 @@ def test_dedupe_distinguishes_price_tiers(client, db_session):
     consumidor = svc.create(
         OrderCreate.model_validate({**base, "priceTierCode": "consumidor"})
     )
-    # Misma geometría, mismo nivel => idempotente (misma orden).
+    # Same geometry, same tier => idempotent (same order).
     again = svc.create(
         OrderCreate.model_validate({**base, "priceTierCode": "consumidor"})
     )
     assert again.id == consumidor.id
-    # Misma geometría, distinto nivel => orden distinta (el nivel no está en el hash).
+    # Same geometry, different tier => different order (tier isn't part of the hash).
     carpintero = svc.create(
         OrderCreate.model_validate({**base, "priceTierCode": "carpintero"})
     )
@@ -193,7 +193,7 @@ def test_dedupe_distinguishes_price_tiers(client, db_session):
     assert carpintero.optimization_hash == consumidor.optimization_hash
 
 
-# --- Revisión pública: el cliente ve el descuento ----------------------------
+# --- Public review: the client sees the discount ----------------------------
 def test_public_review_reflects_discount(client, db_session):
     c = _create_client(client)
     b = _create_board(client)

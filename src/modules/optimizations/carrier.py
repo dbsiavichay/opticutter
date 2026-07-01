@@ -5,19 +5,19 @@ from typing import List, Optional
 
 @dataclass
 class ProformaCarrier:
-    """Portador duck-typed que la proforma y la hoja de producción saben renderizar.
+    """Duck-typed carrier that the proforma and production sheet know how to render.
 
-    Unifica las dos fuentes de un mismo cálculo —una optimización efímera
-    (cacheada por hash) o el snapshot inmutable de una orden— exponiendo los
-    mismos atributos que ``ProformaService`` lee, sin acoplar el render a un
-    modelo ORM concreto. El render solo depende de esta forma, no de su origen.
+    Unifies the two sources of the same computation — an ephemeral optimization
+    (cached by hash) or an order's immutable snapshot — exposing the same
+    attributes that ``ProformaService`` reads, without coupling the render to a
+    concrete ORM model. The render only depends on this shape, not its origin.
     """
 
     reference: str
     client: object
     company: dict = field(default_factory=dict)
-    # Vigencia (días) que muestra la proforma; ``None`` la omite (p. ej. una orden
-    # ya confirmada no es una cotización vigente). La fijan los carriers de cotización.
+    # Validity (days) shown on the proforma; ``None`` omits it (e.g. an already
+    # confirmed order isn't a current quote). Set by the quoting carriers.
     validity_days: Optional[int] = None
     requirements: List[dict] = field(default_factory=list)
     materials_summary: List[dict] = field(default_factory=list)
@@ -29,27 +29,27 @@ class ProformaCarrier:
     total_edge_banding_cost: float = 0.0
     total_cut_linear_m: float = 0.0
     total_edge_banding_linear_m: float = 0.0
-    # Descuento a nivel documento (nivel de precio). 0 = sin descuento (consumidor).
+    # Document-level discount (price tier). 0 = no discount (walk-in customer).
     price_tier_name: Optional[str] = None
     discount_rate: float = 0.0
     discount_amount: float = 0.0
-    # Datos de despacho (solo la hoja de despacho los usa; ``None`` los omite). Los
-    # fija ``from_order`` desde la orden; el camino de optimización efímera no.
+    # Dispatch data (only the dispatch sheet uses it; ``None`` omits it). Set by
+    # ``from_order`` from the order; the ephemeral-optimization path doesn't.
     dispatch_date: Optional[datetime] = None
     dispatched_by_label: Optional[str] = None
-    # Forma de pago congelada (informativa). Solo la fija ``from_order``; las
-    # cotizaciones efímeras la dejan en ``None`` y el bloque se omite en el PDF.
+    # Frozen payment method (informational). Only ``from_order`` sets it; ephemeral
+    # quotes leave it as ``None`` and the block is omitted from the PDF.
     payment_cash_amount: Optional[float] = None
     payment_credit_amount: Optional[float] = None
 
     @property
     def subtotal(self) -> float:
-        """Subtotal a precio de lista: tableros + tapacantos (antes del descuento)."""
+        """List-price subtotal: boards + edge banding (before the discount)."""
         return round(self.total_boards_cost + self.total_edge_banding_cost, 2)
 
     @property
     def total_cost(self) -> float:
-        """Costo total: subtotal a precio de lista menos el descuento del nivel."""
+        """Total cost: list-price subtotal minus the tier discount."""
         return round(self.subtotal - self.discount_amount, 2)
 
     @classmethod
@@ -62,19 +62,19 @@ class ProformaCarrier:
         validity_days: Optional[int] = None,
         branch: dict | None = None,
     ) -> "ProformaCarrier":
-        """Construye el portador desde un payload de optimización + el cliente.
+        """Builds the carrier from an optimization payload + the client.
 
-        ``company`` es el membrete vigente (datos de la empresa) que se renderiza en
-        vivo; no forma parte del snapshot con precio. ``validity_days`` es la vigencia
-        de la cotización que muestra la proforma (``None`` la omite). ``branch``, si se
-        da, es la sucursal dueña del documento: reemplaza el listado de sucursales del
-        membrete para mostrar solo esa (``{"name", "address"}``).
+        ``company`` is the current letterhead (company data) rendered live; it's
+        not part of the priced snapshot. ``validity_days`` is the quote's validity
+        period shown on the proforma (``None`` omits it). ``branch``, if given, is
+        the branch that owns the document: it replaces the letterhead's branch
+        listing to show only that one (``{"name", "address"}``).
         """
         company = company or {}
         if branch is not None:
             company = {**company, "branches": [branch]}
-        # Bloque de descuento (lo adjunta build_pricing antes de armar el carrier; un
-        # payload sin él = sin descuento, p. ej. snapshots previos a la feature).
+        # Discount block (attached by build_pricing before assembling the carrier;
+        # a payload without it = no discount, e.g. snapshots predating the feature).
         pricing = payload.get("pricing") or {}
         return cls(
             reference=reference,
@@ -100,28 +100,29 @@ class ProformaCarrier:
     def from_order(
         cls, order, company: dict | None = None, branch: dict | None = None
     ) -> "ProformaCarrier":
-        """Construye el portador desde una orden (snapshot + precios congelados).
+        """Builds the carrier from an order (snapshot + frozen prices).
 
-        El desglose (tableros vs tapacantos) se toma del snapshot inmutable; el
-        gran total congelado vive en ``order.total`` (= tableros + tapacantos). El
-        membrete (``company``) se renderiza en vivo, no se congela en el snapshot.
-        ``branch`` (sucursal de la orden) acota el membrete a esa sucursal.
+        The breakdown (boards vs edge banding) is taken from the immutable
+        snapshot; the frozen grand total lives in ``order.total`` (= boards +
+        edge banding). The letterhead (``company``) is rendered live, not frozen
+        into the snapshot. ``branch`` (the order's branch) scopes the letterhead
+        to that branch.
         """
         snapshot = order.optimization_snapshot or {}
         reference = order.code or f"ORD-{order.id:06d}"
         carrier = cls.from_payload(
             snapshot, order.client, reference=reference, company=company, branch=branch
         )
-        # La orden congela el conteo de tableros al confirmar.
+        # The order freezes the board count when confirmed.
         carrier.total_boards_used = order.total_boards_used
-        # El descuento congelado vive en columnas de la orden (fuente de verdad); el
-        # nombre del nivel viene del snapshot (from_payload ya lo leyó).
+        # The frozen discount lives in the order's columns (source of truth); the
+        # tier name comes from the snapshot (already read by from_payload).
         carrier.discount_rate = order.discount_rate
         carrier.discount_amount = order.discount_amount
-        # Despacho congelado (lo muestra la hoja de despacho; ``None`` antes de despachar).
+        # Frozen dispatch data (shown by the dispatch sheet; ``None`` before dispatch).
         carrier.dispatch_date = order.dispatched_at
         carrier.dispatched_by_label = order.dispatched_by_label
-        # Forma de pago congelada (``None`` antes de pasar a cola).
+        # Frozen payment method (``None`` before moving to the queue).
         carrier.payment_cash_amount = order.payment_cash_amount
         carrier.payment_credit_amount = order.payment_credit_amount
         return carrier

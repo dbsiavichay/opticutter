@@ -1,8 +1,8 @@
-"""Unidad: coordinación tablero↔tapacanto de ``ProductService`` (sin DB).
+"""Unit: board<->edge-banding coordination in ``ProductService`` (no DB).
 
-``_design_key`` y el mapa grosor→ancho son lógica pura; el emparejamiento de
-``find_edge_bandings_for_board`` se prueba con ``mock_session`` devolviendo
-candidatos falsos, sin tocar el catálogo real.
+``_design_key`` and the thickness->width map are pure logic; the matching in
+``find_edge_bandings_for_board`` is tested with ``mock_session`` returning fake
+candidates, without touching the real catalog.
 """
 
 from types import SimpleNamespace
@@ -17,7 +17,7 @@ from src.modules.products.types.edge_banding import BandType
 from src.shared.exceptions import BusinessRuleError
 
 
-# --- Lógica pura -------------------------------------------------------------
+# --- Pure logic ---------------------------------------------------------------
 @pytest.mark.parametrize(
     "code,expected",
     [
@@ -36,7 +36,7 @@ def test_thickness_to_edge_width_map():
     assert BOARD_THICKNESS_TO_EDGE_WIDTH[36] == 40
 
 
-# --- Emparejamiento con sesión mockeada --------------------------------------
+# --- Matching with a mocked session --------------------------------------------
 def _board(code="MDP-SL-CSH-15", thickness=15):
     return SimpleNamespace(code=code, type="board", attributes={"thickness": thickness})
 
@@ -54,13 +54,13 @@ def _candidates(mock_session, items):
 
 
 def test_matches_by_design_key_and_thickness_width(mock_session):
-    mock_session.get.return_value = _board()  # tablero 15mm ⇒ ancho objetivo 19
+    mock_session.get.return_value = _board()  # 15mm board => target width 19
     _candidates(
         mock_session,
         [
-            _band("TAP-SL-CSH-019", 19),  # coincide
-            _band("TAP-SL-CSH-040", 40),  # ancho equivocado para 15mm
-            _band("TAP-OT-XXX-019", 19),  # otro diseño
+            _band("TAP-SL-CSH-019", 19),  # matches
+            _band("TAP-SL-CSH-040", 40),  # wrong width for 15mm
+            _band("TAP-OT-XXX-019", 19),  # different design
         ],
     )
     result = ProductService(mock_session).find_edge_bandings_for_board(1)

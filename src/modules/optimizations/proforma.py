@@ -28,30 +28,30 @@ from src.modules.optimizations.labels import BAND_TYPE_LABEL, edge_banding_notat
 from src.modules.optimizations.patterns import group_layouts
 from src.modules.optimizations.visualization import VisualizationService
 
-# Paleta de marca MADERABLE (muestreada del membrete oficial).
-BRAND_CORAL = colors.HexColor("#E8564B")  # acento principal / cabeceras de tabla
-BRAND_ORANGE = colors.HexColor("#EC7829")  # banda del pie de página
-BRAND_BLACK = colors.HexColor("#1D1D1B")  # logo / texto / reglas
-LIGHT_CORAL = colors.HexColor("#FCE9E6")  # fondo de la caja de totales
+# MADERABLE brand palette (sampled from the official letterhead).
+BRAND_CORAL = colors.HexColor("#E8564B")  # main accent / table headers
+BRAND_ORANGE = colors.HexColor("#EC7829")  # footer band
+BRAND_BLACK = colors.HexColor("#1D1D1B")  # logo / text / rules
+LIGHT_CORAL = colors.HexColor("#FCE9E6")  # totals box background
 ZEBRA_GREY = colors.HexColor("#F5F5F5")
 TEXT_GREY = colors.HexColor("#424242")
 
 
 @dataclass(frozen=True)
 class Palette:
-    """Colores temáticos de un PDF. Permite que la proforma vaya con marca y la
-    hoja de producción en blanco y negro reutilizando los mismos builders."""
+    """Themed colors for a PDF. Lets the proforma go branded and the production
+    sheet stay black and white while reusing the same builders."""
 
-    accent: colors.Color  # cabecera de tabla, regla de sección, borde de totales
-    accent_fill: colors.Color  # fondo de la caja de totales / fila TOTAL
-    text: colors.Color  # títulos y reglas oscuras
-    text_grey: colors.Color  # texto secundario en celdas
-    zebra: colors.Color  # filas alternas
-    header_text: colors.Color  # texto sobre la cabecera de tabla
+    accent: colors.Color  # table header, section rule, totals border
+    accent_fill: colors.Color  # totals box / TOTAL row background
+    text: colors.Color  # titles and dark rules
+    text_grey: colors.Color  # secondary text in cells
+    zebra: colors.Color  # alternating rows
+    header_text: colors.Color  # text over the table header
 
 
-# Proforma comercial: paleta de marca. Hoja de producción: monocromo para taller
-# (cabecera negra con texto blanco e impresión/fotocopia legible en B/N).
+# Commercial proforma: brand palette. Production sheet: monochrome for the
+# workshop (black header with white text, legible when printed/photocopied in B/W).
 BRAND_PALETTE = Palette(
     accent=BRAND_CORAL,
     accent_fill=LIGHT_CORAL,
@@ -80,8 +80,8 @@ ICON_WHATSAPP = ASSETS_DIR / "whatsapp.jpg"
 ICON_EMAIL = ASSETS_DIR / "email.jpg"
 ICON_ADDRESS = ASSETS_DIR / "address.jpg"
 
-# Descargo de responsabilidad de la hoja de despacho: con su firma el cliente
-# acepta la mercadería conforme y libera a la empresa de reclamos posteriores.
+# Dispatch sheet disclaimer: by signing it the client accepts the goods as
+# delivered in good order and releases the company from later claims.
 DISPATCH_DISCLAIMER = (
     "Con la firma de este documento, el cliente declara haber recibido y revisado a "
     "entera conformidad las piezas detalladas, verificando cantidades, medidas, color "
@@ -95,14 +95,14 @@ DISPATCH_DISCLAIMER = (
 
 
 def _scaled_image(path: Path, width: float) -> Image:
-    """Imagen escalada a ``width`` conservando su relación de aspecto."""
+    """Image scaled to ``width`` while preserving its aspect ratio."""
     img_width, img_height = ImageReader(str(path)).getSize()
     height = width * img_height / img_width
     return Image(str(path), width=width, height=height)
 
 
 def _draw_watermark(canvas) -> None:
-    """Marca de agua tenue centrada (se dibuja debajo del contenido)."""
+    """Faint centered watermark (drawn underneath the content)."""
     reader = ImageReader(str(WATERMARK_PATH))
     img_width, img_height = reader.getSize()
     wm_width = 3.8 * inch
@@ -118,7 +118,7 @@ def _draw_watermark(canvas) -> None:
 
 
 def _draw_footer_accent(canvas) -> None:
-    """Banda angular naranja con muesca negra en el borde inferior (estilo membrete)."""
+    """Angular orange band with a black notch on the bottom edge (letterhead style)."""
     band_h = 12
     slant = 20
     x0 = PAGE_WIDTH * 0.52
@@ -143,7 +143,7 @@ def _draw_footer_accent(canvas) -> None:
 
 
 def _draw_page_decoration(canvas, doc) -> None:
-    """Marca de agua, acento de pie y línea de generación/página en cada hoja."""
+    """Watermark, footer accent and generation/page line on every sheet."""
     canvas.saveState()
     _draw_watermark(canvas)
     _draw_footer_accent(canvas)
@@ -163,9 +163,9 @@ def _draw_page_decoration(canvas, doc) -> None:
 
 
 def _draw_page_decoration_plain(canvas, doc) -> None:
-    """Pie mínimo para la hoja de producción: solo fecha de generación y página.
+    """Minimal footer for the production sheet: only generation date and page.
 
-    Sin marca de agua ni banda de pie (la hoja de taller va en blanco y negro).
+    No watermark or footer band (the workshop sheet is black and white).
     """
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
@@ -188,9 +188,9 @@ def _new_doc(
     top: float = 0.5 * inch,
     bottom: float = 0.6 * inch,
 ) -> SimpleDocTemplate:
-    """Documento A4 de Cutter. ``top``/``bottom`` se ajustan para la hoja de
-    producción (más compacta); el margen horizontal se mantiene para no recalcular
-    el ancho de las tablas."""
+    """A4 document for Cutter. ``top``/``bottom`` are adjusted for the production
+    sheet (more compact); the horizontal margin stays fixed so table widths don't
+    need recalculating."""
     return SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -206,11 +206,11 @@ class ProformaService:
     def generate_proforma_pdf(
         carrier: ProformaCarrier, title: str = "PROFORMA"
     ) -> io.BytesIO:
-        """Documento comercial: requerimientos, materiales con precios y disposición.
+        """Commercial document: requirements, priced materials and layout.
 
-        El mismo render sirve a la cotización (``title="PROFORMA"``, no vinculante) y a
-        la orden confirmada (``title="ORDEN DE PEDIDO"``, con compromiso); solo cambia
-        el rótulo del encabezado.
+        The same render serves both the quote (``title="PROFORMA"``, non-binding)
+        and the confirmed order (``title="ORDEN DE PEDIDO"``, committed); only the
+        header label changes.
         """
         buffer = io.BytesIO()
         doc = _new_doc(buffer)
@@ -248,8 +248,8 @@ class ProformaService:
         story.extend(ProformaService._build_layout_pages(carrier))
 
         story.append(Spacer(1, 0.3 * inch))
-        # La vigencia solo aplica a cotizaciones (pre-orden / optimización en vivo); una
-        # orden ya confirmada no la lleva (``carrier.validity_days`` es ``None``).
+        # Validity only applies to quotes (pre-order / live optimization); an
+        # already-confirmed order doesn't carry it (``carrier.validity_days`` is ``None``).
         validity_note = (
             f"Esta proforma es válida por {carrier.validity_days} días. "
             if carrier.validity_days
@@ -278,9 +278,9 @@ class ProformaService:
 
     @staticmethod
     def generate_production_sheet_pdf(carrier: ProformaCarrier) -> io.BytesIO:
-        """Hoja de producción para el taller: en blanco y negro, sin membrete, lista
-        de corte y disposición SIN precios. Aprovecha al máximo el papel (márgenes y
-        espaciados compactos) y diferencia el tipo de canto (suave/duro)."""
+        """Production sheet for the workshop: black and white, no letterhead, cut
+        list and layout WITHOUT prices. Makes the most of the paper (compact
+        margins and spacing) and differentiates the edge-banding type (soft/hard)."""
         buffer = io.BytesIO()
         doc = _new_doc(buffer, top=0.4 * inch, bottom=0.45 * inch)
         pal = MONO_PALETTE
@@ -341,9 +341,9 @@ class ProformaService:
 
     @staticmethod
     def generate_dispatch_sheet_pdf(carrier: ProformaCarrier) -> io.BytesIO:
-        """Hoja de despacho (entrega al cliente): membrete de marca, datos del
-        cliente, detalle de piezas SIN precios, conteo de tableros, nota de descargo
-        de responsabilidad y bloque de firmas (entrega y recibí conforme)."""
+        """Dispatch sheet (delivery to the client): brand letterhead, client data,
+        piece detail WITHOUT prices, board count, liability disclaimer note and
+        signature block (delivered-by / received-in-good-order)."""
         buffer = io.BytesIO()
         doc = _new_doc(buffer)
 
@@ -357,8 +357,8 @@ class ProformaService:
 
         story.extend(_section("INFORMACIÓN DEL CLIENTE", heading_style))
         story.append(ProformaService._build_client_table(carrier))
-        # Fecha de despacho y responsable de la entrega (congelados en la orden; si
-        # aún no se ha despachado caen a "ahora" / "—").
+        # Dispatch date and the person responsible for delivery (frozen on the
+        # order; fall back to "now" / "—" if not yet dispatched).
         dispatch_date = carrier.dispatch_date or datetime.now()
         story.append(
             Paragraph(
@@ -416,9 +416,9 @@ class ProformaService:
 
     @staticmethod
     def _build_signature_block(styles) -> Table:
-        """Dos líneas de firma lado a lado: quien entrega y quien recibe (recibí
-        conforme). El espacio para firmar lo da el Spacer previo; la línea va sobre
-        cada rótulo."""
+        """Two signature lines side by side: the deliverer and the receiver
+        (received in good order). The space to sign comes from the preceding
+        Spacer; the line goes above each label."""
         label_style = ParagraphStyle(
             "SignLabel",
             parent=styles["Normal"],
@@ -465,7 +465,7 @@ class ProformaService:
 
     @staticmethod
     def _build_header(carrier: ProformaCarrier, styles, title: str) -> List:
-        """Membrete MADERABLE: logo + contacto, regla negra y franja de título."""
+        """MADERABLE letterhead: logo + contact, black rule and title bar."""
         logo = _scaled_image(LOGO_PATH, 1.9 * inch)
         logo.hAlign = "LEFT"
 
@@ -541,9 +541,9 @@ class ProformaService:
 
     @staticmethod
     def _build_contact_block(carrier: ProformaCarrier, styles) -> Table:
-        """Bloque de contacto con iconos: WhatsApp, correo y sucursales.
+        """Contact block with icons: WhatsApp, email and branches.
 
-        Lee los datos de la empresa (membrete) en vivo desde ``carrier.company``.
+        Reads the company data (letterhead) live from ``carrier.company``.
         """
         company = carrier.company or {}
         text_style = ParagraphStyle(
@@ -597,8 +597,8 @@ class ProformaService:
     def _build_production_header(
         carrier: ProformaCarrier, styles, palette: Palette = MONO_PALETTE
     ) -> List:
-        """Cabecera compacta de taller: título + N°/fecha/cliente, sin logo ni
-        membrete. El nombre del cliente va aquí (la hoja ya no lleva sección CLIENTE).
+        """Compact workshop header: title + No./date/client, no logo or
+        letterhead. The client name goes here (the sheet has no CLIENT section).
         """
         client = carrier.client
         client_name = (
@@ -740,8 +740,8 @@ class ProformaService:
         palette: Palette = BRAND_PALETTE,
         pad: int = 7,
     ) -> Table:
-        """Resumen de tapacantos por tipo. Con precios (proforma) o sin ellos
-        (hoja de producción), con una columna ``Tipo`` (Suave/Duro) para el taller."""
+        """Edge-banding summary by type. With prices (proforma) or without
+        (production sheet), with a ``Tipo`` (Soft/Hard) column for the workshop."""
         summary = carrier.edge_bandings_summary
         if with_prices:
             header = [
@@ -800,9 +800,9 @@ class ProformaService:
 
     @staticmethod
     def _build_materials_table(carrier: ProformaCarrier, cell_style) -> Table:
-        """Resumen único de materiales: tableros (cantidad en unidades) y tapacantos
-        (cantidad en metros) en una sola tabla con código, descripción, cantidad,
-        precio unitario y subtotal. Ocupa el ancho completo del contenido."""
+        """Single materials summary: boards (quantity in units) and edge banding
+        (quantity in meters) in one table with code, description, quantity, unit
+        price and subtotal. Spans the full content width."""
         mat_data = [["Código", "Descripción", "Cantidad", "P. Unit.", "Subtotal"]]
 
         has_rows = False
@@ -852,9 +852,9 @@ class ProformaService:
         palette: Palette = BRAND_PALETTE,
         pad: int = 7,
     ) -> Table:
-        """Tableros a usar SIN precios (hoja de producción): código, dimensiones, cant.
+        """Boards to use WITHOUT prices (production sheet): code, dimensions, qty.
 
-        Ocupa el ancho completo del contenido para alinear con la lista de corte."""
+        Spans the full content width to align with the cut list."""
         materials_summary = carrier.materials_summary
         mat_data = [["Código", "Nombre", "Dimensiones", "Espesor", "Cantidad"]]
         if isinstance(materials_summary, list) and materials_summary:
@@ -902,7 +902,7 @@ class ProformaService:
             summary_data.append(
                 ["Total de tableros utilizados:", str(carrier.total_boards_used)]
             )
-        # Una sola fila de descuento (nivel de precio), solo sobre tableros de catálogo.
+        # A single discount row (price tier), only over catalog boards.
         if has_discount:
             pct = carrier.discount_rate * 100
             name = carrier.price_tier_name or "descuento"
@@ -915,10 +915,10 @@ class ProformaService:
 
     @staticmethod
     def _payment_section(carrier: ProformaCarrier, heading_style) -> list:
-        """Bloque "FORMA DE PAGO" (informativo): efectivo y/o crédito + total.
+        """ "FORMA DE PAGO" block (informational): cash and/or credit + total.
 
-        Devuelve ``[]`` cuando no hay pago registrado, para omitir el bloque en
-        cotizaciones efímeras y en órdenes aún no enviadas a la cola.
+        Returns ``[]`` when there's no payment registered, to omit the block on
+        ephemeral quotes and on orders not yet sent to the queue.
         """
         cash = carrier.payment_cash_amount or 0
         credit = carrier.payment_credit_amount or 0
@@ -936,7 +936,7 @@ class ProformaService:
     def _build_boards_total_table(
         carrier: ProformaCarrier, palette: Palette = BRAND_PALETTE
     ) -> Table:
-        """Total de tableros a cortar, sin costos (hoja de producción)."""
+        """Total boards to cut, no costs (production sheet)."""
         return _totals_table(
             [["Total de tableros a cortar:", str(carrier.total_boards_used)]],
             palette=palette,
@@ -948,10 +948,10 @@ class ProformaService:
         palette: Palette = BRAND_PALETTE,
         pad: int = 7,
     ) -> Table:
-        """Metros lineales de corte y canto por plancha + total general (taller).
+        """Linear meters of cut and edge banding per sheet + overall total (workshop).
 
-        Una fila por patrón de corte (deduplicado) con los valores por plancha; la
-        fila TOTAL es la suma sobre todas las planchas físicas.
+        One row per cutting pattern (deduplicated) with the per-sheet values; the
+        TOTAL row is the sum across all physical sheets.
         """
         groups = carrier.layout_groups
         if not (isinstance(groups, list) and groups):
@@ -988,7 +988,7 @@ class ProformaService:
             repeatRows=1,
         )
         style = _data_table_style(header_size=10, body_size=9, palette=palette, pad=pad)
-        # Resalta la fila TOTAL (última) como caja de totales.
+        # Highlights the TOTAL row (last) as a totals box.
         style.add("BACKGROUND", (0, -1), (-1, -1), palette.accent_fill)
         style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
         style.add("TEXTCOLOR", (0, -1), (-1, -1), palette.text)
@@ -997,20 +997,20 @@ class ProformaService:
 
     @staticmethod
     def _build_layout_pages(carrier: ProformaCarrier, mono: bool = False) -> List:
-        """Una imagen por patrón, cada una a página completa ocupando el máximo."""
+        """One image per pattern, each on a full page using the maximum space."""
         layouts = carrier.layouts
         if not (isinstance(layouts, list) and layouts):
             return []
 
-        # Usa los grupos persistidos; recompútalos para optimizaciones antiguas que
-        # se guardaron antes de existir el campo ``layout_groups``.
+        # Uses the persisted groups; recomputes them for old optimizations saved
+        # before the ``layout_groups`` field existed.
         groups = carrier.layout_groups
         if not (isinstance(groups, list) and groups):
             groups = group_layouts(layouts)
 
         flowables: List = []
-        # Cada imagen ocupa casi toda la página; el tope deja sitio al encabezado de
-        # sección en la primera (las demás van solas tras un salto de página).
+        # Each image occupies nearly the whole page; the cap leaves room for the
+        # section heading on the first one (the rest stand alone after a page break).
         max_height = 9.3 * inch
         for idx, group in enumerate(groups):
             if idx > 0:
@@ -1035,7 +1035,7 @@ class ProformaService:
 def pdf_response(
     buffer: io.BytesIO, filename: str, fmt: str = "pdf"
 ) -> Union[StreamingResponse, dict]:
-    """Devuelve el PDF como descarga (``pdf``) o envuelto en JSON base64 (``base64``)."""
+    """Returns the PDF as a download (``pdf``) or wrapped in base64 JSON (``base64``)."""
     if fmt.lower() == "base64":
         content = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return {
@@ -1052,7 +1052,7 @@ def pdf_response(
 
 
 def _edge_banding_notation(req: dict) -> str:
-    """Notación de taller de los cantos de una pieza (``2L1C CS``) o ``-`` si no lleva."""
+    """Workshop notation for a piece's edge banding (``2L1C CS``), or ``-`` if none."""
     spec = req.get("edge_banding")
     if not spec:
         return "-"
@@ -1089,7 +1089,7 @@ def _section(
     palette: Palette = BRAND_PALETTE,
     space_after: int = 8,
 ) -> List:
-    """Título de sección con regla de color debajo."""
+    """Section title with a colored rule underneath."""
     return [
         Paragraph(title, heading_style),
         HRFlowable(
@@ -1103,7 +1103,7 @@ def _section(
 
 
 def _totals_table(rows: List[List[str]], palette: Palette = BRAND_PALETTE) -> Table:
-    """Caja resaltada de totales (clave a la izquierda, valor a la derecha)."""
+    """Highlighted totals box (key on the left, value on the right)."""
     table = Table(rows, colWidths=[CONTENT_WIDTH - 2.0 * inch, 2.0 * inch])
     table.setStyle(
         TableStyle(
@@ -1132,7 +1132,7 @@ def _data_table_style(
     palette: Palette = BRAND_PALETTE,
     pad: int = 7,
 ) -> TableStyle:
-    """Estilo común para tablas de datos: cabecera de acento + filas zebra."""
+    """Common style for data tables: accent header + zebra rows."""
     return TableStyle(
         [
             ("BACKGROUND", (0, 0), (-1, 0), palette.accent),

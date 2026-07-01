@@ -11,10 +11,10 @@ from src.shared.exceptions import BusinessRuleError, ConflictError
 
 
 def require_phone(client: ClientModel) -> None:
-    """Exige un celular registrado antes de emitir documentos comerciales.
+    """Require a registered phone number before issuing commercial documents.
 
-    Regla de negocio dura: ni la proforma ni la orden pueden generarse sin un
-    número de celular válido. El email es opcional y nunca bloquea.
+    Hard business rule: neither the proforma nor the order can be generated
+    without a valid mobile phone number. Email is optional and never blocks.
     """
     if not (client.phone and client.phone.strip()):
         raise BusinessRuleError(
@@ -24,13 +24,13 @@ def require_phone(client: ClientModel) -> None:
 
 
 class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
-    """CRUD de clientes + búsquedas específicas."""
+    """Client CRUD + specific search queries."""
 
     model = ClientModel
     conflict_messages = {"identifier": "El identificador ya existe"}
 
     def get_by_identifier(self, identifier: str) -> Optional[ClientModel]:
-        """Obtiene un cliente por identificador."""
+        """Gets a client by identifier."""
         return (
             self.db.query(ClientModel)
             .filter(ClientModel.identifier == identifier)
@@ -38,12 +38,13 @@ class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
         )
 
     def resolve(self, data: ClientCreate) -> ClientModel:
-        """Obtiene el cliente por ``identifier`` o lo crea (idempotente).
+        """Gets the client by ``identifier`` or creates it (idempotent).
 
-        Resolución perezosa para el bot: el cliente solo se materializa cuando hay
-        una acción comercial. Seguro ante carreras —dos mensajes casi simultáneos
-        del mismo usuario— porque el unique de ``identifier`` hace fallar la segunda
-        creación; se captura el conflicto y se re-lee el cliente ya creado.
+        Lazy resolution for the bot: the client only materializes once there is
+        a commercial action. Safe against races — two near-simultaneous messages
+        from the same user — because the ``identifier`` unique constraint fails
+        the second creation; the conflict is caught and the already-created
+        client is re-read.
         """
         existing = self.get_by_identifier(data.identifier)
         if existing is not None:
@@ -59,7 +60,7 @@ class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
     def search_paginated(
         self, search: str, limit: int = 20, offset: int = 0
     ) -> Tuple[List[ClientModel], int]:
-        """Busca clientes por identificador, nombre o apellido; ``(items, total)``."""
+        """Searches clients by identifier, first name, or last name; ``(items, total)``."""
         pattern = f"%{search}%"
         query = self.db.query(ClientModel).filter(
             ClientModel.identifier.ilike(pattern)
@@ -70,5 +71,5 @@ class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
 
 
 def client_service(db: Session = Depends(get_db)) -> ClientService:
-    """Provider de ``ClientService`` para inyección en rutas."""
+    """``ClientService`` provider for route injection."""
     return ClientService(db)

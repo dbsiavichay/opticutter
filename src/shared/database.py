@@ -5,7 +5,7 @@ from src.shared.config import config
 
 
 class Base(DeclarativeBase):
-    """Clase base para todos los modelos ORM."""
+    """Base class for all ORM models."""
 
 
 engine = create_engine(config.DATABASE_URL)
@@ -13,7 +13,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def get_db():
-    """Dependencia FastAPI: provee una sesión de base de datos por request."""
+    """FastAPI dependency: provides a database session per request."""
     db = SessionLocal()
     try:
         yield db

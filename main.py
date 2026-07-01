@@ -33,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manejo del ciclo de vida de la aplicación"""
-    logger.info("Iniciando aplicación FastAPI")
+    """Application lifecycle handling"""
+    logger.info("Starting FastAPI application")
     yield
-    logger.info("Cerrando aplicación FastAPI")
+    logger.info("Shutting down FastAPI application")
 
 
-# Crear aplicación FastAPI
+# Create FastAPI application
 app = FastAPI(
     title="Cutter API",
-    description="API para optimización de cortes de melamina",
+    description="API for optimizing melamine board cuts",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -57,16 +57,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Usuario autenticado en contexto para auditoría genérica (created_by/updated_by).
+# Authenticated user in context for generic auditing (created_by/updated_by).
 app.add_middleware(CurrentUserMiddleware)
-# Correlación por request (requestId + header X-Request-ID). Se añade de último
-# para envolver al resto del stack y estar disponible en éxito y en error.
+# Per-request correlation (requestId + X-Request-ID header). Added last so it
+# wraps the rest of the stack and is available on both success and error.
 app.add_middleware(RequestIDMiddleware)
 
-# Manejo centralizado de errores de aplicación
+# Centralized application error handling
 register_exception_handlers(app)
 
-# Incluir rutas
+# Include routes
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
@@ -85,13 +85,13 @@ app.include_router(settings_tiers_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    """Redirige a la documentación de la API"""
+    """Redirects to the API documentation"""
     return RedirectResponse("/docs")
 
 
 @app.get("/health")
 async def health_check():
-    """Endpoint de verificación de salud"""
+    """Health check endpoint"""
     return {"status": "healthy", "environment": config.ENVIRONMENT, "version": "1.0.0"}
 
 

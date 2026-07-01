@@ -9,23 +9,23 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class ProductType(str, Enum):
-    """Tipos de producto comercializados.
+    """Product types sold.
 
-    Cada tipo aporta su propio esquema de ``attributes`` (ver ``products.registry``);
-    agregar un tipo nuevo no requiere migración de base de datos.
+    Each type contributes its own ``attributes`` schema (see
+    ``products.registry``); adding a new type requires no database migration.
     """
 
-    BOARD = "board"  # tablero de melamina (único insumo del optimizador)
-    EDGE_BANDING = "edge_banding"  # tapacanto (futuro)
-    HARDWARE = "hardware"  # herraje (futuro)
+    BOARD = "board"  # melamine board (the optimizer's only input)
+    EDGE_BANDING = "edge_banding"  # edge banding (future)
+    HARDWARE = "hardware"  # hardware (future)
 
 
 class ProductModel(TimestampMixin, AuditMixin, Base):
-    """Catálogo unificado: columnas comunes + ``attributes`` específicos por tipo.
+    """Unified catalog: common columns + per-type ``attributes``.
 
-    Lo común (``code``, ``name``, ``price``, ``type``, ``is_active``) son columnas
-    consultables/restringibles; lo específico de cada tipo vive en el JSON
-    ``attributes``, validado por su esquema Pydantic en la frontera del API.
+    The common fields (``code``, ``name``, ``price``, ``type``, ``is_active``)
+    are queryable/constrainable columns; what's specific to each type lives in
+    the JSON ``attributes``, validated by its Pydantic schema at the API boundary.
     """
 
     __tablename__ = "products"

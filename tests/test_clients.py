@@ -1,4 +1,4 @@
-"""Tests del módulo clients (CRUD vía CRUDService + rutas finas)."""
+"""Tests for the clients module (CRUD via CRUDService + thin routes)."""
 
 
 def _payload(identifier="0991112233", first="Ada", last="Lovelace"):
@@ -34,7 +34,7 @@ def test_get_missing_client_returns_404(client):
 
 
 def test_resolve_creates_then_is_idempotent(client):
-    """``POST /clients/resolve`` crea la primera vez y luego devuelve el mismo id."""
+    """``POST /clients/resolve`` creates the first time, then returns the same id."""
     first = client.post("/api/v1/clients/resolve", json=_payload())
     assert first.status_code == 200
     created = first.json()["data"]
@@ -43,13 +43,13 @@ def test_resolve_creates_then_is_idempotent(client):
     second = client.post("/api/v1/clients/resolve", json=_payload(first="Ignored"))
     assert second.status_code == 200
     assert second.json()["data"]["id"] == created["id"]
-    # No se duplica ni se sobrescribe el cliente existente.
+    # The existing client is neither duplicated nor overwritten.
     assert second.json()["data"]["firstName"] == "Ada"
     assert len(client.get("/api/v1/clients/").json()["data"]) == 1
 
 
 def test_resolve_returns_existing_created_client(client):
-    """Si el cliente ya existe (creado por POST /clients), resolve lo reutiliza."""
+    """If the client already exists (created via POST /clients), resolve reuses it."""
     created = client.post("/api/v1/clients/", json=_payload()).json()["data"]
     resolved = client.post("/api/v1/clients/resolve", json=_payload())
     assert resolved.status_code == 200
@@ -95,7 +95,7 @@ def test_update_client(client):
 
 
 def test_create_client_stores_phone_and_email(client):
-    """``phone`` y ``email`` se almacenan y se devuelven (email opcional)."""
+    """``phone`` and ``email`` are stored and returned (email is optional)."""
     payload = {**_payload(), "phone": "0991112233", "email": "ada@example.com"}
     created = client.post("/api/v1/clients/", json=payload).json()["data"]
     assert created["phone"] == "0991112233"
@@ -103,19 +103,19 @@ def test_create_client_stores_phone_and_email(client):
 
 
 def test_client_phone_and_email_are_optional_on_create(client):
-    """Sin ``phone``/``email`` el cliente se crea igual (regla se aplica al cotizar)."""
+    """The client is created fine without ``phone``/``email`` (the rule applies when quoting)."""
     created = client.post("/api/v1/clients/", json=_payload()).json()["data"]
     assert created["phone"] is None
     assert created["email"] is None
 
 
 def test_update_client_phone(client):
-    """``PUT`` permite registrar el celular más tarde (lo usa el bot tras compartir)."""
+    """``PUT`` allows registering the phone number later (used by the bot after sharing)."""
     created = client.post("/api/v1/clients/", json=_payload()).json()["data"]
     resp = client.put(f"/api/v1/clients/{created['id']}", json={"phone": "0987654321"})
     assert resp.status_code == 200
     assert resp.json()["data"]["phone"] == "0987654321"
-    # No pisa el resto de campos.
+    # Doesn't overwrite the rest of the fields.
     assert resp.json()["data"]["firstName"] == "Ada"
 
 

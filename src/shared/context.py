@@ -1,11 +1,11 @@
-"""Contexto por request: identificador de correlación (requestId) y usuario.
+"""Per-request context: correlation id (requestId) and user.
 
-Ambos los fija un middleware ASGI puro al inicio de cada request. El requestId lo
-leen la ``Meta`` de las respuestas y los handlers de error; el id de usuario lo
-lee ``CRUDService`` para estampar ``created_by``/``updated_by`` sin propagar el
-valor por la firma de cada endpoint. Se fijan en middleware (no en una dependencia)
-porque las dependencias sync corren en threadpool y su mutación del ContextVar no
-propaga al handler.
+Both are set by a pure ASGI middleware at the start of every request. The
+requestId is read by the response ``Meta`` and error handlers; the user id is
+read by ``CRUDService`` to stamp ``created_by``/``updated_by`` without
+propagating the value through every endpoint's signature. They are set in
+middleware (not in a dependency) because sync dependencies run in a
+threadpool and their ContextVar mutation doesn't propagate to the handler.
 """
 
 from contextvars import ContextVar
@@ -19,10 +19,10 @@ current_user_ctx: ContextVar[Optional[int]] = ContextVar(
 
 
 def get_request_id() -> str:
-    """requestId del request en curso, o uno nuevo como fallback defensivo."""
+    """requestId of the current request, or a new one as a defensive fallback."""
     return request_id_ctx.get() or str(uuid4())
 
 
 def get_current_user_id() -> Optional[int]:
-    """Id del usuario autenticado del request en curso, o ``None`` si es público."""
+    """Id of the authenticated user for the current request, or ``None`` if public."""
     return current_user_ctx.get()

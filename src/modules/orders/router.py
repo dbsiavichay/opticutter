@@ -34,10 +34,10 @@ from src.shared.responses import (
 
 router = APIRouter(prefix="/orders", tags=["orders"], responses=ERROR_RESPONSES)
 
-# Lectura/proforma: admin + vendedor + operador. Escritura (crear, factura, export):
-# admin + vendedor. Transición de estado: admin + vendedor + operador (TRANSITION_ROLES
-# filtra por transición específica en el servicio). Plan de corte (ver + hoja de
-# producción): admin + vendedor + operador. Marcar piezas: admin + operador.
+# Read/proforma: admin + seller + operator. Write (create, invoice, export):
+# admin + seller. State transition: admin + seller + operator (TRANSITION_ROLES
+# filters by specific transition in the service). Cutting plan (view + production
+# sheet): admin + seller + operator. Marking pieces: admin + operator.
 _READ = Depends(require_permission("orders:read"))
 _WRITE = Depends(require_permission("orders:write"))
 _TRANSITION = Depends(require_permission("orders:transition"))
@@ -47,7 +47,7 @@ _BAND = Depends(require_permission("orders:band"))
 
 _FORMAT_QUERY = Query(
     default="pdf",
-    description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
+    description="Output format: 'pdf' (file) or 'base64' (JSON)",
     pattern="^(pdf|base64)$",
 )
 
@@ -56,22 +56,22 @@ _FORMAT_QUERY = Query(
 def list_orders(
     status: Optional[List[OrderStatus]] = Query(
         default=None,
-        description="Filtra órdenes por uno o varios estados (repetir el parámetro)",
+        description="Filter orders by one or more statuses (repeat the parameter)",
     ),
     branch_id: Optional[int] = Query(
         default=None,
         alias="branchId",
-        description="Solo roles globales (admin/vendedor): estrecha el listado a una "
-        "sucursal (vacío = todas)",
+        description="Global roles only (admin/seller): narrows the listing to a "
+        "branch (empty = all)",
     ),
     paging: PageParams = Depends(),
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Lista órdenes con filtro por estado y paginación opcionales.
+    """Lists orders with optional status filter and pagination.
 
-    El operador solo ve las de su sucursal; los roles globales (admin/vendedor) ven
-    todas (o filtran con ``branchId``).
+    The operator only sees their branch's orders; global roles (admin/seller)
+    see all of them (or filter with ``branchId``).
     """
     items, total = svc.list_orders(
         status=status,
@@ -92,9 +92,9 @@ def get_banding_queue(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Cola de canteado del canteador: órdenes con canteado pendiente (su sucursal).
+    """Bander's banding queue: orders with pending banding (their branch).
 
-    Declarada antes de ``/{order_id}`` para que la ruta paramétrica no la capture.
+    Declared before ``/{order_id}`` so the parametric route doesn't capture it.
     """
     return ok(svc.list_banding_queue(branch_scope=branch_scope))
 
@@ -107,7 +107,7 @@ def get_order(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Obtiene una orden por ID (404 si es de otra sucursal y no eres admin)."""
+    """Gets an order by ID (404 if it belongs to another branch and you're not admin)."""
     return ok(svc.get_scoped_or_404(order_id, branch_scope))
 
 
@@ -122,7 +122,7 @@ def update_order_status(
     current_user: UserModel = Depends(require_permission("orders:transition")),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Transiciona el estado de una orden validando la máquina de estados."""
+    """Transitions an order's state, validating the state machine."""
     return ok(
         svc.transition(
             order_id,
@@ -146,10 +146,10 @@ def update_order_banding(
     current_user: UserModel = Depends(require_permission("orders:band")),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Registra inicio/fin del canteado (pista paralela al corte).
+    """Registers the start/finish of banding (track parallel to cutting).
 
-    El canteador avanza ``in_progress`` (inicia) → ``done`` (termina) sin tocar el
-    estado de corte; corre mientras la orden está en ``cutting``/``cut``.
+    The bander advances ``in_progress`` (start) → ``done`` (finish) without
+    touching the cutting status; runs while the order is in ``cutting``/``cut``.
     """
     return ok(
         svc.transition_banding(
@@ -171,7 +171,7 @@ def get_cutting_plan(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Plan de corte para la vista de taller: tableros físicos, piezas y avance."""
+    """Cutting plan for the workshop view: physical boards, pieces and progress."""
     return ok(svc.get_cutting_plan(order_id, branch_scope=branch_scope))
 
 
@@ -187,9 +187,9 @@ def mark_piece_cut(
     current_user: UserModel = Depends(require_permission("orders:cut")),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Marca (o desmarca, ``cut=false``) una pieza colocada como cortada.
+    """Marks (or unmarks, ``cut=false``) a placed piece as cut.
 
-    Solo con la orden en ``cutting``. Idempotente: re-marcar no cambia nada.
+    Only with the order in ``cutting``. Idempotent: re-marking changes nothing.
     """
     return ok(
         svc.mark_piece_cut(
@@ -213,7 +213,7 @@ def set_order_invoice(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Asocia el ID de la factura externa (costura con el proveedor de facturación)."""
+    """Associates the external invoice ID (stitches with the billing provider)."""
     return ok(
         svc.set_external_invoice_id(
             order_id, data.external_invoice_id, branch_scope=branch_scope
@@ -231,12 +231,12 @@ def export_order(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Documento de facturación neutral para el proveedor externo (cobro=tableros)."""
+    """Neutral billing document for the external provider (billing=boards)."""
     return ok(svc.build_export(order_id, branch_scope=branch_scope))
 
 
-# Exentos de la envoltura JSON: transporte de archivo PDF (StreamingResponse) y su
-# variante base64 son "el archivo, transportado", no recursos JSON de dominio.
+# Exempt from the JSON envelope: PDF file transport (StreamingResponse) and its
+# base64 variant are "the file, transported", not domain JSON resources.
 @router.get("/{order_id}/document", dependencies=[_READ])
 def get_order_document(
     order_id: int,
@@ -245,10 +245,10 @@ def get_order_document(
     settings_svc: SettingsService = Depends(settings_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Orden de pedido (documento con compromiso, precios congelados) del snapshot.
+    """Order document (committed document, frozen prices) from the snapshot.
 
-    No es una proforma (cotización no vinculante): es el documento del pedido ya
-    confirmado, por eso el encabezado dice "ORDEN DE PEDIDO".
+    Not a proforma (non-binding quote): it's the document for an already
+    confirmed order, hence the header reads "ORDEN DE PEDIDO".
     """
     order = svc.get_scoped_or_404(order_id, branch_scope)
     carrier = ProformaCarrier.from_order(
@@ -270,7 +270,7 @@ def get_order_production_sheet(
     settings_svc: SettingsService = Depends(settings_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Hoja de producción (lista de corte y disposición, SIN precios) para el taller."""
+    """Production sheet (cut list and layout, NO prices) for the workshop."""
     order = svc.get_scoped_or_404(order_id, branch_scope)
     carrier = ProformaCarrier.from_order(
         order,
@@ -289,8 +289,8 @@ def get_order_dispatch_sheet(
     settings_svc: SettingsService = Depends(settings_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Hoja de despacho (entrega al cliente): piezas SIN precios, descargo de
-    responsabilidad y firmas. Muestra la fecha/responsable de despacho del snapshot."""
+    """Dispatch sheet (handover to the client): pieces with NO prices, a liability
+    disclaimer and signatures. Shows the snapshot's dispatch date/responsible party."""
     order = svc.get_scoped_or_404(order_id, branch_scope)
     carrier = ProformaCarrier.from_order(
         order,

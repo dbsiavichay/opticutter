@@ -1,6 +1,6 @@
-"""Dominio puro del algoritmo de corte 2D (guillotina).
+"""Pure domain of the 2D (guillotine) cutting algorithm.
 
-Sin dependencias de frameworks: solo dataclasses y lógica de optimización.
+No framework dependencies: just dataclasses and optimization logic.
 """
 
 from src.cutting.enums import (

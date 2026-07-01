@@ -33,9 +33,9 @@ from src.shared.responses import (
     page,
 )
 
-# Pre-órdenes (cotización interna): "administrador" y "vendedor"
-# (RESOURCE_ROLES["preorders"]). El flujo público del cliente vive en
-# ``public_router.py`` y se autentica solo por el token del enlace.
+# Pre-orders (internal quote): "administrador" and "vendedor"
+# (RESOURCE_ROLES["preorders"]). The public client flow lives in
+# ``public_router.py`` and authenticates solely via the link token.
 router = APIRouter(
     prefix="/preorders",
     tags=["preorders"],
@@ -45,13 +45,13 @@ router = APIRouter(
 
 _FORMAT_QUERY = Query(
     default="pdf",
-    description="Formato de salida: 'pdf' (archivo) o 'base64' (JSON)",
+    description="Output format: 'pdf' (file) or 'base64' (JSON)",
     pattern="^(pdf|base64)$",
 )
 
 
 def _detail(svc: PreOrderService, preorder: PreOrderModel) -> PreOrderResponse:
-    """Detalle de la pre-orden con su optimización recalculada (precios vivos)."""
+    """Pre-order detail with its recomputed optimization (live prices)."""
     return PreOrderResponse(
         id=preorder.id,
         code=preorder.code,
@@ -83,10 +83,11 @@ def create_preorder(
     current_user: UserModel = Depends(get_current_user),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Crea una pre-orden (cotización mutable) con los inputs del optimizador.
+    """Creates a pre-order (mutable quote) with the optimizer inputs.
 
-    El operador la crea en su sucursal; el vendedor la predetermina en su sucursal base
-    (puede sobrescribirla con ``branchId``); el admin debe indicar ``branchId``.
+    The operator creates it in their own branch; the seller defaults to their
+    base branch (can override it with ``branchId``); the admin must provide
+    ``branchId``.
     """
     return ok(
         _detail(
@@ -104,25 +105,25 @@ def create_preorder(
 @router.get("/", response_model=PaginatedResponse[PreOrderSummaryResponse])
 def list_preorders(
     status: Optional[PreOrderStatus] = Query(
-        default=None, description="Filtra pre-órdenes por estado"
+        default=None, description="Filter pre-orders by status"
     ),
     client_id: Optional[int] = Query(
-        default=None, alias="clientId", description="Filtra por cliente"
+        default=None, alias="clientId", description="Filter by client"
     ),
     branch_id: Optional[int] = Query(
         default=None,
         alias="branchId",
-        description="Solo roles globales (admin/vendedor): estrecha el listado a una "
-        "sucursal (vacío = todas)",
+        description="Global roles only (admin/seller): narrows the listing to a "
+        "branch (empty = all)",
     ),
     paging: PageParams = Depends(),
     svc: PreOrderService = Depends(preorder_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Lista pre-órdenes (resumen liviano) con filtros y paginación opcionales.
+    """Lists pre-orders (lightweight summary) with optional filters and pagination.
 
-    El operador solo ve las de su sucursal; los roles globales (admin/vendedor) ven
-    todas (o filtran con ``branchId``).
+    The operator only sees the ones in their branch; global roles (admin/seller)
+    see all of them (or filter with ``branchId``).
     """
     items, total = svc.list_preorders(
         status=status,
@@ -141,7 +142,7 @@ def get_preorder(
     svc: PreOrderService = Depends(preorder_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Obtiene una pre-orden por ID con su optimización recalculada."""
+    """Gets a pre-order by ID with its recomputed optimization."""
     return ok(_detail(svc, svc.get_scoped_or_404(preorder_id, branch_scope)))
 
 
@@ -153,7 +154,7 @@ def update_preorder(
     current_user: UserModel = Depends(get_current_user),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Edita una pre-orden abierta (draft/sent)."""
+    """Edits an open pre-order (draft/sent)."""
     return ok(
         _detail(
             svc,
@@ -173,7 +174,7 @@ def delete_preorder(
     svc: PreOrderService = Depends(preorder_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Elimina una pre-orden (salvo si ya fue confirmada)."""
+    """Deletes a pre-order (unless already confirmed)."""
     svc.delete(preorder_id, branch_scope=branch_scope)
 
 
@@ -188,10 +189,10 @@ def create_review_link(
     current_user: UserModel = Depends(get_current_user),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Genera el enlace de revisión del cliente (revoca el anterior si existía).
+    """Generates the client review link (revokes the previous one, if any).
 
-    Transiciona la pre-orden a ``sent``. El token solo se expone en esta respuesta;
-    si se pierde, se regenera.
+    Transitions the pre-order to ``sent``. The token is only exposed in this
+    response; if lost, it must be regenerated.
     """
     link, raw_token = svc.generate(
         preorder_id, actor=staff_actor(current_user), branch_scope=branch_scope
@@ -215,11 +216,11 @@ def get_review_link_info(
     svc: PreOrderReviewService = Depends(preorder_review_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Metadatos del último enlace de revisión (sin el token, irrecuperable)."""
+    """Metadata of the latest review link (without the token, unrecoverable)."""
     return ok(svc.get_latest_info(preorder_id, branch_scope=branch_scope))
 
 
-# Exento de la envoltura JSON: transporte de archivo PDF (StreamingResponse/base64).
+# Exempt from the JSON envelope: PDF file transport (StreamingResponse/base64).
 @router.get("/{preorder_id}/proforma")
 def get_preorder_proforma(
     preorder_id: int,
@@ -227,7 +228,7 @@ def get_preorder_proforma(
     svc: PreOrderService = Depends(preorder_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Proforma comercial recalculada (precios vivos) de la pre-orden."""
+    """Recomputed commercial proforma (live prices) of the pre-order."""
     preorder = svc.get_scoped_or_404(preorder_id, branch_scope)
     carrier = svc.build_carrier(preorder)
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier)

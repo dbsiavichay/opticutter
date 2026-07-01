@@ -42,21 +42,21 @@ from src.shared.exceptions import (
     ValidationError,
 )
 
-# Reubicación de cantos cuando la pieza sale rotada del optimizador. Convención:
-# giro de 90° en sentido horario (top→right→bottom→left→top). El optimizador solo
-# intercambia ancho↔alto, así que fijamos esta convención para dibujar el canto en
-# el lado físico correcto de la pieza ya rotada.
+# Edge relocation when a piece comes out rotated from the optimizer. Convention:
+# 90° clockwise rotation (top→right→bottom→left→top). The optimizer only swaps
+# width↔height, so we fix this convention to draw the edge band on the correct
+# physical side of the already-rotated piece.
 _CW_ROTATION = {"top": "right", "right": "bottom", "bottom": "left", "left": "top"}
 
 
 class OptimizationService:
-    """Orquesta el dominio de corte (``cutting``) y cachea el resultado por hash.
+    """Orchestrates the cutting domain (``cutting``) and caches the result by hash.
 
-    El cómputo es determinista y efímero: se cachea por un hash de las entradas y
-    **no** se persiste en BD (la orden es la fuente de verdad durable). El hash es
-    el identificador con el que se recupera la proforma. El material es agnóstico al
-    origen: un ``MaterialResolver`` traduce catálogo/retazo/manual a dimensiones y
-    costo antes de optimizar, de modo que ``cutting`` solo ve geometría.
+    The computation is deterministic and ephemeral: it's cached by a hash of the
+    inputs and is **not** persisted to the DB (the order is the durable source of
+    truth). The hash is the identifier used to retrieve the proforma. The material
+    is source-agnostic: a ``MaterialResolver`` translates catalog/offcut/manual into
+    dimensions and cost before optimizing, so ``cutting`` only ever sees geometry.
     """
 
     def __init__(self, db: Session):
@@ -66,10 +66,11 @@ class OptimizationService:
         self.settings_service = SettingsService(db)
 
     def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
-        """Calcula (cache-first) y arma la respuesta del endpoint ``POST /optimize``.
+        """Computes (cache-first) and builds the ``POST /optimize`` response.
 
-        El cómputo es agnóstico del cliente: solo se resuelve (y valida) el cliente
-        cuando la petición trae ``client_id``. Sin él, la respuesta es anónima.
+        The computation is client-agnostic: the client is only resolved (and
+        validated) when the request carries a ``client_id``. Without it, the
+        response is anonymous.
         """
         payload, optimization_hash = self.compute(request)
         client = None
@@ -77,8 +78,8 @@ class OptimizationService:
             client = self.db.get(ClientModel, request.client_id)
             if client is None:
                 raise EntityNotFoundError("Client", request.client_id)
-        # El descuento se aplica fuera de la caché de geometría: cada nivel reusa el
-        # mismo payload (cache-first) y solo difiere en el bloque `pricing`.
+        # The discount is applied outside the geometry cache: every tier reuses
+        # the same payload (cache-first) and only differs in the `pricing` block.
         tier = self.settings_service.resolve_price_tier(request.price_tier_code)
         pricing = build_pricing(payload, tier)
         return OptimizeResponse(
@@ -99,12 +100,12 @@ class OptimizationService:
         )
 
     def compute(self, request: OptimizeRequest) -> Tuple[dict, str]:
-        """Calcula (o recupera de caché) el resultado de la optimización.
+        """Computes (or retrieves from cache) the optimization result.
 
-        Cache-first por un hash determinista de entradas (materiales resueltos +
-        requerimientos + parámetros de corte + precios de tapacanto). No escribe en
-        BD: lo reutiliza el módulo de órdenes para congelar el snapshot sin depender
-        de la caché. Devuelve ``(payload, optimization_hash)``.
+        Cache-first via a deterministic hash of the inputs (resolved materials +
+        requirements + cutting parameters + edge-banding prices). Doesn't write to
+        the DB: the orders module reuses it to freeze the snapshot without depending
+        on the cache. Returns ``(payload, optimization_hash)``.
         """
         if not request.requirements:
             raise ValidationError("La lista de piezas no puede estar vacía")
@@ -123,9 +124,9 @@ class OptimizationService:
         )
         waste_factor = settings.edge_banding_waste_factor
 
-        # Resuelve a dimensiones+costo solo los materiales realmente referenciados,
-        # agnóstico al origen (catálogo/retazo/manual). Aquí vive el único punto que
-        # conoce el catálogo; ``cutting`` solo ve geometría.
+        # Resolves only the materials actually referenced into dimensions+cost,
+        # agnostic of source (catalog/offcut/manual). This is the only point that
+        # knows about the catalog; ``cutting`` only ever sees geometry.
         materials_by_key = {m.key: m for m in request.materials}
         resolved: Dict[str, ResolvedMaterial] = {
             key: self.material_resolver.resolve(materials_by_key[key])
@@ -154,8 +155,8 @@ class OptimizationService:
             )[0]
             results.append((edge_map, net_map, layouts))
 
-        # Cobro a la mitad: las planchas de catálogo cuyo contenido cabe en un medio
-        # tablero se reemplazan por el medio (ancho/2, costo/2) antes de armar el payload.
+        # Half-board billing: catalog sheets whose content fits on a half board are
+        # replaced by the half (width/2, cost/2) before the payload is assembled.
         apply_half_boards(results, resolved, cutting_params, strategy)
 
         payload = self._build_result_payload(
@@ -167,18 +168,18 @@ class OptimizationService:
     def _resolve_edge_banding_products(
         self, requirements: List[Requirement]
     ) -> Dict[int, ProductModel]:
-        """Resuelve y valida los productos de tapacanto referenciados por las piezas.
+        """Resolves and validates the edge-banding products referenced by the pieces.
 
-        Mismo contrato que la validación de tableros: 404 si no existe, regla de
-        negocio si el producto no es de tipo ``edge_banding``.
+        Same contract as board validation: 404 if it doesn't exist, business rule
+        error if the product isn't of type ``edge_banding``.
         """
         eb_products: Dict[int, ProductModel] = {}
         for req in requirements:
             if req.edge_banding is None:
                 continue
             pid = req.edge_banding.product_id
-            # Canto solo-geometría (sin producto): aporta metraje pero no se resuelve
-            # ni se cobra hasta que se asigne un producto al cotizar.
+            # Geometry-only edge banding (no product): contributes length but isn't
+            # resolved or charged until a product is assigned at quoting time.
             if pid is None or pid in eb_products:
                 continue
             product = self.product_service.get(pid)
@@ -199,13 +200,13 @@ class OptimizationService:
         eb_products: Dict[int, ProductModel],
         waste_factor: float,
     ) -> str:
-        """Hash sha256 determinista de las entradas que afectan el resultado.
+        """Deterministic sha256 hash of the inputs that affect the result.
 
-        No incluye ``client_id`` (el cómputo no depende del cliente); la dedupe de
-        órdenes sí combina ``client_id`` con este hash. Se calcula sobre los
-        materiales resueltos (origen, dimensiones y costo), los requerimientos, los
-        parámetros de corte y los precios de tapacanto, para invalidar la caché
-        cuando cualquiera cambia.
+        Doesn't include ``client_id`` (the computation doesn't depend on the
+        client); order dedupe does combine ``client_id`` with this hash. Computed
+        over the resolved materials (source, dimensions and cost), the
+        requirements, the cutting parameters and the edge-banding prices, so the
+        cache is invalidated whenever any of them changes.
         """
         materials = {
             key: {
@@ -239,7 +240,7 @@ class OptimizationService:
     def _group_requirements_by_material_key(
         self, requirements: List[Requirement]
     ) -> Dict[str, List[Requirement]]:
-        """Agrupa los requerimientos por la key del material a optimizar."""
+        """Groups the requirements by the key of the material to optimize."""
         requirements_by_key = defaultdict(list)
         for req in requirements:
             requirements_by_key[req.material_key].append(req)
@@ -254,13 +255,13 @@ class OptimizationService:
         max_sheets: int = 100,
         min_rect_size: float = 0.1,
     ) -> Tuple[List[CuttingLayout], List[Piece]]:
-        """Optimiza el layout de corte para un material resuelto (cualquier origen).
+        """Optimizes the cutting layout for a resolved material (any source).
 
-        Recibe las piezas de dominio ya expandidas y con id único (ver
-        ``_build_pieces``): cada instancia física llega con ``quantity=1`` para que el
-        optimizador conserve el id tal cual y la atribución de canto por pieza no
-        dependa de etiquetas ambiguas. ``strategy`` define el perfil de acomodo
-        (eficiencia máxima vs. retazos largos); la regla de split se deriva de él.
+        Receives domain pieces already expanded with a unique id (see
+        ``_build_pieces``): each physical instance arrives with ``quantity=1`` so
+        the optimizer preserves the id as-is and per-piece edge-banding attribution
+        doesn't depend on ambiguous labels. ``strategy`` defines the packing profile
+        (max efficiency vs. long offcuts); the split rule is derived from it.
         """
         if not pieces:
             raise ValidationError("La lista de piezas no puede estar vacía")
@@ -285,18 +286,18 @@ class OptimizationService:
     def _build_pieces(
         self, reqs: List[Requirement]
     ) -> Tuple[List[Piece], Dict[str, EdgeBandingSpec], Dict[str, float]]:
-        """Expande los requerimientos a piezas de dominio con id único por instancia.
+        """Expands the requirements into domain pieces with a unique id per instance.
 
-        El id de pieza es la identidad con la que se atribuye el canto y el metraje a
-        cada pieza colocada, así que **debe** ser único: dos requerimientos distintos
-        con la misma etiqueta (p. ej. varias "Puerta" con cantos diferentes) ya no se
-        colapsan en una sola entrada. Se sufija ``#N`` cuando una etiqueta base tiene
-        más de una instancia física en el grupo —sea por ``quantity > 1`` o por
-        etiquetas repetidas—, unificando ambos casos en una sola regla (antes el
-        optimizador solo sufijaba el caso ``quantity > 1``). Devuelve
-        ``(pieces, edge_map, net_map)`` con los mapas indexados por ese id único; el
-        metraje neto es por instancia (``width`` para ``top/bottom``, ``height`` para
-        ``left/right``, independiente de la rotación), sin multiplicar por cantidad.
+        The piece id is the identity used to attribute edge banding and length to
+        each placed piece, so it **must** be unique: two distinct requirements with
+        the same label (e.g. several "Puerta" with different edge banding) no longer
+        collapse into a single entry. A ``#N`` suffix is added when a base label has
+        more than one physical instance in the group — whether from ``quantity > 1``
+        or repeated labels — unifying both cases under a single rule (previously the
+        optimizer only suffixed the ``quantity > 1`` case). Returns
+        ``(pieces, edge_map, net_map)`` with the maps indexed by that unique id; the
+        net length is per instance (``width`` for ``top/bottom``, ``height`` for
+        ``left/right``, independent of rotation), not multiplied by quantity.
         """
         base = [p.label or f"piece_{i+1}" for i, p in enumerate(reqs)]
         totals: Counter = Counter()
@@ -335,13 +336,14 @@ class OptimizationService:
     def _geometric_edges(
         self, spec: EdgeBandingSpec, eb_products: Dict[int, ProductModel], rotated: bool
     ) -> dict:
-        """Traduce los lados nominales a los lados geométricos de la pieza dibujada.
+        """Translates the nominal sides to the geometric sides of the drawn piece.
 
-        Sin rotar: identidad. Rotada: el optimizador solo intercambia ancho↔alto
-        (un bounding box, sin sentido de giro), así que adoptamos por convención un
-        giro de 90° horario y reubicamos cada canto (``_CW_ROTATION``). Una
-        rotación pura siempre es físicamente realizable, por lo que el canteado
-        asimétrico no impide rotar: simplemente se intercambian los lados.
+        Not rotated: identity. Rotated: the optimizer only swaps width↔height (a
+        bounding box, with no sense of rotation direction), so we adopt the
+        convention of a 90° clockwise turn and relocate each edge band
+        (``_CW_ROTATION``). A pure rotation is always physically realizable, so
+        asymmetric edge banding doesn't prevent rotation: the sides are simply
+        swapped.
         """
         nominal = {s.value for s in spec.sides}
         sides = {_CW_ROTATION[s] for s in nominal} if rotated else nominal
@@ -353,12 +355,12 @@ class OptimizationService:
             "product_id": spec.product_id,
             "code": product.code if product else None,
             "color": attrs.get("color"),
-            # Tipo canónico (``Soft``/``Hard``) para diferenciar la franja en el
-            # diagrama (suave = sólida, duro = rayada). ``None`` en snapshots viejos.
+            # Canonical type (``Soft``/``Hard``) to differentiate the band in the
+            # diagram (soft = solid, hard = hatched). ``None`` in older snapshots.
             "band_type": attrs.get("bandType"),
-            # Notación de taller calculada desde los lados NOMINALES (estable bajo
-            # rotación); ``geo`` solo sirve para pintar las bandas en el lado correcto.
-            # ``attributes`` se persiste en camelCase → ``bandType``.
+            # Workshop notation computed from the NOMINAL sides (stable under
+            # rotation); ``geo`` is only used to draw the bands on the right side.
+            # ``attributes`` is persisted in camelCase → ``bandType``.
             "notation": edge_banding_notation(nominal, attrs.get("bandType")),
         }
 
@@ -368,10 +370,10 @@ class OptimizationService:
         edge_map: Dict[str, EdgeBandingSpec],
         eb_products: Dict[int, ProductModel],
     ) -> None:
-        """Añade ``edges`` (lados geométricos canteados) a cada pieza colocada.
+        """Adds ``edges`` (geometric banded sides) to each placed piece.
 
-        El ``edge_map`` se indexa por el id único de pieza (ver ``_build_pieces``), así
-        que la búsqueda es por el ``piece_id`` exacto de la pieza colocada.
+        ``edge_map`` is indexed by the piece's unique id (see ``_build_pieces``), so
+        the lookup uses the exact ``piece_id`` of the placed piece.
         """
         for placed in layout_dict.get("placed_pieces", []):
             spec = edge_map.get(str(placed.get("piece_id", "")))
@@ -387,12 +389,12 @@ class OptimizationService:
         eb_products: Dict[int, ProductModel],
         waste_factor: float,
     ) -> Tuple[List[dict], float]:
-        """Agrega el metraje de tapacanto por tipo y devuelve ``(summary, total)``.
+        """Aggregates edge-banding length by type and returns ``(summary, total)``.
 
-        El metraje neto es la suma de los lados tapados (``width`` para
-        ``top/bottom``, ``height`` para ``left/right``) por la cantidad; es
-        independiente de la rotación. Se aplica la merma configurada y se redondea
-        al metro entero que se cobra.
+        The net length is the sum of the banded sides (``width`` for
+        ``top/bottom``, ``height`` for ``left/right``) times the quantity; it's
+        independent of rotation. The configured waste factor is applied and the
+        result is rounded up to the whole meter that gets billed.
         """
         waste = waste_factor
         net_mm: Dict[Optional[int], float] = defaultdict(float)
@@ -409,8 +411,8 @@ class OptimizationService:
         summary: List[dict] = []
         total_cost = 0.0
         for pid, mm in net_mm.items():
-            # ``pid is None`` = canto solo-geometría: se reporta el metraje pero sin
-            # identidad de producto ni precio (queda pendiente de asignar al cotizar).
+            # ``pid is None`` = geometry-only edge banding: length is reported but
+            # without product identity or price (pending assignment at quoting time).
             product = eb_products.get(pid)
             attrs = (product.attributes if product else None) or {}
             price = product.price if product else 0.0
@@ -441,15 +443,15 @@ class OptimizationService:
         layouts: List[CuttingLayout],
         resolved: Dict[str, ResolvedMaterial],
     ) -> List[dict]:
-        """Agrega los layouts por material con métricas y costos (cualquier origen).
+        """Aggregates the layouts by material with metrics and costs (any source).
 
-        Lleva la metadata de origen (``material_key``/``source`` y, solo para
-        catálogo, ``product_id``/``product_code``/``product_name``). Para materiales
-        inline cae a la key como código y a las dimensiones como nombre legible, de
-        modo que la proforma renderiza sin tratamiento especial.
+        Carries the origin metadata (``material_key``/``source`` and, for catalog
+        materials only, ``product_id``/``product_code``/``product_name``). For
+        inline materials it falls back to the key as code and the dimensions as a
+        readable name, so the proforma renders without special handling.
         """
-        # Clave compuesta (material, ¿medio?) para que completos y medios del mismo
-        # tablero sean líneas de cobro distintas (distinto ancho, costo y etiqueta).
+        # Composite key (material, half?) so full and half boards of the same
+        # material end up as separate billing lines (different width, cost, label).
         summary: Dict[Tuple[str, bool], dict] = {}
         for layout in layouts:
             key = layout.material.id
@@ -498,13 +500,13 @@ class OptimizationService:
         resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
     ) -> dict:
-        """Vuelca un requirement al payload y le anexa ``band_type`` del tapacanto.
+        """Dumps a requirement to the payload and attaches the edge-banding ``band_type``.
 
-        ``product_code`` lleva la etiqueta del material (código de catálogo, o el
-        nombre/key para orígenes inline) que la proforma muestra en la columna
-        "Tablero". El ``band_type`` vive en los atributos del producto, no en el
-        ``EdgeBandingSpec``; se inyecta aquí para que la proforma arme la notación de
-        cantos (``2L1C CS``) sin volver a resolver el producto al renderizar.
+        ``product_code`` carries the material's label (catalog code, or
+        name/key for inline sources) that the proforma shows in the "Tablero"
+        column. ``band_type`` lives in the product's attributes, not in the
+        ``EdgeBandingSpec``; it's injected here so the proforma can build the edge
+        notation (``2L1C CS``) without re-resolving the product at render time.
         """
         rm = resolved.get(req.material_key)
         material_label = (rm.code or rm.name) if rm else None
@@ -515,7 +517,7 @@ class OptimizationService:
         if req.edge_banding is not None and data.get("edge_banding"):
             product = eb_products.get(req.edge_banding.product_id)
             attrs = (product.attributes if product else None) or {}
-            # ``attributes`` se persiste en camelCase → ``bandType``.
+            # ``attributes`` is persisted in camelCase → ``bandType``.
             data["edge_banding"]["band_type"] = attrs.get("bandType")
         return data
 
@@ -529,21 +531,20 @@ class OptimizationService:
         eb_products: Dict[int, ProductModel],
         waste_factor: float,
     ) -> dict:
-        """Arma el payload cacheable/serializable del resultado de optimización.
+        """Builds the cacheable/serializable payload for the optimization result.
 
-        Mismas claves que consumen ``proforma`` y el snapshot de las órdenes.
-        ``results`` agrupa por material como ``(edge_map, net_map, layouts)`` (mapas
-        indexados por el id único de pieza de ``_build_pieces``) para enriquecer cada
-        pieza colocada con sus lados canteados y su metraje sin colisión de ids.
+        Same keys consumed by ``proforma`` and the order snapshot. ``results``
+        groups by material as ``(edge_map, net_map, layouts)`` (maps indexed by the
+        unique piece id from ``_build_pieces``) to enrich each placed piece with its
+        banded sides and length without id collisions.
         """
         all_layouts = [layout for _, _, layouts in results for layout in layouts]
         total_boards_used = len(all_layouts)
         total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
 
-        # Métricas por plancha (corte = recorrido de sierra; canto = metraje neto de
-        # las piezas colocadas) acumuladas a totales generales. Se inyectan en las
-        # estadísticas del layout antes de ``group_layouts`` para que los patrones
-        # deduplicados hereden las cifras.
+        # Per-sheet metrics (cut = saw travel; edge banding = net length of the
+        # placed pieces) accumulated into overall totals. Injected into the layout
+        # statistics before ``group_layouts`` so deduplicated patterns inherit them.
         layout_dicts: List[dict] = []
         total_cut_linear_m = 0.0
         total_edge_banding_linear_m = 0.0
@@ -590,5 +591,5 @@ class OptimizationService:
 
 
 def optimization_service(db: Session = Depends(get_db)) -> OptimizationService:
-    """Provider de ``OptimizationService`` para inyección en rutas."""
+    """``OptimizationService`` provider for route injection."""
     return OptimizationService(db)

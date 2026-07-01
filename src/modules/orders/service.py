@@ -55,17 +55,17 @@ from src.shared.exceptions import (
 
 
 def _has_payment(payment: Optional[OrderPaymentInput]) -> bool:
-    """True si se registró al menos un monto (> 0) en alguna forma de pago."""
+    """True if at least one amount (> 0) was registered in either payment method."""
     if payment is None:
         return False
     return (payment.cash_amount or 0) > 0 or (payment.credit_amount or 0) > 0
 
 
 class OrderService(BranchScopedMixin):
-    """Crea órdenes (snapshot inmutable), gestiona estados y antiabuso.
+    """Creates orders (immutable snapshot), manages states and anti-abuse.
 
-    Aislada por sucursal (``BranchScopedMixin``): los listados y accesos por id se
-    filtran por la sucursal del usuario; el administrador (scope ``None``) ve todas.
+    Branch-isolated (``BranchScopedMixin``): listings and by-id access are
+    filtered by the user's branch; the admin (scope ``None``) sees all.
     """
 
     model = OrderModel
@@ -89,11 +89,11 @@ class OrderService(BranchScopedMixin):
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[OrderModel], int]:
-        """Lista órdenes (más recientes primero) con conteo total: ``(items, total)``.
+        """Lists orders (most recent first) with total count: ``(items, total)``.
 
-        ``status`` filtra por uno o varios estados (lista vacía/``None`` = todos).
-        ``branch_scope`` aísla al staff a su sucursal; el admin (``None``) ve todas y
-        puede estrechar a una con ``branch_filter``.
+        ``status`` filters by one or more statuses (empty list/``None`` = all).
+        ``branch_scope`` isolates staff to their branch; the admin (``None``)
+        sees all and can narrow to one with ``branch_filter``.
         """
         query = self.db.query(OrderModel)
         if status:
@@ -104,20 +104,20 @@ class OrderService(BranchScopedMixin):
         return orders, total
 
     def create(self, data: OrderCreate, actor: Optional[Actor] = None) -> OrderModel:
-        """Recalcula (cache-first), congela el snapshot y crea la orden.
+        """Recomputes (cache-first), freezes the snapshot and creates the order.
 
-        Idempotente: un re-POST idéntico devuelve la orden activa existente.
-        ``actor`` audita el origen (cliente al confirmar la pre-orden, o sistema).
+        Idempotent: an identical re-POST returns the existing active order.
+        ``actor`` audits the origin (client on pre-order confirmation, or system).
         """
         actor = actor or system_actor()
-        # Regla de negocio: el cliente debe existir y tener un celular registrado
-        # antes de congelar cualquier pedido (también bloquea re-POST sin celular).
+        # Business rule: the client must exist and have a phone number on file
+        # before any order is frozen (this also blocks a re-POST without a phone).
         client = self.db.get(ClientModel, data.client_id)
         if client is None:
             raise EntityNotFoundError("Client", data.client_id)
         require_phone(client)
-        # La sucursal viene del llamador de confianza (la pre-orden al confirmar);
-        # se valida que exista y esté activa. ``branch_scope=None`` ⇒ exige branchId.
+        # The branch comes from a trusted caller (the pre-order on confirmation);
+        # it's validated to exist and be active. ``branch_scope=None`` ⇒ requires branchId.
         branch_id = resolve_branch_for_create(self.db, None, data.branch_id)
 
         opt_request = OptimizeRequest(
@@ -128,13 +128,14 @@ class OrderService(BranchScopedMixin):
         )
         payload, optimization_hash = self.optimization_service.compute(opt_request)
 
-        # Las órdenes admiten materiales fuera del catálogo (retazos/manual): se
-        # congelan tal cual el snapshot. Sus líneas/piezas quedan con ``product_id``
-        # nulo y se identifican por ``product_code``/``product_name``.
+        # Orders accept materials outside the catalog (offcuts/manual): they're
+        # frozen as-is from the snapshot. Their lines/pieces end up with a null
+        # ``product_id`` and are identified by ``product_code``/``product_name``.
 
-        # Nivel de precio: se valida y se congela su rate (auditoría histórica). El
-        # descuento entra en la dedupe porque dos órdenes idénticas en geometría pero
-        # de distinto nivel NO son la misma (el nivel no está en el hash).
+        # Price tier: validated and its rate frozen (historical audit). The
+        # discount factors into dedupe because two orders that are geometrically
+        # identical but at a different tier are NOT the same order (the tier
+        # isn't part of the hash).
         tier = self.settings_service.resolve_price_tier(data.price_tier_code)
         existing = self._find_active_duplicate(
             branch_id, data.client_id, optimization_hash, tier["code"]
@@ -142,15 +143,15 @@ class OrderService(BranchScopedMixin):
         if existing is not None:
             return existing
 
-        # Descuento a nivel documento (solo tableros de catálogo). Las líneas se
-        # congelan a precio de lista; el snapshot embebe `pricing` para autocontención.
+        # Document-level discount (catalog boards only). Lines are frozen at list
+        # price; the snapshot embeds `pricing` so it's self-contained.
         pricing = build_pricing(payload, tier)
         snapshot = {**payload, "pricing": pricing}
 
-        # La orden nace 'confirmed' (la revisión previa del cliente, antes 'quoted',
-        # vive ahora en la pre-orden, que mintea esta orden al confirmar).
-        # Pista de canteado: arranca 'pending' si la orden lleva tapacantos (algo que
-        # cantear), si no 'not_applicable' (no participa del gate de cierre).
+        # The order is born 'confirmed' (the client's prior review, formerly
+        # 'quoted', now lives in the pre-order, which mints this order on confirmation).
+        # Banding track: starts 'pending' if the order has edge banding (something
+        # to band), else 'not_applicable' (doesn't participate in the closing gate).
         has_banding = bool(payload.get("edge_bandings_summary"))
         banding_status = (
             BandingStatus.pending if has_banding else BandingStatus.not_applicable
@@ -176,7 +177,7 @@ class OrderService(BranchScopedMixin):
             confirmed_at=now,
             created_by=actor.user_id,
         )
-        # Líneas de cobro = tableros usados + tapacantos (productos consumidos).
+        # Billing lines = boards used + edge banding (consumed products).
         order.lines = [
             OrderLineModel(
                 product_id=m["product_id"],
@@ -202,8 +203,8 @@ class OrderService(BranchScopedMixin):
             )
             for e in payload.get("edge_bandings_summary", [])
         ]
-        # Lista de corte = piezas (insumo de producción; no se cobra). El producto
-        # se resuelve por la key del material (nulo si el material no es de catálogo).
+        # Cut list = pieces (production input; not billed). The product is
+        # resolved by the material's key (null if the material isn't from the catalog).
         product_id_by_key = {
             m["material_key"]: m["product_id"] for m in payload.get("materials", [])
         }
@@ -220,8 +221,8 @@ class OrderService(BranchScopedMixin):
             )
             for r in payload["requirements"]
         ]
-        # Plan de corte = tableros físicos con cada pieza colocada (la unidad que
-        # el operario marca en el taller; estado mutable fuera del snapshot).
+        # Cutting plan = physical boards with each placed piece (the unit the
+        # operator marks in the workshop; mutable state outside the snapshot).
         _attach_cutting_plan(order, payload)
         order.history = [
             OrderStatusHistoryModel(
@@ -235,7 +236,7 @@ class OrderService(BranchScopedMixin):
         ]
 
         self.db.add(order)
-        self.db.flush()  # asigna id para componer el code legible
+        self.db.flush()  # assigns id to build the human-readable code
         order.code = f"ORD-{now.year}-{order.id:04d}"
         self.db.commit()
         self.db.refresh(order)
@@ -250,17 +251,17 @@ class OrderService(BranchScopedMixin):
         payment: Optional[OrderPaymentInput] = None,
         branch_scope: Optional[int] = None,
     ) -> OrderModel:
-        """Valida y aplica una transición de estado, registrando el historial.
+        """Validates and applies a state transition, recording the history.
 
-        Verifica que el rol del actor esté autorizado para la transición concreta
-        (TRANSITION_ROLES). Gate de producción: pasar a ``cut`` exige que todas
-        las piezas del plan de corte estén marcadas.
+        Verifies the actor's role is authorized for the specific transition
+        (TRANSITION_ROLES). Production gate: moving to ``cut`` requires every
+        piece in the cutting plan to be marked.
         """
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
         current = OrderStatus(order.status)
 
-        # Validación de rol por transición antes de tocar el estado.
+        # Per-transition role validation before touching the state.
         if actor.role is not None:
             allowed = TRANSITION_ROLES.get((current, to_status), ())
             if allowed and actor.role not in (r.value for r in allowed):
@@ -269,7 +270,7 @@ class OrderService(BranchScopedMixin):
                     f"'{current.value}' → '{to_status.value}'"
                 )
 
-        # Gate: todas las piezas deben estar cortadas antes de cerrar el corte.
+        # Gate: every piece must be cut before the cutting stage can close.
         if to_status == OrderStatus.cut and order.status == OrderStatus.cutting.value:
             self._ensure_cutting_plan(order)
             pending = (
@@ -283,16 +284,16 @@ class OrderService(BranchScopedMixin):
             if pending:
                 raise BusinessRuleError(f"Faltan {pending} pieza(s) por cortar")
 
-        # Gate de cierre: si la orden lleva tapacantos, el canteado debe estar
-        # terminado antes de completarla (las órdenes sin canteado pasan directo).
+        # Closing gate: if the order has edge banding, banding must be finished
+        # before completing it (orders with no banding pass straight through).
         if (
             to_status == OrderStatus.completed
             and BandingStatus(order.banding_status) in BANDING_PENDING_STATUSES
         ):
             raise BusinessRuleError("Falta terminar el canteado")
 
-        # Gate de forma de pago: ingresar a la cola exige registrar cómo paga el
-        # cliente (al menos un monto > 0). Solo informativo, no se valida vs. total.
+        # Payment-method gate: entering the queue requires registering how the
+        # client pays (at least one amount > 0). Informational only, not validated against the total.
         is_payment_capture = (
             to_status == OrderStatus.queued and current == OrderStatus.confirmed
         )
@@ -303,7 +304,7 @@ class OrderService(BranchScopedMixin):
 
         self._apply_transition(order, to_status, actor=actor, note=note)
 
-        # Asignación al transicionar a ``cutting``; limpieza al regresar a ``queued``.
+        # Assignment when transitioning to ``cutting``; cleared when returning to ``queued``.
         if to_status == OrderStatus.cutting:
             order.assigned_to_id = actor.user_id
             order.assigned_at = datetime.utcnow()
@@ -313,14 +314,14 @@ class OrderService(BranchScopedMixin):
             order.assigned_at = None
             order.assigned_to_label = None
 
-        # Despacho: congela fecha y quién entregó (lo muestra la hoja de despacho).
+        # Dispatch: freezes date and who handed it over (shown on the dispatch sheet).
         if to_status == OrderStatus.dispatched:
             order.dispatched_at = datetime.utcnow()
             order.dispatched_by = actor.user_id
             order.dispatched_by_label = actor.label
 
-        # Forma de pago: congela los montos al entrar a la cola (informativo). El
-        # rollback admin cutting → queued no entra aquí (current != confirmed).
+        # Payment method: freezes the amounts on entering the queue (informational).
+        # The admin cutting → queued rollback doesn't hit this (current != confirmed).
         if is_payment_capture:
             order.payment_cash_amount = payment.cash_amount
             order.payment_credit_amount = payment.credit_amount
@@ -332,7 +333,7 @@ class OrderService(BranchScopedMixin):
     def get_cutting_plan(
         self, order_id: int, branch_scope: Optional[int] = None
     ) -> CuttingPlanResponse:
-        """Plan de corte para la vista de taller: tableros físicos + avance."""
+        """Cutting plan for the workshop view: physical boards + progress."""
         order = self.get_scoped_or_404(order_id, branch_scope)
         self._ensure_cutting_plan(order)
         boards = [
@@ -370,11 +371,11 @@ class OrderService(BranchScopedMixin):
         actor: Optional[Actor] = None,
         branch_scope: Optional[int] = None,
     ) -> PieceCutResponse:
-        """Marca (o desmarca) una pieza colocada como cortada, idempotente.
+        """Marks (or unmarks) a placed piece as cut, idempotently.
 
-        Solo con la orden en ``cutting``: antes no hay nada que cortar y después el
-        corte ya quedó cerrado por la transición. ``actor`` registra quién la cortó
-        (FK + etiqueta), en sincronía con ``cut_at``.
+        Only with the order in ``cutting``: before that there's nothing to cut,
+        and after that the cutting stage is already closed by the transition.
+        ``actor`` records who cut it (FK + label), in sync with ``cut_at``.
         """
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
@@ -406,10 +407,10 @@ class OrderService(BranchScopedMixin):
     def list_banding_queue(
         self, branch_scope: Optional[int] = None
     ) -> List[BandingQueueItem]:
-        """Cola de canteado: órdenes con canteado pendiente y corte ya iniciado.
+        """Banding queue: orders with pending banding whose cutting has started.
 
-        Vista mínima para el canteador (sin precios ni detalle): solo las órdenes en
-        ``cutting``/``cut`` cuyo canteado aún no terminó. Aislada por sucursal.
+        Minimal view for the bander (no prices or detail): only orders in
+        ``cutting``/``cut`` whose banding hasn't finished yet. Branch-isolated.
         """
         query = self.db.query(OrderModel).filter(
             OrderModel.status.in_([s.value for s in BANDING_MUTABLE_ORDER_STATUSES]),
@@ -435,11 +436,12 @@ class OrderService(BranchScopedMixin):
         actor: Optional[Actor] = None,
         branch_scope: Optional[int] = None,
     ) -> BandingStatusResponse:
-        """Avanza la pista de canteado (``in_progress``/``done``), idempotente.
+        """Advances the banding track (``in_progress``/``done``), idempotently.
 
-        Pista paralela e independiente del corte: solo exige que la orden ya esté en
-        ``cutting``/``cut`` (hay piezas liberadas que cantear). Forward-only; re-aplicar
-        el estado actual no cambia nada. Sella inicio/fin con timestamp + actor.
+        Track parallel to and independent of cutting: only requires the order
+        to already be in ``cutting``/``cut`` (pieces are released to band).
+        Forward-only; re-applying the current status is a no-op. Seals
+        start/finish with a timestamp + actor.
         """
         actor = actor or system_actor()
         order = self.get_scoped_or_404(order_id, branch_scope)
@@ -457,7 +459,7 @@ class OrderService(BranchScopedMixin):
                 "El canteado solo se registra con la orden en corte o cortada"
             )
 
-        # Idempotente: re-aplicar el estado actual es un no-op (no re-sella timestamps).
+        # Idempotent: re-applying the current status is a no-op (timestamps aren't re-sealed).
         if to_status != current:
             if to_status not in BANDING_TRANSITIONS.get(current, set()):
                 raise BusinessRuleError(
@@ -486,10 +488,10 @@ class OrderService(BranchScopedMixin):
         )
 
     def _ensure_cutting_plan(self, order: OrderModel) -> None:
-        """Materializa el plan de corte desde el snapshot si aún no existe.
+        """Materializes the cutting plan from the snapshot if it doesn't exist yet.
 
-        Cubre las órdenes creadas antes de esta funcionalidad sin backfill: la
-        primera lectura/marcado reconstruye las filas desde ``layouts``.
+        Covers orders created before this feature without a backfill: the
+        first read/mark rebuilds the rows from ``layouts``.
         """
         if order.boards:
             return
@@ -505,10 +507,10 @@ class OrderService(BranchScopedMixin):
         actor: Actor,
         note: Optional[str] = None,
     ) -> None:
-        """Valida y aplica la transición sin commit (el llamador persiste).
+        """Validates and applies the transition without committing (caller persists).
 
-        Permite componer la transición con otros cambios (p. ej. marcar el
-        enlace de revisión como usado) en una sola transacción atómica.
+        Lets the transition be composed with other changes (e.g. marking the
+        review link as used) in a single atomic transaction.
         """
         current = OrderStatus(order.status)
         if to_status not in TRANSITIONS.get(current, set()):
@@ -533,10 +535,10 @@ class OrderService(BranchScopedMixin):
         external_invoice_id: str,
         branch_scope: Optional[int] = None,
     ) -> OrderModel:
-        """Asocia (costura de facturación) el ID de la factura externa a la orden.
+        """Associates (billing stitch) the external invoice ID with the order.
 
-        Idempotente con el mismo ID; si ya hay otro asociado lanza ``ConflictError``
-        para no pisar una factura ya emitida.
+        Idempotent with the same ID; if a different one is already associated,
+        raises ``ConflictError`` to avoid overwriting an already-issued invoice.
         """
         order = self.get_scoped_or_404(order_id, branch_scope)
         if (
@@ -555,7 +557,7 @@ class OrderService(BranchScopedMixin):
     def build_export(
         self, order_id: int, branch_scope: Optional[int] = None
     ) -> OrderExportResponse:
-        """Proyecta la orden como documento de facturación neutral (cobro=tableros)."""
+        """Projects the order as a neutral billing document (billing=boards)."""
         order = self.get_scoped_or_404(order_id, branch_scope)
         lines = [
             OrderExportLine(
@@ -589,11 +591,12 @@ class OrderService(BranchScopedMixin):
         optimization_hash: str,
         price_tier_code: str,
     ) -> Optional[OrderModel]:
-        """Orden no terminal de la misma sucursal+cliente con igual hash (idempotencia).
+        """Non-terminal order from the same branch+client with the same hash (idempotency).
 
-        Incluye la sucursal en la clave: el mismo cliente puede pedir lo mismo en dos
-        sucursales y son órdenes distintas. Incluye el nivel de precio: el descuento no
-        forma parte del hash, así que el mismo corte a distinto nivel son dos órdenes.
+        Includes the branch in the key: the same client can order the same
+        thing at two branches and those are different orders. Includes the
+        price tier: the discount isn't part of the hash, so the same cut at a
+        different tier counts as two orders.
         """
         terminal = [s.value for s in TERMINAL_STATUSES]
         return (
@@ -610,11 +613,11 @@ class OrderService(BranchScopedMixin):
 
 
 def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
-    """Expande ``payload["layouts"]`` en tableros físicos + piezas colocadas.
+    """Expands ``payload["layouts"]`` into physical boards + placed pieces.
 
-    Cada layout del snapshot es una hoja real; ``sheet_number`` se reasigna como
-    secuencia global (el del snapshot se reinicia por material). Las piezas
-    quedan ligadas también a la orden para contar avance sin joins.
+    Each layout in the snapshot is a real sheet; ``sheet_number`` is
+    reassigned as a global sequence (the snapshot's resets per material).
+    Pieces are also linked directly to the order to count progress without joins.
     """
     materials_by_key = {m["material_key"]: m for m in payload.get("materials", [])}
     for seq, layout in enumerate(payload.get("layouts", []), start=1):
@@ -631,7 +634,7 @@ def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
             thickness=material.get("thickness", 0.0),
             half_board=bool(material.get("half_board", False)),
             remainders=layout.get("remainders") or None,
-            # Snapshots previos a la serialización de ``cuts`` no traen la clave.
+            # Snapshots predating ``cuts`` serialization don't carry the key.
             cuts=layout.get("cuts") or None,
         )
         for placed in layout.get("placed_pieces", []):
@@ -655,7 +658,7 @@ def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
 
 
 def _progress(pieces: List[OrderPlacedPieceModel]) -> CuttingProgress:
-    """Avance de corte sobre un conjunto de piezas colocadas."""
+    """Cutting progress over a set of placed pieces."""
     return CuttingProgress(
         cut_pieces=sum(1 for p in pieces if p.cut_at is not None),
         total_pieces=len(pieces),
@@ -663,7 +666,7 @@ def _progress(pieces: List[OrderPlacedPieceModel]) -> CuttingProgress:
 
 
 def _piece_response(piece: OrderPlacedPieceModel) -> PlacedPieceResponse:
-    """Proyección API de una pieza colocada (``cut`` derivado de ``cut_at``)."""
+    """API projection of a placed piece (``cut`` derived from ``cut_at``)."""
     return PlacedPieceResponse(
         id=piece.id,
         piece_id=piece.piece_id,
@@ -684,12 +687,12 @@ def _piece_response(piece: OrderPlacedPieceModel) -> PlacedPieceResponse:
 
 
 def _line_description(line: OrderLineModel) -> str:
-    """Descripción legible de una línea de cobro para la factura externa."""
+    """Human-readable description of a billing line for the external invoice."""
     if line.product_code and line.product_name:
         return f"{line.product_name} ({line.product_code})"
     return line.product_name or line.product_code or f"Producto {line.product_id}"
 
 
 def order_service(db: Session = Depends(get_db)) -> OrderService:
-    """Provider de ``OrderService`` para inyección en rutas."""
+    """``OrderService`` provider for route injection."""
     return OrderService(db)

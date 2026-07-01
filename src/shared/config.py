@@ -6,10 +6,10 @@ env = Env()
 
 
 class Config:
-    """Configuración única de la aplicación.
+    """Single application configuration.
 
-    Lee de variables de entorno; los defaults dependen de ``ENVIRONMENT``.
-    Reemplaza la antigua división en ``core/config/{base,local,staging,production}.py``.
+    Reads from environment variables; defaults depend on ``ENVIRONMENT``.
+    Replaces the old split into ``core/config/{base,local,staging,production}.py``.
     """
 
     ENVIRONMENT = env("ENVIRONMENT", "local")
@@ -55,53 +55,54 @@ class Config:
         else env("SECRET_KEY", "dev-secret-change-me")
     )
 
-    # JWT (autenticación). HS256 firma con SECRET_KEY; el access token expira a los
-    # ACCESS_TOKEN_EXPIRE_MINUTES. En producción SECRET_KEY es obligatorio (arriba);
-    # en otros entornos cae a un placeholder de desarrollo. El access token es corto
-    # (renovable vía /auth/refresh): el front presenta el refresh token y obtiene un
-    # par nuevo. REFRESH_TOKEN_EXPIRE_DAYS acota la vida del refresh (opaco, revocable).
+    # JWT (authentication). HS256 signs with SECRET_KEY; the access token expires
+    # after ACCESS_TOKEN_EXPIRE_MINUTES. In production SECRET_KEY is mandatory
+    # (above); other environments fall back to a development placeholder. The
+    # access token is short-lived (renewable via /auth/refresh): the frontend
+    # presents the refresh token and gets a new pair. REFRESH_TOKEN_EXPIRE_DAYS
+    # bounds the refresh token's lifetime (opaque, revocable).
     JWT_ALGORITHM = env("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
     REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
-    # Factor de coste de bcrypt al hashear contraseñas (rounds = 2**factor iteraciones).
-    # 12 es un default seguro para prod/dev; la suite de tests lo baja a 4 (hashes válidos,
-    # ~16× más rápidos) para no pagar el coste deliberado de bcrypt en cada fixture.
+    # bcrypt cost factor when hashing passwords (rounds = 2**factor iterations).
+    # 12 is a safe default for prod/dev; the test suite lowers it to 4 (still valid
+    # hashes, ~16x faster) to avoid paying bcrypt's deliberate cost in every fixture.
     BCRYPT_ROUNDS = env.int("BCRYPT_ROUNDS", 12)
 
-    # Semilla del primer administrador (migración idempotente). Si ambos están
-    # definidos y no existe un usuario con ese email, la migración lo crea con rol
-    # "administrador". Vacíos = no se siembra nada.
+    # First admin seed (idempotent migration). If both are set and no user exists
+    # with that email, the migration creates it with role "administrador". Empty =
+    # nothing is seeded.
     ADMIN_EMAIL = env("ADMIN_EMAIL", "")
     ADMIN_PASSWORD = env("ADMIN_PASSWORD", "")
 
-    # Parámetros de corte (mm). Solo siembran la fila singleton de `settings` en su
-    # primera lectura; la fuente de verdad en runtime es la tabla `settings`
-    # (editable vía PATCH /settings/cutting).
+    # Cutting parameters (mm). Only seed the `settings` singleton row on its first
+    # read; the runtime source of truth is the `settings` table (editable via
+    # PATCH /settings/cutting).
     KERF = env.float("KERF", 5.0)
     TOP_TRIM = env.float("TOP_TRIM", 0.0)
     BOTTOM_TRIM = env.float("BOTTOM_TRIM", 0.0)
     LEFT_TRIM = env.float("LEFT_TRIM", 0.0)
     RIGHT_TRIM = env.float("RIGHT_TRIM", 0.0)
 
-    # Tapacantos: merma (sobrante de canteadora) aplicada al metraje neto antes de
-    # redondear al metro entero que se cobra. 0.10 = +10%.
+    # Edge banding: waste (offcut from the edge-banding machine) applied to the net
+    # length before rounding up to the whole meter that gets billed. 0.10 = +10%.
     EDGE_BANDING_WASTE_FACTOR = env.float("EDGE_BANDING_WASTE_FACTOR", 0.10)
 
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
-    # Pre-órdenes (cotización mutable): vigencia y tope de abiertas por cliente. Solo
-    # siembran la sección "preorders" de la fila singleton de `settings` en su primera
-    # lectura; la fuente de verdad en runtime es la tabla `settings` (editable vía
-    # PATCH /settings/preorders), igual que los parámetros de corte.
+    # Pre-orders (mutable quote): validity period and open-count cap per client.
+    # Only seed the "preorders" section of the `settings` singleton row on its
+    # first read; the runtime source of truth is the `settings` table (editable
+    # via PATCH /settings/preorders), same as the cutting parameters.
     PREORDER_VALIDITY_DAYS = env.int("PREORDER_VALIDITY_DAYS", 15)
     MAX_OPEN_PREORDERS_PER_CLIENT = env.int("MAX_OPEN_PREORDERS_PER_CLIENT", 5)
 
-    # Niveles de precio (descuento sobre el precio base "Precio Consumidor"). Solo
-    # siembran la columna `price_tiers` de la fila singleton de `settings` en su primera
-    # lectura; la fuente de verdad en runtime es la tabla `settings` (editable vía
-    # PATCH /settings/price-tiers). El descuento se aplica solo a tableros de catálogo y
-    # se congela en la orden (auditoría histórica aunque luego cambien las tarifas).
+    # Price tiers (discount over the base "Precio Consumidor" price). Only seed
+    # the `price_tiers` column of the `settings` singleton row on its first read;
+    # the runtime source of truth is the `settings` table (editable via PATCH
+    # /settings/price-tiers). The discount applies only to catalog boards and is
+    # frozen into the order (historical audit even if rates change later).
     PRICE_TIERS = env.json(
         "PRICE_TIERS",
         [
@@ -129,14 +130,14 @@ class Config:
         ],
     )
 
-    # Base del frontend de Maderable: compone la URL del enlace de revisión que
-    # abre el cliente (el origen debe estar también en CORS_ORIGINS). El dashboard
-    # usa HashRouter, por eso la base termina en "/#" (ruta = {base}/review/{token}).
+    # Maderable frontend base: composes the review link URL the client opens (the
+    # origin must also be in CORS_ORIGINS). The dashboard uses HashRouter, hence
+    # the base ends in "/#" (route = {base}/review/{token}).
     FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3001/#")
 
-    # Datos de la empresa (membrete de la proforma). Valores dummy por defecto que
-    # solo siembran la fila singleton de `settings` en su primera lectura; la fuente
-    # de verdad en runtime es la tabla `settings` (editable vía PATCH /settings/company).
+    # Company data (proforma letterhead). Dummy defaults that only seed the
+    # `settings` singleton row on its first read; the runtime source of truth is
+    # the `settings` table (editable via PATCH /settings/company).
     COMPANY_NAME = env("COMPANY_NAME", "Mi Empresa")
     COMPANY_TAGLINE = env("COMPANY_TAGLINE", "eslogan de la empresa")
     COMPANY_EMAIL = env("COMPANY_EMAIL", "correo@empresa.com")
@@ -150,7 +151,7 @@ class Config:
     )
 
     def get_cors_origins(self) -> List[str]:
-        """Lista de orígenes permitidos para CORS."""
+        """List of allowed CORS origins."""
         return self.CORS_ORIGINS
 
     def is_development(self) -> bool:

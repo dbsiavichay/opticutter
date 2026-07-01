@@ -1,4 +1,4 @@
-"""Tests de la agrupación de layouts por patrón de corte (lógica pura)."""
+"""Tests for grouping layouts by cutting pattern (pure logic)."""
 
 from src.modules.optimizations.patterns import (
     base_label,
@@ -8,7 +8,7 @@ from src.modules.optimizations.patterns import (
 
 
 def _layout(sheet_number, pieces, material_key="b1"):
-    """Construye un layout mínimo con la forma de ``CuttingLayout.to_dict``."""
+    """Builds a minimal layout shaped like ``CuttingLayout.to_dict``."""
     return {
         "material": {"material_key": material_key, "sheet_number": sheet_number},
         "placed_pieces": [
@@ -34,8 +34,8 @@ def test_base_label_strips_single_instance_suffix():
 
 
 def test_base_label_preserves_labels_ending_in_underscore_number():
-    """``#`` separa la instancia: las etiquetas que terminan en ``_<n>`` (auto-label
-    ``piece_1`` o de usuario ``estante_2``) no se mutilan."""
+    """``#`` separates the instance: labels ending in ``_<n>`` (auto-label
+    ``piece_1`` or user label ``estante_2``) are not mangled."""
     assert base_label("piece_1") == "piece_1"
     assert base_label("estante_2") == "estante_2"
     assert base_label("estante_2#3") == "estante_2"

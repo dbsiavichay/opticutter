@@ -19,7 +19,7 @@ from src.shared.responses import (
 
 router = APIRouter(prefix="/products", tags=["products"], responses=ERROR_RESPONSES)
 
-# Lectura del catálogo: admin + vendedor. Escritura: solo admin.
+# Catalog read: admin + vendedor. Write: admin only.
 _READ = Depends(require_permission("products:read"))
 _WRITE = Depends(require_permission("products:write"))
 
@@ -31,7 +31,7 @@ _WRITE = Depends(require_permission("products:write"))
     dependencies=[_WRITE],
 )
 def create_product(data: ProductCreate, svc: ProductService = Depends(product_service)):
-    """Crea un producto (los ``attributes`` se validan según el ``type``)."""
+    """Creates a product (``attributes`` are validated according to ``type``)."""
     return ok(svc.create(data))
 
 
@@ -40,13 +40,11 @@ def create_product(data: ProductCreate, svc: ProductService = Depends(product_se
 )
 def list_products(
     paging: PageParams = Depends(),
-    type: Optional[ProductType] = Query(
-        None, description="Filtra por tipo de producto"
-    ),
-    search: Optional[str] = Query(None, description="Búsqueda por nombre o código"),
+    type: Optional[ProductType] = Query(None, description="Filter by product type"),
+    search: Optional[str] = Query(None, description="Search by name or code"),
     svc: ProductService = Depends(product_service),
 ):
-    """Lista productos con filtro por tipo, búsqueda y paginación opcionales."""
+    """Lists products with optional type filter, search, and pagination."""
     items, total = svc.search_paginated(search, type, paging.limit, paging.offset)
     return page(items, total, paging.limit, paging.offset)
 
@@ -59,15 +57,15 @@ def list_products(
 def get_board_edge_bandings(
     board_id: int,
     band_type: Optional[BandType] = Query(
-        None, description="Filtra por tipo de canto: Soft o Hard"
+        None, description="Filter by band type: Soft or Hard"
     ),
     svc: ProductService = Depends(product_service),
 ):
-    """Tapacantos coordinados con un tablero (mismo diseño y ancho según grosor).
+    """Edge bandings coordinated with a board (same design and width-by-thickness).
 
-    Empareja por la clave de diseño del código (evita falsos positivos por nombre)
-    y aplica la regla grosor→ancho. ``data`` vacío significa que no hay tapacanto
-    coordinado para esa combinación.
+    Matches on the design key derived from the code (avoids false positives by
+    name) and applies the thickness→width rule. An empty ``data`` means there's
+    no coordinated edge banding for that combination.
     """
     return ok(svc.find_edge_bandings_for_board(board_id, band_type))
 
@@ -76,7 +74,7 @@ def get_board_edge_bandings(
     "/{product_id}", response_model=DataResponse[ProductResponse], dependencies=[_READ]
 )
 def get_product(product_id: int, svc: ProductService = Depends(product_service)):
-    """Obtiene un producto por ID."""
+    """Gets a product by ID."""
     return ok(svc.get_or_404(product_id))
 
 
@@ -84,7 +82,7 @@ def get_product(product_id: int, svc: ProductService = Depends(product_service))
     "/code/{code}", response_model=DataResponse[ProductResponse], dependencies=[_READ]
 )
 def get_product_by_code(code: str, svc: ProductService = Depends(product_service)):
-    """Obtiene un producto por código."""
+    """Gets a product by code."""
     product = svc.get_by_code(code)
     if product is None:
         raise EntityNotFoundError("Product", code)
@@ -99,11 +97,11 @@ def update_product(
     data: ProductUpdate,
     svc: ProductService = Depends(product_service),
 ):
-    """Actualiza un producto."""
+    """Updates a product."""
     return ok(svc.update(product_id, data))
 
 
 @router.delete("/{product_id}", status_code=204, dependencies=[_WRITE])
 def delete_product(product_id: int, svc: ProductService = Depends(product_service)):
-    """Elimina un producto."""
+    """Deletes a product."""
     svc.delete(product_id)

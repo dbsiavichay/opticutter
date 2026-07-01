@@ -14,11 +14,11 @@ from src.shared.database import get_db
 class OptimizationDraftService(
     BranchScopedMixin, CRUDService[OptimizationDraftModel, DraftCreate, DraftUpdate]
 ):
-    """CRUD de borradores del optimizador, aislado por sucursal.
+    """CRUD for optimizer drafts, branch-scoped.
 
-    Sin optimización, sin antiabuso, sin gate de teléfono ni cap: un borrador es
-    trabajo en progreso editable. El ``BranchScopedMixin`` aísla el trabajo en curso
-    entre sucursales (el admin —scope ``None``— ve todos).
+    No optimization, no anti-abuse, no phone gate or cap: a draft is editable
+    work in progress. ``BranchScopedMixin`` isolates work in progress between
+    branches (the admin — scope ``None`` — sees all of them).
     """
 
     model = OptimizationDraftModel
@@ -29,11 +29,12 @@ class OptimizationDraftService(
         branch_scope: Optional[int] = None,
         default_branch_id: Optional[int] = None,
     ) -> OptimizationDraftModel:
-        """Crea un borrador en la sucursal resuelta desde el scope.
+        """Creates a draft in the branch resolved from the scope.
 
-        El operador lo fija en la suya; los roles globales (admin/vendedor) usan
-        ``data.branch_id`` o, si no viene, la ``default_branch_id`` (sucursal base del
-        creador — el vendedor la predetermina, el admin debe indicar ``branchId``).
+        The operator is pinned to their own; global roles (admin/seller) use
+        ``data.branch_id`` or, if missing, ``default_branch_id`` (the creator's
+        base branch — the seller defaults to one, the admin must provide
+        ``branchId``).
         """
         branch_id = resolve_branch_for_create(
             self.db, branch_scope, data.branch_id, default_branch_id
@@ -50,7 +51,7 @@ class OptimizationDraftService(
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[OptimizationDraftModel], int]:
-        """Lista borradores aplicando el aislamiento por sucursal."""
+        """Lists drafts applying branch isolation."""
         query = self._apply_branch_scope(
             self.db.query(OptimizationDraftModel), branch_scope, branch_filter
         )
@@ -59,12 +60,12 @@ class OptimizationDraftService(
     def update_scoped(
         self, id: int, data: DraftUpdate, branch_scope: Optional[int] = None
     ) -> OptimizationDraftModel:
-        """Actualiza un borrador verificando antes que sea de la sucursal del usuario."""
+        """Updates a draft after verifying it belongs to the user's branch."""
         self.get_scoped_or_404(id, branch_scope)
         return self.update(id, data)
 
     def delete_scoped(self, id: int, branch_scope: Optional[int] = None) -> None:
-        """Elimina un borrador verificando antes que sea de la sucursal del usuario."""
+        """Deletes a draft after verifying it belongs to the user's branch."""
         self.get_scoped_or_404(id, branch_scope)
         self.delete(id)
 
@@ -72,5 +73,5 @@ class OptimizationDraftService(
 def optimization_draft_service(
     db: Session = Depends(get_db),
 ) -> OptimizationDraftService:
-    """Provider de ``OptimizationDraftService`` para inyección en rutas."""
+    """Provider for ``OptimizationDraftService`` injection in routes."""
     return OptimizationDraftService(db)

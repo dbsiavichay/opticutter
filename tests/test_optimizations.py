@@ -1,4 +1,4 @@
-"""Tests del módulo optimizations: flujo de optimize (geometría + costos)."""
+"""Tests for the optimizations module: optimize flow (geometry + costs)."""
 
 import pytest
 
@@ -51,7 +51,7 @@ def _optimize_payload(client_id, product_id):
 
 
 def _full_board_payload(client_id, product_id, quantity=2):
-    """Job que exige tablero(s) completo(s): pieza con ambos lados > medio ancho (610)."""
+    """Job requiring full board(s): piece with both sides > half width (610)."""
     return {
         "clientId": client_id,
         "materials": [{"key": "b1", "source": "catalog", "productId": product_id}],
@@ -88,13 +88,13 @@ def test_optimize_returns_layouts(client):
     assert layout["material"]["sheetNumber"] == 1
     assert "efficiency" in layout["statistics"]
     assert layout["placedPieces"][0]["originalWidth"] == 600
-    # Cortes de guillotina expuestos para dibujar las líneas de sierra.
-    assert layout["cuts"], "colocar piezas genera recorridos de sierra"
+    # Guillotine cuts exposed for drawing the saw lines.
+    assert layout["cuts"], "placing pieces generates saw paths"
     assert set(layout["cuts"][0]) == {"x", "y", "length", "isHorizontal"}
 
 
 def test_optimize_reports_cut_linear_meters(client):
-    """La respuesta expone metros de corte por plancha y el total general (= suma)."""
+    """The response exposes cut meters per sheet and the overall total (= sum)."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 
@@ -117,7 +117,7 @@ def test_optimize_reports_cut_linear_meters(client):
 
 
 def test_carrier_exposes_linear_meter_totals():
-    """``from_payload`` expone los totales nuevos; un payload viejo cae a 0.0."""
+    """``from_payload`` exposes the new totals; an old payload falls back to 0.0."""
     from src.modules.optimizations.carrier import ProformaCarrier
 
     carrier = ProformaCarrier.from_payload(
@@ -134,7 +134,7 @@ def test_carrier_exposes_linear_meter_totals():
 
 
 def test_optimize_returns_optimization_hash(client):
-    """La respuesta expone el hash determinista de las entradas."""
+    """The response exposes the deterministic hash of the inputs."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 
@@ -148,10 +148,10 @@ def test_optimize_returns_optimization_hash(client):
 
 
 def test_optimize_strategy_changes_hash_and_is_echoed(client):
-    """La heurística `strategy` afecta el hash (cache key distinta) y se refleja.
+    """The `strategy` heuristic affects the hash (different cache key) and is echoed.
 
-    Omitirla equivale a `default`; pasar `longOffcuts` produce otro hash para que
-    no colisione en caché con el acomodo por defecto.
+    Omitting it is equivalent to `default`; passing `longOffcuts` produces a
+    different hash so it doesn't collide in cache with the default packing.
     """
     created_client = _create_client(client)
     created_board = _create_board(client)
@@ -167,17 +167,17 @@ def test_optimize_strategy_changes_hash_and_is_echoed(client):
         "/api/v1/optimize/", json={**base, "strategy": "longOffcuts"}
     ).json()["data"]
 
-    # Echo de la estrategia aplicada.
+    # Echo of the applied strategy.
     assert default_resp["strategy"] == "default"
     assert long_off["strategy"] == "longOffcuts"
-    # Omitir == default explícito (mismo hash de caché).
+    # Omitting == explicit default (same cache hash).
     assert explicit_default["optimizationHash"] == default_resp["optimizationHash"]
-    # Otra estrategia => otro hash (no colisiona la caché).
+    # Different strategy => different hash (no cache collision).
     assert long_off["optimizationHash"] != default_resp["optimizationHash"]
 
 
 def test_optimize_computes_total_boards_cost(client):
-    """El costo total debe ser nº de tableros usados * precio del tablero."""
+    """The total cost must be the number of boards used * board price."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 
@@ -203,7 +203,7 @@ def test_optimize_unknown_product_returns_404(client):
 
 
 def test_optimize_non_board_product_is_rejected(client):
-    """Un producto que no es tablero no es optimizable (regla de negocio 422)."""
+    """A product that is not a board cannot be optimized (422 business rule)."""
     created_client = _create_client(client)
     tapacanto = client.post(
         "/api/v1/products/",
@@ -225,8 +225,8 @@ def test_optimize_non_board_product_is_rejected(client):
 
 
 def test_optimize_without_client_is_anonymous(client):
-    """``POST /optimize`` sin ``clientId`` responde 200 con ``client`` nulo y el
-    mismo hash que con cliente (el cómputo es agnóstico del cliente)."""
+    """``POST /optimize`` without ``clientId`` returns 200 with a null ``client``
+    and the same hash as with a client (the computation is client-agnostic)."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 
@@ -246,7 +246,7 @@ def test_optimize_without_client_is_anonymous(client):
 
 
 def test_optimize_unknown_client_returns_404(client):
-    """Si se envía un ``clientId`` inexistente, la respuesta es 404."""
+    """If a nonexistent ``clientId`` is sent, the response is 404."""
     created_board = _create_board(client)
     resp = client.post(
         "/api/v1/optimize/",
@@ -257,7 +257,7 @@ def test_optimize_unknown_client_returns_404(client):
 
 
 def test_optimize_does_not_persist(client, db_session):
-    """El dual-write se retiró: ``POST /optimize`` no escribe en BD."""
+    """The dual-write was removed: ``POST /optimize`` does not write to the DB."""
     from src.modules.optimizations.model import OptimizationModel
 
     created_client = _create_client(client)
@@ -272,18 +272,18 @@ def test_optimize_does_not_persist(client, db_session):
 
 
 def test_service_rejects_empty_requirements(db_session):
-    """La guarda defensiva de ``compute`` lanza ValidationError (422)."""
+    """The defensive guard in ``compute`` raises ValidationError (422)."""
     request = OptimizeRequest.model_construct(requirements=[], client_id=1)
     with pytest.raises(ValidationError):
         OptimizationService(db_session).compute(request)
 
 
 def test_optimize_deduplicates_identical_patterns(client):
-    """Varias hojas con el mismo patrón se colapsan en un grupo con su conteo."""
+    """Several sheets with the same pattern collapse into one group with its count."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 
-    # Una pieza grande (1700×670) entra una sola vez por tablero → 5 hojas idénticas.
+    # A large piece (1700x670) fits only once per board -> 5 identical sheets.
     payload = {
         "clientId": created_client["id"],
         "materials": [
@@ -305,12 +305,12 @@ def test_optimize_deduplicates_identical_patterns(client):
     assert resp.status_code == 200
     data = resp.json()["data"]
 
-    # El conteo físico se mantiene en 5 (layouts, totales y resumen de materiales).
+    # The physical count stays at 5 (layouts, totals, and materials summary).
     assert data["totalBoardsUsed"] == 5
     assert len(data["layouts"]) == 5
     assert data["materialsSummary"][0]["count"] == 5
 
-    # Pero los patrones se deduplican en un único grupo con count == 5.
+    # But patterns are deduplicated into a single group with count == 5.
     groups = data["layoutGroups"]
     assert len(groups) == 1
     group = groups[0]
@@ -322,7 +322,7 @@ def test_optimize_deduplicates_identical_patterns(client):
 
 
 def test_optimize_includes_materials_summary(client):
-    """materials_summary agrupa por tipo de tablero con código, cantidad y costo."""
+    """materials_summary groups by board type with code, quantity, and cost."""
     created_client = _create_client(client)
     created_board = _create_board(client, code="MEL18")
 
@@ -347,7 +347,7 @@ def test_optimize_includes_materials_summary(client):
 
 
 # --------------------------------------------------------------------------- #
-# Material agnóstico al origen (catálogo / manual / retazo / mixto)
+# Source-agnostic material (catalog / manual / offcut / mixed)
 # --------------------------------------------------------------------------- #
 def _manual_material(key="m1", height=2000, width=1000, thickness=18, cost=30.0):
     return {
@@ -362,7 +362,7 @@ def _manual_material(key="m1", height=2000, width=1000, thickness=18, cost=30.0)
 
 
 def test_optimize_with_manual_material(client):
-    """Una medida manual (sin catálogo) se optimiza por dimensiones y costo."""
+    """A manual measurement (no catalog) is optimized by dimensions and cost."""
     c = _create_client(client)
     payload = {
         "clientId": c["id"],
@@ -395,7 +395,7 @@ def test_optimize_with_manual_material(client):
 
 
 def test_optimize_with_company_offcut_material(client):
-    """Un retazo de empresa se trata igual: dimensiones inline, sin producto."""
+    """A company offcut is treated the same: inline dimensions, no product."""
     c = _create_client(client)
     payload = {
         "clientId": c["id"],
@@ -425,13 +425,13 @@ def test_optimize_with_company_offcut_material(client):
     entry = resp.json()["data"]["materialsSummary"][0]
     assert entry["source"] == "companyOffcut"
     assert entry["productId"] is None
-    # Sin label ni código de catálogo cae a la key / dimensiones legibles.
+    # With no label or catalog code, it falls back to the key / readable dimensions.
     assert entry["productCode"] == "r1"
     assert entry["productName"] == "600×1200"
 
 
 def test_optimize_mixed_catalog_and_manual(client):
-    """Catálogo y manual conviven en una misma optimización (stock heterogéneo)."""
+    """Catalog and manual coexist in the same optimization (heterogeneous stock)."""
     c = _create_client(client)
     board = _create_board(client)
     payload = {
@@ -470,7 +470,7 @@ def test_optimize_mixed_catalog_and_manual(client):
 
 
 def test_optimize_unknown_material_key_returns_422(client):
-    """Un requerimiento que referencia una key inexistente es 422 (validación)."""
+    """A requirement referencing a nonexistent key is 422 (validation)."""
     c = _create_client(client)
     board = _create_board(client)
     payload = {
@@ -491,7 +491,7 @@ def test_optimize_unknown_material_key_returns_422(client):
 
 
 def test_optimize_manual_material_hash_is_deterministic(client):
-    """Dos peticiones idénticas con material manual comparten hash (cache-first)."""
+    """Two identical requests with manual material share a hash (cache-first)."""
     c = _create_client(client)
     payload = {
         "clientId": c["id"],
@@ -512,7 +512,7 @@ def test_optimize_manual_material_hash_is_deterministic(client):
 
 
 def test_material_resolver_resolves_each_source(db_session):
-    """El resolver traduce catálogo y fuentes inline a un ResolvedMaterial uniforme."""
+    """The resolver translates catalog and inline sources into a uniform ResolvedMaterial."""
     from src.modules.optimizations.materials import MaterialResolver
     from src.modules.optimizations.schemas import (
         CatalogMaterialInput,
@@ -560,11 +560,11 @@ def test_material_resolver_resolves_each_source(db_session):
     assert manual.to_dict()["source"] == "manual"
 
 
-# --- Medios tableros (cobro a la mitad) ------------------------------------
+# --- Half boards (billed at half price) -----------------------------------
 
 
 def _full_layouts(pieces, width=1220, height=2440, cost=45.5):
-    """Optimiza ``pieces`` sobre un tablero completo y devuelve los layouts."""
+    """Optimizes ``pieces`` over a full board and returns the layouts."""
     from src.cutting import (
         CuttingParameters,
         Material,
@@ -602,7 +602,7 @@ def _resolved(source="catalog", product_id=1, width=1220, height=2440, cost=45.5
 
 
 def test_apply_half_boards_downgrades_fitting_board():
-    """Una plancha de catálogo cuyo contenido cabe en medio pasa a medio tablero."""
+    """A catalog sheet whose content fits in half becomes a half board."""
     from src.cutting import CuttingParameters, PackingStrategy, Piece
     from src.modules.optimizations.half_boards import apply_half_boards
 
@@ -616,18 +616,18 @@ def test_apply_half_boards_downgrades_fitting_board():
     assert len(out) == 1
     board = out[0]
     assert board.material.half_board is True
-    assert board.material.width == 610  # ancho/2, largo intacto
+    assert board.material.width == 610  # width/2, length unchanged
     assert board.material.height == 2440
-    assert board.material.cost_per_unit == 22.75  # precio/2
-    assert len(board.placed_pieces) == 1  # no se pierden piezas
+    assert board.material.cost_per_unit == 22.75  # price/2
+    assert len(board.placed_pieces) == 1  # no pieces are lost
 
 
 def test_apply_half_boards_keeps_wide_board_full():
-    """Una pieza más ancha que medio (en ambos ejes) mantiene el tablero completo."""
+    """A piece wider than half (on both axes) keeps the board full."""
     from src.cutting import CuttingParameters, PackingStrategy, Piece
     from src.modules.optimizations.half_boards import apply_half_boards
 
-    # 700×800: ambos lados > 610, no entra en un medio (610 de ancho).
+    # 700x800: both sides > 610, doesn't fit in a half (610 wide).
     layouts = _full_layouts([Piece(id="p1", width=700, height=800)])
     results = [({}, {}, layouts)]
     apply_half_boards(
@@ -641,7 +641,7 @@ def test_apply_half_boards_keeps_wide_board_full():
 
 
 def test_apply_half_boards_skips_non_catalog():
-    """Retazos/manual no se vuelven medio aunque su contenido quepa (van a costo)."""
+    """Offcuts/manual never become half even if content fits (priced at full cost)."""
     from src.cutting import CuttingParameters, PackingStrategy, Piece
     from src.modules.optimizations.half_boards import apply_half_boards
 
@@ -660,9 +660,9 @@ def test_apply_half_boards_skips_non_catalog():
 
 
 def test_optimize_charges_half_board_for_sparse_job(client):
-    """Un trabajo chico de catálogo se cobra como medio tablero (precio/2)."""
+    """A small catalog job is billed as a half board (price/2)."""
     created_client = _create_client(client)
-    created_board = _create_board(client)  # 2440×1220, precio 45.5
+    created_board = _create_board(client)  # 2440x1220, price 45.5
 
     payload = {
         "clientId": created_client["id"],
@@ -698,7 +698,7 @@ def test_optimize_charges_half_board_for_sparse_job(client):
 
 
 def test_optimize_keeps_full_board_for_wide_job(client):
-    """Un trabajo con una pieza ancha se cobra como tablero completo."""
+    """A job with a wide piece is billed as a full board."""
     created_client = _create_client(client)
     created_board = _create_board(client)
 

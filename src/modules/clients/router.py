@@ -15,7 +15,7 @@ from src.shared.responses import (
     page,
 )
 
-# Gestión de clientes: "administrador" y "vendedor" (RESOURCE_ROLES["clients:manage"]).
+# Client management: "administrador" and "vendedor" (RESOURCE_ROLES["clients:manage"]).
 router = APIRouter(
     prefix="/clients",
     tags=["clients"],
@@ -26,16 +26,16 @@ router = APIRouter(
 
 @router.post("/", response_model=DataResponse[ClientResponse], status_code=201)
 def create_client(data: ClientCreate, svc: ClientService = Depends(client_service)):
-    """Crea un nuevo cliente."""
+    """Creates a new client."""
     return ok(svc.create(data))
 
 
 @router.post("/resolve", response_model=DataResponse[ClientResponse])
 def resolve_client(data: ClientCreate, svc: ClientService = Depends(client_service)):
-    """Obtiene el cliente por identificador o lo crea (idempotente).
+    """Gets the client by identifier or creates it (idempotent).
 
-    Pensado para el bot: resuelve al cliente justo antes de una acción comercial
-    (proforma u orden) en una sola llamada, sin GET + POST condicional.
+    Meant for the bot: it resolves the client right before a commercial action
+    (proforma or order) in a single call, without a conditional GET + POST.
     """
     return ok(svc.resolve(data))
 
@@ -44,11 +44,11 @@ def resolve_client(data: ClientCreate, svc: ClientService = Depends(client_servi
 def list_clients(
     paging: PageParams = Depends(),
     search: Optional[str] = Query(
-        None, description="Búsqueda por identificador, nombre o apellido"
+        None, description="Search by identifier, first name, or last name"
     ),
     svc: ClientService = Depends(client_service),
 ):
-    """Lista clientes con búsqueda y paginación opcionales."""
+    """Lists clients with optional search and pagination."""
     if search:
         items, total = svc.search_paginated(search, paging.limit, paging.offset)
     else:
@@ -58,7 +58,7 @@ def list_clients(
 
 @router.get("/{client_id}", response_model=DataResponse[ClientResponse])
 def get_client(client_id: int, svc: ClientService = Depends(client_service)):
-    """Obtiene un cliente por ID."""
+    """Gets a client by ID."""
     return ok(svc.get_or_404(client_id))
 
 
@@ -66,7 +66,7 @@ def get_client(client_id: int, svc: ClientService = Depends(client_service)):
 def get_client_by_identifier(
     identifier: str, svc: ClientService = Depends(client_service)
 ):
-    """Obtiene un cliente por identificador."""
+    """Gets a client by identifier."""
     client = svc.get_by_identifier(identifier)
     if client is None:
         raise EntityNotFoundError("Client", identifier)
@@ -77,11 +77,11 @@ def get_client_by_identifier(
 def update_client(
     client_id: int, data: ClientUpdate, svc: ClientService = Depends(client_service)
 ):
-    """Actualiza un cliente."""
+    """Updates a client."""
     return ok(svc.update(client_id, data))
 
 
 @router.delete("/{client_id}", status_code=204)
 def delete_client(client_id: int, svc: ClientService = Depends(client_service)):
-    """Elimina un cliente."""
+    """Deletes a client."""
     svc.delete(client_id)

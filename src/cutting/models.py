@@ -4,7 +4,7 @@ from typing import Dict, List
 
 @dataclass
 class Rectangle:
-    """Representa un rectángulo con posición y dimensiones"""
+    """Represents a rectangle with position and dimensions"""
 
     x: float
     y: float
@@ -12,19 +12,19 @@ class Rectangle:
     height: float
 
     def __post_init__(self):
-        """Valida las dimensiones del rectángulo"""
+        """Validates the rectangle's dimensions"""
         if self.width < 0 or self.height < 0:
             raise ValueError(
-                f"Las dimensiones no pueden ser negativas: width={self.width}, height={self.height}"
+                f"Dimensions cannot be negative: width={self.width}, height={self.height}"
             )
 
     @property
     def area(self) -> float:
-        """Calcula el área del rectángulo"""
+        """Computes the rectangle's area"""
         return self.width * self.height
 
     def contains(self, width: float, height: float) -> bool:
-        """Verifica si un rectángulo puede contener dimensiones dadas"""
+        """Checks whether this rectangle can contain the given dimensions"""
         return self.width >= width and self.height >= height
 
     def __repr__(self) -> str:
@@ -33,11 +33,11 @@ class Rectangle:
 
 @dataclass
 class Cut:
-    """Representa un corte de guillotina (segmento de recorrido de la sierra).
+    """Represents a guillotine cut (a saw travel segment).
 
-    ``length`` es el largo del recorrido (eje del corte); el ``kerf`` es el ancho
-    de hoja (perpendicular) y no afecta esta longitud. Se guardan las coordenadas
-    de inicio para un eventual dibujo, aunque el uso inmediato es sumar ``length``.
+    ``length`` is the travel length (cut axis); ``kerf`` is the blade width
+    (perpendicular) and does not affect this length. Start coordinates are kept
+    for eventual drawing, though the immediate use is summing ``length``.
     """
 
     x: float
@@ -48,7 +48,7 @@ class Cut:
 
 @dataclass
 class Piece:
-    """Representa una pieza a cortar"""
+    """Represents a piece to be cut"""
 
     id: str
     width: float
@@ -58,19 +58,17 @@ class Piece:
     priority: int = 0
 
     def __post_init__(self):
-        """Valida las dimensiones de la pieza"""
+        """Validates the piece's dimensions"""
         if self.width <= 0 or self.height <= 0:
             raise ValueError(
-                f"Las dimensiones deben ser positivas: width={self.width}, height={self.height}"
+                f"Dimensions must be positive: width={self.width}, height={self.height}"
             )
         if self.quantity < 1:
-            raise ValueError(
-                f"La cantidad debe ser al menos 1: quantity={self.quantity}"
-            )
+            raise ValueError(f"Quantity must be at least 1: quantity={self.quantity}")
 
     @property
     def area(self) -> float:
-        """Calcula el área de la pieza"""
+        """Computes the piece's area"""
         return self.width * self.height
 
     def __repr__(self) -> str:
@@ -79,7 +77,7 @@ class Piece:
 
 @dataclass
 class PlacedPiece:
-    """Representa una pieza ya colocada en el material"""
+    """Represents a piece already placed on the material"""
 
     piece: Piece
     x: float
@@ -89,7 +87,7 @@ class PlacedPiece:
     rotated: bool = False
 
     def to_dict(self) -> Dict:
-        """Convierte a diccionario para serialización"""
+        """Converts to a dictionary for serialization"""
         return {
             "piece_id": self.piece.id,
             "x": self.x,
@@ -104,32 +102,32 @@ class PlacedPiece:
 
 @dataclass
 class Material:
-    """Representa un material/tablero donde se cortarán las piezas"""
+    """Represents a material/board on which pieces will be cut"""
 
     id: str
     width: float
     height: float
     thickness: float
     cost_per_unit: float = 0.0
-    # Metadato descriptivo: ``True`` si esta plancha es un medio tablero (ancho/2,
-    # costo/2). El algoritmo lo ignora; lo usan las capas superiores para agrupar el
-    # cobro y etiquetar el documento/plan de corte.
+    # Descriptive metadata: ``True`` if this sheet is a half board (width/2,
+    # cost/2). The algorithm ignores it; upper layers use it to group billing
+    # and label the document/cutting plan.
     half_board: bool = False
 
     def __post_init__(self):
-        """Valida las dimensiones del material"""
+        """Validates the material's dimensions"""
         if self.width <= 0 or self.height <= 0:
             raise ValueError(
-                f"Las dimensiones deben ser positivas: width={self.width}, height={self.height}"
+                f"Dimensions must be positive: width={self.width}, height={self.height}"
             )
         if self.thickness < 0:
             raise ValueError(
-                f"El grosor no puede ser negativo: thickness={self.thickness}"
+                f"Thickness cannot be negative: thickness={self.thickness}"
             )
 
     @property
     def area(self) -> float:
-        """Calcula el área del material"""
+        """Computes the material's area"""
         return self.width * self.height
 
     def __repr__(self) -> str:
@@ -138,7 +136,7 @@ class Material:
 
 @dataclass
 class CuttingLayout:
-    """Representa el layout de corte de un material"""
+    """Represents the cutting layout of a material"""
 
     material: Material
     placed_pieces: List[PlacedPiece] = field(default_factory=list)
@@ -148,28 +146,28 @@ class CuttingLayout:
 
     @property
     def used_area(self) -> float:
-        """Calcula el área utilizada (sin considerar kerf)"""
+        """Computes the used area (kerf not included)"""
         return sum(p.width * p.height for p in self.placed_pieces)
 
     @property
     def cut_length(self) -> float:
-        """Largo total de corte (mm): suma del recorrido de la sierra en la plancha."""
+        """Total cut length (mm): sum of the saw's travel across the sheet."""
         return sum(c.length for c in self.cuts)
 
     @property
     def efficiency(self) -> float:
-        """Calcula la eficiencia de uso del material (0-1)"""
+        """Computes the material usage efficiency (0-1)"""
         if self.material.area == 0:
             return 0.0
         return self.used_area / self.material.area
 
     @property
     def waste_area(self) -> float:
-        """Calcula el área desperdiciada"""
+        """Computes the wasted area"""
         return self.material.area - self.used_area
 
     def to_dict(self) -> Dict:
-        """Convierte a diccionario para serialización"""
+        """Converts to a dictionary for serialization"""
         return {
             "material": {
                 "material_key": self.material.id,

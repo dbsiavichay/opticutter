@@ -8,13 +8,13 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class BranchModel(TimestampMixin, AuditMixin, Base):
-    """Sucursal (almacén) del negocio: entidad raíz del aislamiento multi-sucursal.
+    """Business branch (warehouse): root entity of the multi-branch isolation.
 
-    Antes las sucursales solo existían como un JSON de membrete en ``settings``;
-    ahora son una entidad real a la que apuntan órdenes, pre-órdenes, borradores y
-    usuarios (``branch_id``). El staff (vendedor/operador) queda atado a una
-    sucursal; el administrador no (ve y opera todas). La baja es lógica
-    (``is_active``) para no romper las FKs históricas.
+    Branches used to only exist as a letterhead JSON in ``settings``; now
+    they're a real entity that orders, pre-orders, drafts and users point to
+    (``branch_id``). Staff (seller/operator) is bound to a branch; the admin
+    isn't (sees and operates all of them). Deactivation is logical
+    (``is_active``) to avoid breaking historical FKs.
     """
 
     __tablename__ = "branches"

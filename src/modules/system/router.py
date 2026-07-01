@@ -1,4 +1,4 @@
-"""Rutas transversales del sistema: health checks e información de la API."""
+"""Cross-cutting system routes: health checks and API information."""
 
 from fastapi import APIRouter
 
@@ -12,13 +12,13 @@ cutter_router = APIRouter(prefix="/cutter", tags=["cutter"])
 
 @health_router.get("/")
 async def api_health():
-    """Estado básico del servicio."""
+    """Basic service status."""
     return {"status": "healthy", "environment": config.ENVIRONMENT, "version": "1.0.0"}
 
 
 @health_router.get("/ready")
 async def api_ready():
-    """Readiness check (dependencias del servicio)."""
+    """Readiness check (service dependencies)."""
     checks = {
         "redis": True,
     }
@@ -27,7 +27,7 @@ async def api_ready():
 
 @cutter_router.get("/")
 async def info():
-    """Información general de la API de corte."""
+    """General information about the cutting API."""
     return {
         "message": "Cutter API is running",
         "version": "1.0.0",
@@ -42,7 +42,7 @@ async def info():
 
 @cutter_router.get("/status")
 async def status():
-    """Estado operativo de los procesos de corte."""
+    """Operational status of the cutting processes."""
     return {
         "status": "operational",
         "active_processes": 0,

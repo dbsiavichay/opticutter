@@ -18,7 +18,7 @@ from src.shared.security import hash_password, verify_password
 
 
 class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
-    """CRUD de usuarios + autenticación. Hashea la contraseña al crear/actualizar."""
+    """User CRUD + authentication. Hashes the password on create/update."""
 
     model = UserModel
     conflict_messages = {"email": "El email ya está registrado"}
@@ -26,11 +26,10 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
     def _normalize_branch(
         self, role_value: str, branch_id: Optional[int]
     ) -> Optional[int]:
-        """Concilia rol y sucursal: admin global (None); staff exige una válida.
+        """Reconciles role and branch: global admin (None); staff requires a valid one.
 
-        El administrador ve y opera todas las sucursales, así que su ``branch_id``
-        se fuerza a ``None``. Vendedor/operador/canteador deben tener una sucursal
-        existente.
+        The administrator sees and operates all branches, so its ``branch_id`` is
+        forced to ``None``. Seller/operator/bander must have an existing branch.
         """
         if role_value == UserRole.ADMIN.value:
             return None
@@ -45,7 +44,7 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         return branch_id
 
     def create(self, data: UserCreate) -> UserModel:
-        """Crea un usuario hasheando la contraseña; nunca la persiste en claro."""
+        """Creates a user hashing the password; never persists it in plain text."""
         payload = data.model_dump(exclude={"password", "role", "branch_id"})
         user = UserModel(
             **payload,
@@ -56,7 +55,7 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         return self._persist(user)
 
     def update(self, id: int, data: UserUpdate) -> UserModel:
-        """Actualiza un usuario; si llega ``password`` la rehashea."""
+        """Updates a user; rehashes ``password`` when it's included."""
         obj = self.get_or_404(id)
         changes = data.model_dump(exclude_unset=True)
         if "password" in changes:
@@ -65,26 +64,26 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
             changes["role"] = UserRole(changes["role"]).value
         for field, value in changes.items():
             setattr(obj, field, value)
-        # Concilia rol↔sucursal sobre el estado resultante (cubre cambios de rol y/o
-        # de sucursal, y normaliza al admin a sucursal nula).
+        # Reconciles role<->branch over the resulting state (covers role and/or
+        # branch changes, and normalizes the admin to a null branch).
         obj.branch_id = self._normalize_branch(obj.role, obj.branch_id)
         return self._persist(obj)
 
     def update_profile(self, user: UserModel, data: ProfileUpdate) -> UserModel:
-        """Autoservicio: el propio usuario edita su perfil (solo ``full_name``).
+        """Self-service: the user edits their own profile (``full_name`` only).
 
-        No toca ``role``/``is_active``/``email``: eso es gestión y vive en el CRUD
-        solo-admin. Semántica PATCH: solo aplica los campos enviados.
+        Doesn't touch ``role``/``is_active``/``email``: that's management and lives
+        in the admin-only CRUD. PATCH semantics: only applies the fields sent.
         """
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(user, field, value)
         return self._persist(user)
 
     def change_password(self, user: UserModel, current: str, new: str) -> None:
-        """Autoservicio: cambia la propia contraseña verificando la actual.
+        """Self-service: changes the own password after verifying the current one.
 
-        Lanza ``AuthenticationError`` (401) si la contraseña actual no coincide.
-        El caller revoca los refresh tokens para forzar re-login en otros equipos.
+        Raises ``AuthenticationError`` (401) if the current password doesn't match.
+        The caller revokes the refresh tokens to force re-login on other devices.
         """
         if not verify_password(current, user.hashed_password):
             raise AuthenticationError("La contraseña actual es incorrecta")
@@ -92,11 +91,11 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         self._persist(user)
 
     def get_by_email(self, email: str) -> Optional[UserModel]:
-        """Obtiene un usuario por email (identificador de login)."""
+        """Gets a user by email (login identifier)."""
         return self.db.query(UserModel).filter(UserModel.email == email).first()
 
     def authenticate(self, email: str, password: str) -> Optional[UserModel]:
-        """Valida credenciales; devuelve el usuario si están activas y coinciden."""
+        """Validates credentials; returns the user if active and matching."""
         user = self.get_by_email(email)
         if user is None or not user.is_active:
             return None
@@ -107,7 +106,7 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
     def search_paginated(
         self, search: str, limit: int = 20, offset: int = 0
     ) -> Tuple[List[UserModel], int]:
-        """Busca usuarios por email o nombre; ``(items, total)``."""
+        """Searches users by email or name; ``(items, total)``."""
         pattern = f"%{search}%"
         query = self.db.query(UserModel).filter(
             UserModel.email.ilike(pattern) | UserModel.full_name.ilike(pattern)
@@ -116,5 +115,5 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
 
 
 def user_service(db: Session = Depends(get_db)) -> UserService:
-    """Provider de ``UserService`` para inyección en rutas."""
+    """``UserService`` provider for route injection."""
     return UserService(db)

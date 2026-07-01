@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class CuttingParameters:
-    """Parámetros de corte para el optimizador"""
+    """Cutting parameters for the optimizer"""
 
     kerf: float = 0.0
     top_trim: float = 0.0
@@ -13,12 +13,12 @@ class CuttingParameters:
 
     def __post_init__(self):
         if self.kerf < 0:
-            raise ValueError(f"Kerf no puede ser negativo: {self.kerf}")
+            raise ValueError(f"Kerf cannot be negative: {self.kerf}")
         if self.top_trim < 0:
-            raise ValueError(f"Top trim no puede ser negativo: {self.top_trim}")
+            raise ValueError(f"Top trim cannot be negative: {self.top_trim}")
         if self.bottom_trim < 0:
-            raise ValueError(f"Bottom trim no puede ser negativo: {self.bottom_trim}")
+            raise ValueError(f"Bottom trim cannot be negative: {self.bottom_trim}")
         if self.left_trim < 0:
-            raise ValueError(f"Left trim no puede ser negativo: {self.left_trim}")
+            raise ValueError(f"Left trim cannot be negative: {self.left_trim}")
         if self.right_trim < 0:
-            raise ValueError(f"Right trim no puede ser negativo: {self.right_trim}")
+            raise ValueError(f"Right trim cannot be negative: {self.right_trim}")

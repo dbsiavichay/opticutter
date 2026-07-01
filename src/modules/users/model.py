@@ -9,11 +9,11 @@ from src.shared.mixins import AuditMixin, TimestampMixin
 
 
 class UserModel(TimestampMixin, AuditMixin, Base):
-    """Usuario interno del sistema (staff): credenciales + rol.
+    """Internal system user (staff): credentials + role.
 
-    El login es por ``email`` (único). La contraseña nunca se guarda en claro:
-    solo su hash bcrypt en ``hashed_password``. La baja es lógica (``is_active``)
-    para no romper referencias ni perder trazabilidad.
+    Login is by ``email`` (unique). The password is never stored in plain text:
+    only its bcrypt hash in ``hashed_password``. Deactivation is logical
+    (``is_active``) to avoid breaking references or losing traceability.
     """
 
     __tablename__ = "users"
@@ -24,9 +24,9 @@ class UserModel(TimestampMixin, AuditMixin, Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default=UserRole.OPERATOR.value)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Sucursal asignada al staff (vendedor/operador). NULL = administrador global,
-    # que ve y opera todas las sucursales. Editable por el admin (mueve de sucursal);
-    # el cambio surte efecto al instante (la sucursal no viaja en el JWT).
+    # Branch assigned to staff (seller/operator). NULL = global administrator,
+    # who sees and operates all branches. Editable by the admin (moves the branch);
+    # the change takes effect instantly (the branch doesn't travel in the JWT).
     branch_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("branches.id"), index=True, nullable=True
     )

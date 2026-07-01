@@ -4,25 +4,25 @@ from sqlalchemy.orm import Mapped, mapped_column
 from src.shared.database import Base
 from src.shared.mixins import AuditMixin, TimestampMixin
 
-# La configuración es única: una sola fila con este id fijo (patrón singleton).
+# Configuration is unique: a single row with this fixed id (singleton pattern).
 SETTINGS_ID = 1
 
 
 class SettingsModel(TimestampMixin, AuditMixin, Base):
-    """Configuración única de la aplicación (fila singleton, ``id=1``).
+    """Application's single configuration (singleton row, ``id=1``).
 
-    Persiste lo que antes vivía solo en variables de entorno: los parámetros de
-    corte y los datos de la empresa (membrete de la proforma). La fila se siembra
-    perezosamente desde ``config`` en la primera lectura, por lo que el despliegue
-    es retrocompatible. La fuente de verdad en runtime es esta tabla; ``config``
-    solo aporta los valores iniciales.
+    Persists what used to live only in environment variables: the cutting
+    parameters and company data (proforma letterhead). The row is lazily
+    seeded from ``config`` on first read, so deployment is backward-compatible.
+    This table is the runtime source of truth; ``config`` only supplies the
+    initial values.
     """
 
     __tablename__ = "settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
-    # Parámetros de corte (mm)
+    # Cutting parameters (mm)
     kerf: Mapped[float] = mapped_column(Float)
     top_trim: Mapped[float] = mapped_column(Float)
     bottom_trim: Mapped[float] = mapped_column(Float)
@@ -30,16 +30,16 @@ class SettingsModel(TimestampMixin, AuditMixin, Base):
     right_trim: Mapped[float] = mapped_column(Float)
     edge_banding_waste_factor: Mapped[float] = mapped_column(Float)
 
-    # Pre-órdenes (cotización mutable): vigencia y tope de abiertas por cliente
+    # Pre-orders (mutable quote): validity period and open-orders cap per client
     preorder_validity_days: Mapped[int] = mapped_column(Integer)
     max_open_preorders_per_client: Mapped[int] = mapped_column(Integer)
 
-    # Niveles de precio: lista de tarifas {code, name, rate, is_active, sort_order}.
-    # El descuento (rate) se aplica sobre el precio base de los tableros de catálogo.
-    # Nullable/legacy se tolera leyendo config.PRICE_TIERS por defecto.
+    # Price tiers: list of rates {code, name, rate, is_active, sort_order}.
+    # The discount (rate) is applied to the base price of catalog boards.
+    # Nullable/legacy is tolerated by falling back to config.PRICE_TIERS.
     price_tiers: Mapped[list] = mapped_column(JSON, default=list)
 
-    # Datos de la empresa (membrete de la proforma)
+    # Company data (proforma letterhead)
     company_name: Mapped[str] = mapped_column(String(128))
     company_tagline: Mapped[str] = mapped_column(String(256))
     company_email: Mapped[str] = mapped_column(String(128))

@@ -1,4 +1,4 @@
-"""Tests del módulo users: seguridad, CRUD, login, refresh, autoservicio y RBAC."""
+"""Tests for the users module: security, CRUD, login, refresh, self-service and RBAC."""
 
 import pytest
 
@@ -21,15 +21,15 @@ _PWD = "supersecret123"
 
 @pytest.fixture
 def client(anon_client):
-    """En esta suite ``client`` es el cliente SIN autenticación por defecto.
+    """In this suite ``client`` is the unauthenticated client by default.
 
-    Sobreescribe el ``client`` admin-autenticado de ``conftest`` para poder probar
-    el login, el refresh y el enforcement por rol controlando el header a mano.
+    Overrides the admin-authenticated ``client`` from ``conftest`` so login,
+    refresh and role enforcement can be tested by controlling the header by hand.
     """
     return anon_client
 
 
-# Sucursal por defecto sembrada por conftest (id=1); el staff cuelga de ella.
+# Default branch seeded by conftest (id=1); workshop staff hangs off it.
 _BRANCH = 1
 
 
@@ -65,18 +65,18 @@ def _token(client, email, password=_PWD):
 
 @pytest.fixture
 def auth(client, db_session):
-    """Factory de headers Bearer por rol (siembra el usuario y hace login).
+    """Bearer-header factory per role (seeds the user and logs in).
 
-    ``auth("administrador")`` -> headers autenticados de un admin. Siembra directo
-    en la BD (sin pasar por el CRUD protegido) y reusa la sesión del ``client``.
+    ``auth("administrador")`` -> authenticated headers for an admin. Seeds directly
+    into the DB (bypassing the protected CRUD) and reuses the ``client`` session.
     """
 
     def _for(role: str, email: str | None = None):
         email = email or f"{role}@empresa.com"
         svc = UserService(db_session)
         if svc.get_by_email(email) is None:
-            # El staff (vendedor/operador) cuelga de la sucursal por defecto; el
-            # admin es global (branch_id se ignora y queda en null).
+            # Workshop staff (vendedor/operador) hangs off the default branch; the
+            # admin is global (branch_id is ignored and stays null).
             branch_id = None if role == "administrador" else _BRANCH
             svc.create(
                 UserCreate(
@@ -96,7 +96,7 @@ def _create_user(client, headers, **kw):
     return client.post("/api/v1/users/", json=_user_payload(**kw), headers=headers)
 
 
-# --- Helpers de seguridad (unitarios, sin DB) -------------------------------
+# --- Security helpers (unit, no DB) ------------------------------------------
 
 
 def test_password_hash_round_trip():
@@ -125,17 +125,17 @@ def test_expired_token_raises_authentication_error():
 
 def test_tampered_token_raises_authentication_error():
     token = create_access_token(subject=1, role="vendedor")
-    # Alteramos el PRIMER carácter de la firma (un byte completo). Cambiar el último
-    # carácter base64 era flaky ~6%: solo codifica 4 bits útiles + 2 de relleno, así
-    # que para ciertas firmas decodificaba a los mismos bytes y el token "manipulado"
-    # seguía siendo válido.
+    # We alter the FIRST character of the signature (a whole byte). Changing the
+    # last base64 character was flaky ~6% of the time: it only encodes 4 useful
+    # bits + 2 padding bits, so for some signatures it decoded to the same bytes
+    # and the "tampered" token stayed valid.
     head, _, sig = token.rpartition(".")
     tampered = f"{head}.{'a' if sig[0] != 'a' else 'b'}{sig[1:]}"
     with pytest.raises(AuthenticationError):
         decode_access_token(tampered)
 
 
-# --- require_role / require_permission (unitarios) --------------------------
+# --- require_role / require_permission (unit) --------------------------------
 
 
 def _fake_user(role):
@@ -172,12 +172,12 @@ def test_require_permission_blocks_disallowed_role():
 
 
 def test_require_permission_unknown_key_raises_keyerror():
-    # Un typo en la clave revienta al construir la dependencia (carga del router).
+    # A typo in the key blows up while building the dependency (router import time).
     with pytest.raises(KeyError):
         require_permission("does:not:exist")
 
 
-# --- CRUD de usuarios (vía API, como admin) ---------------------------------
+# --- User CRUD (via API, as admin) -------------------------------------------
 
 
 def test_create_user_hashes_password_and_hides_it(client, auth):
@@ -230,7 +230,7 @@ def test_list_and_search_users(client, auth):
     _create_user(client, admin, email="beto@empresa.com", full_name="Beto")
     all_users = client.get("/api/v1/users/", headers=admin)
     assert all_users.status_code == 200
-    # El admin sembrado por la fixture también cuenta.
+    # The admin seeded by the fixture counts too.
     emails = {u["email"] for u in all_users.json()["data"]}
     assert {"ana@empresa.com", "beto@empresa.com"} <= emails
     found = client.get("/api/v1/users/", params={"search": "ana"}, headers=admin)
@@ -280,11 +280,11 @@ def test_create_user_invalid_role_returns_422(client, auth):
     assert resp.status_code == 422
 
 
-# --- Login / refresh / logout -----------------------------------------------
+# --- Login / refresh / logout --------------------------------------------------
 
 
 def test_login_success_returns_token_pair_and_user(client, auth):
-    auth("administrador")  # siembra + asegura que el login funciona
+    auth("administrador")  # seeds + ensures login works
     resp = _login(client, "administrador@empresa.com", _PWD)
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -299,17 +299,17 @@ def test_login_success_returns_token_pair_and_user(client, auth):
 def test_login_records_event_but_refresh_does_not(client, auth, db_session):
     from src.modules.users.login_event_model import UserLoginEventModel
 
-    auth("vendedor")  # siembra el usuario (incluye un login para el header)
+    auth("vendedor")  # seeds the user (includes a login for the header)
     db_session.query(UserLoginEventModel).delete()
     db_session.commit()
 
     logged = _login(client, "vendedor@empresa.com", _PWD).json()["data"]
     events = db_session.query(UserLoginEventModel).all()
-    assert len(events) == 1  # el login registra exactamente una entrada
+    assert len(events) == 1  # the login records exactly one entry
     assert events[0].user_agent == "testclient"
-    assert events[0].ip_address  # IP capturada
+    assert events[0].ip_address  # captured IP
 
-    # La renovación de token NO es una entrada nueva.
+    # Token refresh is NOT a new entry.
     client.post("/api/v1/auth/refresh", json={"refreshToken": logged["refreshToken"]})
     assert db_session.query(UserLoginEventModel).count() == 1
 
@@ -345,7 +345,7 @@ def test_refresh_rotates_tokens_and_invalidates_old(client, auth):
     new = rotated.json()["data"]
     assert new["accessToken"] and new["refreshToken"]
     assert new["refreshToken"] != first["refreshToken"]
-    # El refresh viejo ya no sirve (rotación).
+    # The old refresh no longer works (rotation).
     reuse = client.post(
         "/api/v1/auth/refresh", json={"refreshToken": first["refreshToken"]}
     )
@@ -363,14 +363,14 @@ def test_refresh_reuse_revokes_whole_family(client, auth):
     second = client.post(
         "/api/v1/auth/refresh", json={"refreshToken": first["refreshToken"]}
     ).json()["data"]
-    # Reusar el primero (ya rotado) dispara la detección de robo.
+    # Reusing the first one (already rotated) triggers theft detection.
     assert (
         client.post(
             "/api/v1/auth/refresh", json={"refreshToken": first["refreshToken"]}
         ).status_code
         == 401
     )
-    # …y revoca también el segundo (familia entera).
+    # …and also revokes the second one (whole family).
     assert (
         client.post(
             "/api/v1/auth/refresh", json={"refreshToken": second["refreshToken"]}
@@ -396,7 +396,7 @@ def test_logout_revokes_refresh_token(client, auth):
     )
 
 
-# --- get_current_user vía /auth/me ------------------------------------------
+# --- get_current_user via /auth/me ---------------------------------------------
 
 
 def test_me_with_valid_token(client, auth):
@@ -428,7 +428,7 @@ def test_me_with_nonnumeric_subject_returns_401(client):
     assert client.get("/api/v1/auth/me", headers=_auth_header(token)).status_code == 401
 
 
-# --- Autoservicio: PATCH /auth/me + change-password -------------------------
+# --- Self-service: PATCH /auth/me + change-password ---------------------------
 
 
 def test_update_me_changes_full_name_only(client, auth):
@@ -441,7 +441,7 @@ def test_update_me_changes_full_name_only(client, auth):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["fullName"] == "Operario Renombrado"
-    # El rol NO se puede auto-cambiar: el campo extra se ignora.
+    # The role CANNOT be self-changed: the extra field is ignored.
     assert data["role"] == "operador"
 
 
@@ -459,14 +459,14 @@ def test_change_password_revokes_sessions_and_rotates_credential(client, auth):
         headers=headers,
     )
     assert resp.status_code == 204
-    # Los refresh previos quedan revocados (cierre de sesiones abiertas).
+    # Previous refresh tokens are revoked (closes open sessions).
     assert (
         client.post(
             "/api/v1/auth/refresh", json={"refreshToken": session["refreshToken"]}
         ).status_code
         == 401
     )
-    # La clave vieja deja de servir; la nueva funciona.
+    # The old password stops working; the new one works.
     assert _login(client, "vendedor@empresa.com", _PWD).status_code == 401
     assert _login(client, "vendedor@empresa.com", "nueva-clave-1").status_code == 200
 
@@ -489,7 +489,7 @@ def test_change_password_requires_auth(client):
     assert resp.status_code == 401
 
 
-# --- Enforcement por permiso (representativo de la matriz) ------------------
+# --- Permission enforcement (representative of the matrix) --------------------
 
 
 def test_users_endpoint_requires_admin(client, auth):
@@ -502,17 +502,17 @@ def test_users_endpoint_requires_admin(client, auth):
 
 def test_products_read_allows_seller(client, auth):
     assert client.get("/api/v1/products/", headers=auth("vendedor")).status_code == 200
-    # El operador no entra al catálogo.
+    # The operador doesn't have access to the catalog.
     assert client.get("/api/v1/products/", headers=auth("operador")).status_code == 403
 
 
 def test_products_write_requires_admin(client, auth):
-    # DELETE no lleva body: la autorización decide antes de tocar el recurso.
+    # DELETE has no body: authorization decides before the resource is touched.
     assert (
         client.delete("/api/v1/products/999", headers=auth("vendedor")).status_code
         == 403
     )
-    # El admin pasa la autorización; el 404 (no existe) prueba que se permitió.
+    # The admin passes authorization; the 404 (doesn't exist) proves it was allowed.
     assert (
         client.delete("/api/v1/products/999", headers=auth("administrador")).status_code
         == 404
@@ -555,14 +555,14 @@ def test_orders_read_allows_operator(client, auth):
 
 
 def test_orders_transition_allows_operator(client, auth):
-    # Operadores tienen acceso al endpoint orders:transition.
-    # El payload inválido da 422 (validación Pydantic), no 403 (auth denegada).
+    # Operadores have access to the orders:transition endpoint.
+    # The invalid payload gives 422 (Pydantic validation), not 403 (auth denied).
     resp = client.patch("/api/v1/orders/999/status", json={}, headers=auth("operador"))
     assert resp.status_code not in (401, 403)
 
 
 def test_cutting_plan_allows_operator(client, auth):
-    # Permitido para operador: el 404 (orden inexistente) prueba que pasó la auth.
+    # Allowed for operador: the 404 (order doesn't exist) proves auth was passed.
     resp = client.get("/api/v1/orders/999/cutting-plan", headers=auth("operador"))
     assert resp.status_code != 403
     assert resp.status_code != 401
@@ -570,11 +570,11 @@ def test_cutting_plan_allows_operator(client, auth):
 
 def test_public_endpoints_need_no_auth(client):
     assert client.get("/api/v1/health/").status_code == 200
-    # El flujo público de revisión se autentica solo por token: sin él, 404 uniforme.
+    # The public review flow authenticates only via token: without it, uniform 404.
     assert client.get("/api/v1/public/review/token-desconocido").status_code == 404
 
 
-# --- Matriz de permisos (spec) ----------------------------------------------
+# --- Permission matrix (spec) --------------------------------------------------
 
 
 def test_permission_matrix_reflects_roles():

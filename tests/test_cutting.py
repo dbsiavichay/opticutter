@@ -1,4 +1,4 @@
-"""Tests del dominio puro de corte (sin frameworks)."""
+"""Tests for the pure cutting domain (no frameworks)."""
 
 import pytest
 
@@ -14,7 +14,7 @@ from src.cutting import (
     SplitRule,
 )
 
-# --- Modelos -------------------------------------------------------------
+# --- Models ----------------------------------------------------------------
 
 
 def test_rectangle_area_and_contains():
@@ -56,7 +56,7 @@ def test_cutting_parameters_reject_negative():
         CuttingParameters(left_trim=-1)
 
 
-# --- Optimizador de una hoja --------------------------------------------
+# --- Single-sheet optimizer -------------------------------------------------
 
 
 def test_guillotine_places_pieces_and_reports_efficiency():
@@ -83,7 +83,7 @@ def test_guillotine_places_pieces_and_reports_efficiency():
     assert as_dict["statistics"]["pieces_count"] == 1
     assert as_dict["material"]["material_key"] == "m1"
     assert as_dict["material"]["sheet_number"] == 1
-    # Los cortes de sierra se serializan (los consume la vista de taller).
+    # Saw cuts are serialized (consumed by the workshop view).
     assert as_dict["cuts"] == [
         {"x": c.x, "y": c.y, "length": c.length, "is_horizontal": c.is_horizontal}
         for c in layout.cuts
@@ -97,14 +97,14 @@ def test_guillotine_empty_pieces_returns_empty():
     assert unplaced == []
 
 
-# --- Metros lineales de corte (reconstrucción exacta) --------------------
+# --- Cut linear meters (exact reconstruction) -------------------------------
 
 
 def test_cut_length_single_piece_vertical_first():
-    """SHORTER_LEFTOVER_AXIS con sobrante menor en ancho → ``vertical_first``.
+    """SHORTER_LEFTOVER_AXIS with a smaller width leftover -> ``vertical_first``.
 
-    Pieza 400(ancho)×300(alto) en tablero 1000×1000 (kerf 0): corte horizontal a
-    ancho completo (1000) + corte vertical al alto de la pieza (300) = 1300 mm.
+    400(width)x300(height) piece on a 1000x1000 board (kerf 0): a horizontal cut
+    at the full width (1000) + a vertical cut at the piece's height (300) = 1300 mm.
     """
     material = Material(id="m1", width=1000, height=1000, thickness=18)
     optimizer = GuillotineOptimizer(
@@ -131,10 +131,10 @@ def test_cut_length_single_piece_vertical_first():
 
 
 def test_cut_length_single_piece_horizontal_first():
-    """Sobrante mayor en ancho → ``horizontal_first``.
+    """A larger width leftover -> ``horizontal_first``.
 
-    Pieza 300(ancho)×600(alto) en tablero 1000×1000 (kerf 0): corte vertical a alto
-    completo (1000) + corte horizontal al ancho de la pieza (300) = 1300 mm.
+    300(width)x600(height) piece on a 1000x1000 board (kerf 0): a vertical cut at
+    the full height (1000) + a horizontal cut at the piece's width (300) = 1300 mm.
     """
     material = Material(id="m1", width=1000, height=1000, thickness=18)
     optimizer = GuillotineOptimizer(
@@ -152,7 +152,7 @@ def test_cut_length_single_piece_horizontal_first():
 
 
 def test_cut_length_full_fill_has_no_cuts():
-    """Una pieza que llena el tablero exacto no genera cortes (no hay sobrante)."""
+    """A piece that exactly fills the board generates no cuts (no leftover)."""
     material = Material(id="m1", width=500, height=500, thickness=18)
     optimizer = GuillotineOptimizer(
         material=material, cutting_params=CuttingParameters(kerf=0)
@@ -173,7 +173,7 @@ def test_guillotine_trims_exceeding_material_raise():
         )
 
 
-# --- Optimizador multi-hoja ---------------------------------------------
+# --- Multi-sheet optimizer ---------------------------------------------------
 
 
 def test_multisheet_uses_several_sheets_when_needed():
@@ -184,7 +184,7 @@ def test_multisheet_uses_several_sheets_when_needed():
         split_rule=SplitRule.SHORTER_LEFTOVER_AXIS,
         max_sheets=10,
     )
-    # 6 piezas grandes que no caben todas en una sola hoja.
+    # 6 large pieces that don't all fit on a single sheet.
     layouts, remaining = optimizer.optimize(
         [Piece(id="big", width=700, height=700, quantity=6)]
     )
@@ -192,7 +192,7 @@ def test_multisheet_uses_several_sheets_when_needed():
     assert len(layouts) >= 2
     assert remaining == []
     assert all(isinstance(layout, CuttingLayout) for layout in layouts)
-    # El material conserva el board_id original; el número de hoja vive en el layout.
+    # The material keeps the original board_id; the sheet number lives on the layout.
     assert layouts[0].material.id == "board"
     assert [layout.sheet_number for layout in layouts] == list(
         range(1, len(layouts) + 1)
@@ -209,7 +209,7 @@ def test_multisheet_empty_returns_empty():
 
 
 def test_multisheet_layouts_track_cut_length():
-    """Cada layout reporta su largo de corte (suma de sus segmentos) y es positivo."""
+    """Each layout reports its cut length (sum of its segments) and it is positive."""
     material = Material(id="board", width=1000, height=1000, thickness=18)
     optimizer = MultiSheetGuillotineOptimizer(
         material_template=material,
@@ -224,11 +224,11 @@ def test_multisheet_layouts_track_cut_length():
         assert layout.cut_length > 0
 
 
-# --- Estrategias de empaquetado (PackingStrategy) ------------------------
+# --- Packing strategies (PackingStrategy) -------------------------------------
 
 
 def _example_setup():
-    """Tablero retrato (alto 2440 > ancho 1830) + 8 piezas del ejemplo real."""
+    """Portrait board (height 2440 > width 1830) + 8 pieces from the real example."""
     material = Material(id="board", width=1830, height=2440, thickness=15)
     params = CuttingParameters(
         kerf=5, top_trim=10, bottom_trim=10, left_trim=10, right_trim=10
@@ -242,7 +242,7 @@ def _example_setup():
 
 
 def test_strategy_derives_split_rule_when_not_passed():
-    """Sin ``split_rule`` explícito, la estrategia define la regla de split."""
+    """Without an explicit ``split_rule``, the strategy defines the split rule."""
     material = Material(id="m", width=1830, height=2440, thickness=15)
     default = MultiSheetGuillotineOptimizer(material_template=material)
     long_off = MultiSheetGuillotineOptimizer(
@@ -251,7 +251,7 @@ def test_strategy_derives_split_rule_when_not_passed():
     assert default.strategy == PackingStrategy.MAX_EFFICIENCY
     assert default.split_rule == SplitRule.SHORTER_LEFTOVER_AXIS
     assert long_off.split_rule == SplitRule.LONGER_AXIS
-    # Un ``split_rule`` explícito gana sobre el derivado de la estrategia.
+    # An explicit ``split_rule`` wins over the one derived from the strategy.
     override = GuillotineOptimizer(
         material=material,
         split_rule=SplitRule.MAXIMIZE_AREA,
@@ -261,7 +261,7 @@ def test_strategy_derives_split_rule_when_not_passed():
 
 
 def test_default_strategy_preserves_best_area_fit_layout():
-    """El default (MAX_EFFICIENCY) conserva el comportamiento histórico (BAF)."""
+    """The default (MAX_EFFICIENCY) preserves the historical behavior (BAF)."""
     material, params, pieces = _example_setup()
     optimizer = MultiSheetGuillotineOptimizer(
         material_template=material, cutting_params=params
@@ -271,15 +271,15 @@ def test_default_strategy_preserves_best_area_fit_layout():
     assert remaining == []
     layout = layouts[0]
     biggest = max(layout.remainders, key=lambda r: r.area)
-    # Retazo mayor del ejemplo real con BAF: 1502 (ancho) x 1915 (alto).
+    # Largest leftover from the real example with BAF: 1502 (width) x 1915 (height).
     assert biggest.width == pytest.approx(1502)
     assert biggest.height == pytest.approx(1915)
-    # BAF dispersa las piezas a lo ancho (llegan más allá de la mitad derecha).
+    # BAF spreads pieces across the width (they reach past the right half).
     assert max(p.x + p.width for p in layout.placed_pieces) > 1700
 
 
 def test_long_offcuts_leaves_full_height_strip_against_one_side():
-    """``LONG_OFFCUTS`` pega las piezas a la izquierda y deja una tira de alto completo."""
+    """``LONG_OFFCUTS`` pushes pieces to the left and leaves a full-height strip."""
     material, params, pieces = _example_setup()
     optimizer = MultiSheetGuillotineOptimizer(
         material_template=material,
@@ -292,17 +292,17 @@ def test_long_offcuts_leaves_full_height_strip_against_one_side():
     layout = layouts[0]
     usable_height = material.height - params.top_trim - params.bottom_trim  # 2420
 
-    # El retazo dominante es una franja que recorre el alto usable completo.
+    # The dominant leftover is a strip spanning the full usable height.
     biggest = max(layout.remainders, key=lambda r: r.area)
     assert biggest.height == pytest.approx(usable_height)
-    # Está apegada a un costado: las piezas no la invaden (todas a su izquierda).
+    # It hugs one side: pieces don't encroach on it (all to its left).
     assert all(p.x + p.width <= biggest.x + 1e-6 for p in layout.placed_pieces)
-    # Las piezas quedan compactadas contra el lado izquierdo del tablero.
+    # Pieces end up packed against the left side of the board.
     assert max(p.x + p.width for p in layout.placed_pieces) < material.width / 2
 
 
 def test_long_offcuts_differs_from_default_layout():
-    """Las dos estrategias producen acomodos distintos para la misma entrada."""
+    """The two strategies produce different layouts for the same input."""
     material, params, pieces = _example_setup()
     default = MultiSheetGuillotineOptimizer(
         material_template=material, cutting_params=params

@@ -1,14 +1,13 @@
-"""Tests del aislamiento multi-sucursal.
+"""Tests for multi-branch isolation.
 
-Cubre: CRUD de sucursales (solo admin), la lectura global del admin y el vendedor
-con filtro ``branchId``, el alta del vendedor con su sucursal base por defecto y
-override por ``branchId``, el aislamiento del operador (atado a su sucursal), la
-herencia de sucursal de la orden (hecho histórico inmutable) y el comparativo de
-analítica por sucursal.
+Covers: branch CRUD (admin only), global read for admin and seller with the
+``branchId`` filter, seller creation defaulting to their base branch with
+``branchId`` override, operator isolation (bound to their branch), order branch
+inheritance (immutable historical fact), and the per-branch analytics breakdown.
 
-El ``client`` de conftest está autenticado como admin (su header de sesión); para
-actuar como staff de una sucursal se pasa ``headers=`` por request (httpx da
-precedencia al header explícito sobre el de sesión).
+Conftest's ``client`` is authenticated as admin (its session header); to act as
+branch staff, pass ``headers=`` per request (httpx gives precedence to the
+explicit header over the session one).
 """
 
 from src.modules.orders.schemas import OrderCreate
@@ -19,11 +18,11 @@ from src.modules.users.service import UserService
 from .test_orders import _create_board, _create_client, _order_payload
 
 _PWD = "supersecret123"
-_MATRIZ = 1  # sucursal por defecto sembrada por conftest
+_MATRIZ = 1  # default branch seeded by conftest
 
 
 def _staff_headers(client, db_session, role, email, branch_id):
-    """Siembra un usuario staff (rol + sucursal) y devuelve sus headers Bearer."""
+    """Seeds a staff user (role + branch) and returns their Bearer headers."""
     svc = UserService(db_session)
     if svc.get_by_email(email) is None:
         svc.create(
@@ -42,7 +41,7 @@ def _staff_headers(client, db_session, role, email, branch_id):
 
 
 def _payload_no_branch(client_id, product_id, **kw):
-    """``_order_payload`` sin ``branchId`` (para ejercitar el default de sucursal)."""
+    """``_order_payload`` without ``branchId`` (to exercise the branch default)."""
     payload = _order_payload(client_id, product_id, **kw)
     payload.pop("branchId", None)
     return payload
@@ -64,7 +63,7 @@ def _mint_order(db_session, client_id, product_id, branch_id, width=600):
 def test_branch_crud_is_admin_only(client, db_session):
     seller = _staff_headers(client, db_session, "vendedor", "s@e.com", _MATRIZ)
 
-    # Admin crea; el vendedor no puede administrar pero sí leer (poblar selectores).
+    # Admin creates; the seller can't manage but can read (populate selectors).
     created = client.post("/api/v1/branches/", json={"code": "NORTE", "name": "Norte"})
     assert created.status_code == 201
     assert (
@@ -82,16 +81,16 @@ def test_branch_duplicate_code_returns_409(client):
     assert dup.status_code == 409
 
 
-# ----------------------------------------------- vendedor global (lectura + alta)
+# ----------------------------------------------- global seller (read + create)
 def test_seller_reads_all_branches_and_create_defaults_to_base(client, db_session):
-    """El vendedor es global: ve todas las sucursales y crea por defecto en la suya."""
+    """The seller is global: sees all branches and creates in their own by default."""
     norte = _make_branch(client)
     a = _staff_headers(client, db_session, "vendedor", "a@e.com", _MATRIZ)
     b = _staff_headers(client, db_session, "vendedor", "b@e.com", norte["id"])
     c = _create_client(client)
     board = _create_board(client)
 
-    # Sin branchId en el body, cada vendedor cae en su sucursal base.
+    # Without branchId in the body, each seller falls back to their base branch.
     pre_a = client.post(
         "/api/v1/preorders/", json=_payload_no_branch(c["id"], board["id"]), headers=a
     ).json()["data"]
@@ -101,14 +100,14 @@ def test_seller_reads_all_branches_and_create_defaults_to_base(client, db_sessio
     assert pre_a["branch"]["id"] == _MATRIZ
     assert pre_b["branch"]["id"] == norte["id"]
 
-    # A (base Matriz) ahora VE ambas y accede a la de otra sucursal (ya no 404).
+    # A (base Matriz) now SEES both and can access the one from another branch (no longer 404).
     a_ids = {
         p["id"] for p in client.get("/api/v1/preorders/", headers=a).json()["data"]
     }
     assert {pre_a["id"], pre_b["id"]} <= a_ids
     assert client.get(f"/api/v1/preorders/{pre_b['id']}", headers=a).status_code == 200
 
-    # Puede estrechar con branchId (antes era exclusivo del admin).
+    # Can narrow with branchId (used to be admin-only).
     filtered = client.get(
         "/api/v1/preorders/", params={"branchId": norte["id"]}, headers=a
     ).json()["data"]
@@ -116,7 +115,7 @@ def test_seller_reads_all_branches_and_create_defaults_to_base(client, db_sessio
 
 
 def test_seller_can_create_in_another_branch_with_branch_id(client, db_session):
-    """El vendedor sobrescribe su sucursal base indicando branchId en el alta."""
+    """The seller overrides their base branch by passing branchId on create."""
     norte = _make_branch(client)
     a = _staff_headers(client, db_session, "vendedor", "a@e.com", _MATRIZ)
     c = _create_client(client)
@@ -129,19 +128,19 @@ def test_seller_can_create_in_another_branch_with_branch_id(client, db_session):
 
 
 def test_admin_must_specify_branch_on_preorder_create(client, db_session):
-    """El admin no tiene sucursal base: crear sin branchId es un 422."""
+    """The admin has no base branch: creating without branchId is a 422."""
     c = _create_client(client)
     board = _create_board(client)
-    # ``client`` está autenticado como admin (sin sucursal): falta branchId.
+    # ``client`` is authenticated as admin (no branch): branchId is missing.
     resp = client.post(
         "/api/v1/preorders/", json=_payload_no_branch(c["id"], board["id"])
     )
     assert resp.status_code == 422
 
 
-# ------------------------------------------------------------ órdenes aislamiento
+# ------------------------------------------------------------ orders isolation
 def test_seller_sees_orders_across_branches(client, db_session):
-    """El vendedor (global) ve y accede a órdenes de cualquier sucursal."""
+    """The seller (global) sees and accesses orders from any branch."""
     norte = _make_branch(client)
     a = _staff_headers(client, db_session, "vendedor", "a@e.com", _MATRIZ)
     c = _create_client(client)
@@ -151,12 +150,12 @@ def test_seller_sees_orders_across_branches(client, db_session):
     order_b = _mint_order(db_session, c["id"], board["id"], norte["id"], width=500)
     assert order_a.branch_id == _MATRIZ and order_b.branch_id == norte["id"]
 
-    # A (base Matriz) ve AMBAS y accede a la de Norte (ya no 404).
+    # A (base Matriz) sees BOTH and accesses the Norte one (no longer 404).
     a_ids = {o["id"] for o in client.get("/api/v1/orders/", headers=a).json()["data"]}
     assert {order_a.id, order_b.id} <= a_ids
     assert client.get(f"/api/v1/orders/{order_b.id}", headers=a).status_code == 200
 
-    # El admin ve todas; ``branchId`` estrecha a una (igual que el vendedor).
+    # The admin sees all; ``branchId`` narrows to one (same as the seller).
     assert len(client.get("/api/v1/orders/").json()["data"]) == 2
     only_norte = client.get(
         "/api/v1/orders/", params={"branchId": norte["id"]}, headers=a
@@ -165,7 +164,7 @@ def test_seller_sees_orders_across_branches(client, db_session):
 
 
 def test_orders_isolated_for_operator(client, db_session):
-    """El operador sigue atado a su sucursal: no ve ni accede a las de otra."""
+    """The operator stays bound to their branch: can't see or access another's."""
     norte = _make_branch(client)
     op = _staff_headers(client, db_session, "operador", "op@e.com", _MATRIZ)
     c = _create_client(client)
@@ -181,7 +180,7 @@ def test_orders_isolated_for_operator(client, db_session):
 
 
 def test_reassigning_branch_changes_operator_visibility_not_history(client, db_session):
-    """Mover de sucursal a un operador cambia lo que ve, no la sucursal de las órdenes."""
+    """Moving an operator's branch changes what they see, not the orders' branch."""
     norte = _make_branch(client)
     op_email = "mover@e.com"
     op = _staff_headers(client, db_session, "operador", op_email, _MATRIZ)
@@ -193,21 +192,21 @@ def test_reassigning_branch_changes_operator_visibility_not_history(client, db_s
         o["id"] for o in client.get("/api/v1/orders/", headers=op).json()["data"]
     ] == [order_matriz.id]
 
-    # El admin reasigna al operador a Norte; surte efecto al instante (rol/sucursal
-    # se leen de la BD en cada request, no del JWT).
+    # The admin reassigns the operator to Norte; takes effect instantly (role/branch
+    # are read from the DB on every request, not from the JWT).
     svc = UserService(db_session)
     user = svc.get_by_email(op_email)
     client.put(f"/api/v1/users/{user.id}", json={"branchId": norte["id"]})
 
-    # Ya no ve la orden de Matriz (sigue siendo de Matriz: hecho histórico).
+    # No longer sees the Matriz order (it's still Matriz's: historical fact).
     assert client.get("/api/v1/orders/", headers=op).json()["data"] == []
     assert order_matriz.branch_id == _MATRIZ
 
 
 def test_operator_without_branch_is_forbidden(client, db_session):
-    """Un operador sin sucursal asignada (estado inválido) recibe 403 al operar."""
+    """An operator with no assigned branch (invalid state) gets 403 when operating."""
     headers = _staff_headers(client, db_session, "operador", "huerfano@e.com", _MATRIZ)
-    # Se le quita la sucursal directamente en BD (la API no permite dejarlo sin una).
+    # The branch is removed directly in the DB (the API doesn't allow leaving it unset).
     svc = UserService(db_session)
     user = svc.get_by_email("huerfano@e.com")
     user.branch_id = None
@@ -228,11 +227,11 @@ def test_analytics_breakdown_by_branch(client, db_session):
         "items"
     ]
     by_label = {i["label"]: i for i in items}
-    # Densifica todas las sucursales; cada una con su conteo de órdenes.
+    # Densifies all branches; each with its order count.
     assert by_label["Casa Matriz"]["orderCount"] == 1
     assert by_label["Sucursal Norte"]["orderCount"] == 1
 
-    # El filtro branchId acota el summary a una sola sucursal.
+    # The branchId filter narrows the summary to a single branch.
     only_norte = client.get(
         "/api/v1/analytics/summary", params={**rng, "branchId": norte["id"]}
     ).json()["data"]

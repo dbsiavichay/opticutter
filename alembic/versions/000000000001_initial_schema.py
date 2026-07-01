@@ -18,7 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # users primero (sin FK a branches — se agrega después para romper el ciclo)
+    # users first (no FK to branches — added later to break the cycle)
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -39,7 +39,7 @@ def upgrade() -> None:
     op.create_index(op.f("ix_users_branch_id"), "users", ["branch_id"], unique=False)
     op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
 
-    # branches puede referenciar users ahora que existe
+    # branches can reference users now that it exists
     op.create_table(
         "branches",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -58,7 +58,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_branches_code"), "branches", ["code"], unique=True)
 
-    # FK circular: users.branch_id → branches (branches ya existe)
+    # Circular FK: users.branch_id → branches (branches already exists)
     op.create_foreign_key(
         "fk_users_branch_id_branches", "users", "branches", ["branch_id"], ["id"]
     )

@@ -16,10 +16,10 @@ from src.shared.schemas import CamelModel
 
 
 class PreOrderCreate(CamelModel):
-    """Crear una pre-orden (cotización mutable): inputs del optimizador + metadatos.
+    """Create a pre-order (mutable quote): optimizer inputs + metadata.
 
-    Misma forma de entrada que ``OptimizeRequest``/``OrderCreate`` (materiales de
-    cualquier origen + lista de corte), pero nada se congela: se recalcula al leer.
+    Same input shape as ``OptimizeRequest``/``OrderCreate`` (materials of any
+    source + cut list), but nothing is frozen: it's recomputed on read.
     """
 
     materials: List[MaterialInput] = Field(
@@ -34,13 +34,13 @@ class PreOrderCreate(CamelModel):
     price_tier_code: Optional[str] = Field(
         default="consumidor",
         max_length=32,
-        description="Nivel de precio: consumidor (0%) | carpintero (2%) | efectivo (5%)",
+        description="Price tier: consumidor (0%) | carpintero (2%) | efectivo (5%)",
     )
     strategy: OptimizationStrategy = Field(
         default=OptimizationStrategy.default,
         description=(
-            "Heurística de acomodo a recordar para el recálculo: default | longOffcuts. "
-            "Afecta la geometría; se hereda a la orden al confirmar."
+            "Packing heuristic to remember for the recompute: default | longOffcuts. "
+            "Affects geometry; inherited by the order upon confirmation."
         ),
     )
     notes: Optional[str] = Field(default=None, max_length=512)
@@ -56,7 +56,7 @@ class PreOrderCreate(CamelModel):
 
 
 class PreOrderUpdate(CamelModel):
-    """Editar una pre-orden abierta (solo en ``draft``/``sent``). Todo opcional."""
+    """Edit an open pre-order (only while ``draft``/``sent``). Everything optional."""
 
     materials: Optional[List[MaterialInput]] = Field(default=None, min_length=1)
     requirements: Optional[List[Requirement]] = Field(default=None, min_length=1)
@@ -68,7 +68,7 @@ class PreOrderUpdate(CamelModel):
 
 
 class PreOrderStatusHistoryResponse(CamelModel):
-    """Entrada de auditoría de una transición de estado de la pre-orden."""
+    """Audit entry for a pre-order status transition."""
 
     id: int
     from_status: Optional[PreOrderStatus] = None
@@ -87,7 +87,7 @@ class PreOrderStatusHistoryResponse(CamelModel):
 
 
 class PreOrderResponse(CamelModel):
-    """Detalle de una pre-orden con su optimización recalculada (precios vivos)."""
+    """Pre-order detail with its recomputed optimization (live prices)."""
 
     id: int
     code: Optional[str] = None
@@ -114,7 +114,7 @@ class PreOrderResponse(CamelModel):
     sent_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
-    # Inputs crudos editables (lo que el formulario del optimizador re-renderiza).
+    # Raw editable inputs (what the optimizer form re-renders).
     materials: List[MaterialInput] = Field(
         ..., description="Stored material inputs (editable)"
     )
@@ -128,7 +128,7 @@ class PreOrderResponse(CamelModel):
 
 
 class PreOrderSummaryResponse(CamelModel):
-    """Resumen liviano para el listado (sin la optimización completa)."""
+    """Lightweight summary for the listing (without the full optimization)."""
 
     id: int
     code: Optional[str] = None
@@ -143,12 +143,12 @@ class PreOrderSummaryResponse(CamelModel):
 
 
 # ---------------------------------------------------------------------------
-# Enlace de revisión + proyecciones públicas (las consume el frontend de Maderable)
+# Review link + public projections (consumed by the Maderable frontend)
 # ---------------------------------------------------------------------------
 
 
 class ReviewLinkResponse(CamelModel):
-    """Enlace de revisión recién generado: única respuesta que expone el token."""
+    """Freshly generated review link: the only response that exposes the token."""
 
     token: str = Field(..., description="Raw token, returned only at generation time")
     url: str = Field(..., description="Full review URL for the Maderable frontend")
@@ -158,7 +158,7 @@ class ReviewLinkResponse(CamelModel):
 
 
 class ReviewLinkInfoResponse(CamelModel):
-    """Metadatos del enlace vigente, sin el token (irrecuperable por diseño)."""
+    """Metadata of the current link, without the token (unrecoverable by design)."""
 
     status: ReviewLinkStatus
     created_at: datetime
@@ -167,13 +167,13 @@ class ReviewLinkInfoResponse(CamelModel):
 
 
 class ReviewActionRequest(CamelModel):
-    """Acción del cliente sobre la cotización (confirmar/rechazar)."""
+    """Client action on the quote (confirm/reject)."""
 
     note: Optional[str] = Field(default=None, max_length=512)
 
 
 class ReviewLineResponse(CamelModel):
-    """Línea de cobro proyectada para la revisión pública del cliente."""
+    """Billing line projected for the client's public review."""
 
     product_code: Optional[str] = None
     product_name: Optional[str] = None
@@ -184,7 +184,7 @@ class ReviewLineResponse(CamelModel):
 
 
 class ReviewPieceResponse(CamelModel):
-    """Pieza de la lista de corte proyectada para la revisión pública."""
+    """Cut-list piece projected for the public review."""
 
     label: Optional[str] = None
     height: int
@@ -194,11 +194,11 @@ class ReviewPieceResponse(CamelModel):
 
 
 class ReviewPreOrderResponse(CamelModel):
-    """Vista pública sanitizada de la pre-orden: lo que ve el cliente en el enlace.
+    """Sanitized public view of the pre-order: what the client sees on the link.
 
-    Excluye a propósito identificadores internos (id numérico, client_id), datos de
-    contacto del cliente, los inputs crudos y metadatos comerciales internos. Los
-    precios son vivos (recalculados); el desglose se arma desde la optimización.
+    Deliberately excludes internal identifiers (numeric id, client_id), the
+    client's contact details, the raw inputs and internal commercial metadata.
+    Prices are live (recomputed); the breakdown is built from the optimization.
     """
 
     reference: Optional[str] = Field(
@@ -213,17 +213,15 @@ class ReviewPreOrderResponse(CamelModel):
     )
     client_name: Optional[str] = None
     currency: str
-    subtotal: float = Field(
-        ..., description="Suma a precio de lista (antes del descuento)"
-    )
+    subtotal: float = Field(..., description="Sum at list price (before the discount)")
     price_tier_name: Optional[str] = Field(
-        default=None, description="Nombre del nivel de precio aplicado"
+        default=None, description="Name of the applied price tier"
     )
     discount_rate: float = Field(
-        default=0.0, description="Descuento aplicado (0.02 = 2%)"
+        default=0.0, description="Applied discount (0.02 = 2%)"
     )
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal menos el descuento")
+    total: float = Field(..., description="Subtotal minus the discount")
     total_boards_used: int
     created_at: datetime
     sent_at: Optional[datetime] = None

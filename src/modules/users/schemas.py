@@ -8,89 +8,85 @@ from src.shared.schemas import CamelModel
 
 
 class UserBase(CamelModel):
-    email: EmailStr = Field(..., description="Email de login (único)")
-    full_name: Optional[str] = Field(
-        None, max_length=128, description="Nombre completo"
-    )
+    email: EmailStr = Field(..., description="Login email (unique)")
+    full_name: Optional[str] = Field(None, max_length=128, description="Full name")
     role: UserRole = Field(
         default=UserRole.OPERATOR,
-        description="Rol: administrador, vendedor u operador",
+        description="Role: administrador, vendedor or operador",
     )
     branch_id: Optional[int] = Field(
         default=None,
         description=(
-            "Sucursal asignada (obligatoria para vendedor/operador). El "
-            "administrador es global: se ignora y queda en null."
+            "Assigned branch (required for vendedor/operador). The "
+            "administrador is global: ignored and left null."
         ),
     )
 
 
 class UserCreate(UserBase):
-    """Alta de usuario. La contraseña viaja en claro solo aquí; se hashea al persistir."""
+    """User creation. The password travels in plain text only here; it's hashed on persist."""
 
-    password: str = Field(..., min_length=8, max_length=128, description="Contraseña")
+    password: str = Field(..., min_length=8, max_length=128, description="Password")
 
 
 class UserUpdate(CamelModel):
-    """Actualización parcial. Enviar ``password`` la rehashea; ``isActive`` da de baja."""
+    """Partial update. Sending ``password`` rehashes it; ``isActive`` deactivates."""
 
-    email: Optional[EmailStr] = Field(None, description="Email de login (único)")
-    full_name: Optional[str] = Field(
-        None, max_length=128, description="Nombre completo"
+    email: Optional[EmailStr] = Field(None, description="Login email (unique)")
+    full_name: Optional[str] = Field(None, max_length=128, description="Full name")
+    role: Optional[UserRole] = Field(None, description="User role")
+    is_active: Optional[bool] = Field(
+        None, description="Active/inactive (logical deactivation)"
     )
-    role: Optional[UserRole] = Field(None, description="Rol del usuario")
-    is_active: Optional[bool] = Field(None, description="Activo/inactivo (baja lógica)")
     branch_id: Optional[int] = Field(
-        None, description="Sucursal asignada (staff); null/ignorado para administrador"
+        None, description="Assigned branch (staff); null/ignored for administrador"
     )
     password: Optional[str] = Field(
-        None, min_length=8, max_length=128, description="Nueva contraseña"
+        None, min_length=8, max_length=128, description="New password"
     )
 
 
 class UserResponse(UserBase):
-    """Representación pública de un usuario. Nunca incluye la contraseña ni su hash."""
+    """Public representation of a user. Never includes the password or its hash."""
 
-    id: int = Field(..., description="ID del usuario")
-    is_active: bool = Field(..., description="Activo/inactivo")
-    created_at: datetime = Field(..., description="Fecha de creación")
+    id: int = Field(..., description="User ID")
+    is_active: bool = Field(..., description="Active/inactive")
+    created_at: datetime = Field(..., description="Creation date")
 
 
 class ProfileUpdate(CamelModel):
-    """Autoservicio: el propio usuario edita su perfil (solo ``fullName``)."""
+    """Self-service: the user edits their own profile (``fullName`` only)."""
 
-    full_name: Optional[str] = Field(
-        None, max_length=128, description="Nombre completo"
-    )
+    full_name: Optional[str] = Field(None, max_length=128, description="Full name")
 
 
 class ChangePasswordRequest(CamelModel):
-    """Autoservicio: cambio de la propia contraseña verificando la actual."""
+    """Self-service: own password change after verifying the current one."""
 
-    current_password: str = Field(..., description="Contraseña actual")
+    current_password: str = Field(..., description="Current password")
     new_password: str = Field(
-        ..., min_length=8, max_length=128, description="Nueva contraseña"
+        ..., min_length=8, max_length=128, description="New password"
     )
 
 
 class LoginRequest(CamelModel):
-    email: EmailStr = Field(..., description="Email de login")
-    password: str = Field(..., description="Contraseña")
+    email: EmailStr = Field(..., description="Login email")
+    password: str = Field(..., description="Password")
 
 
 class RefreshRequest(CamelModel):
-    """Canje del refresh token por un par nuevo en ``/auth/refresh``."""
+    """Exchanges the refresh token for a new pair on ``/auth/refresh``."""
 
-    refresh_token: str = Field(..., description="Refresh token opaco emitido al login")
+    refresh_token: str = Field(..., description="Opaque refresh token issued at login")
 
 
 class TokenResponse(CamelModel):
-    """Respuesta de login/refresh: par de tokens + datos del usuario autenticado."""
+    """Login/refresh response: token pair + authenticated user data."""
 
-    access_token: str = Field(..., description="JWT de acceso (corto)")
+    access_token: str = Field(..., description="Access JWT (short-lived)")
     refresh_token: str = Field(
-        ..., description="Refresh token opaco (largo, revocable)"
+        ..., description="Opaque refresh token (long, revocable)"
     )
-    token_type: str = Field(default="bearer", description="Tipo de token")
-    expires_in: int = Field(..., description="Vigencia del access token en segundos")
-    user: UserResponse = Field(..., description="Usuario autenticado")
+    token_type: str = Field(default="bearer", description="Token type")
+    expires_in: int = Field(..., description="Access token validity in seconds")
+    user: UserResponse = Field(..., description="Authenticated user")

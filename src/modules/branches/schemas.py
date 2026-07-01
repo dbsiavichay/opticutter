@@ -7,48 +7,46 @@ from src.shared.schemas import CamelModel
 
 class BranchBase(CamelModel):
     code: str = Field(
-        ..., min_length=1, max_length=32, description="Código único de la sucursal"
+        ..., min_length=1, max_length=32, description="Unique branch code"
     )
-    name: str = Field(
-        ..., min_length=1, max_length=128, description="Nombre de la sucursal"
-    )
+    name: str = Field(..., min_length=1, max_length=128, description="Branch name")
     address: Optional[str] = Field(
-        None, max_length=256, description="Dirección (membrete de la proforma)"
+        None, max_length=256, description="Address (proforma letterhead)"
     )
-    phone: Optional[str] = Field(
-        None, max_length=32, description="Teléfono de contacto"
-    )
+    phone: Optional[str] = Field(None, max_length=32, description="Contact phone")
 
 
 class BranchCreate(BranchBase):
-    """Alta de una sucursal."""
+    """Create a branch."""
 
 
 class BranchUpdate(CamelModel):
-    """Actualización parcial de una sucursal."""
+    """Partial update of a branch."""
 
     code: Optional[str] = Field(None, min_length=1, max_length=32)
     name: Optional[str] = Field(None, min_length=1, max_length=128)
     address: Optional[str] = Field(None, max_length=256)
     phone: Optional[str] = Field(None, max_length=32)
-    is_active: Optional[bool] = Field(None, description="Activa/inactiva (baja lógica)")
+    is_active: Optional[bool] = Field(
+        None, description="Active/inactive (logical deactivation)"
+    )
 
 
 class BranchResponse(BranchBase):
-    """Representación pública de una sucursal."""
+    """Public representation of a branch."""
 
-    id: int = Field(..., description="ID de la sucursal")
-    is_active: bool = Field(..., description="Activa/inactiva")
+    id: int = Field(..., description="Branch ID")
+    is_active: bool = Field(..., description="Active/inactive")
 
 
 class BranchRefResponse(CamelModel):
-    """Referencia compacta a una sucursal para incrustar en otras respuestas.
+    """Compact branch reference to embed in other responses.
 
-    La consumen órdenes, pre-órdenes y borradores para que el frontend muestre a qué
-    sucursal pertenece cada documento sin arrastrar los datos de contacto del
-    membrete (``address``/``phone``) en cada fila de un listado.
+    Consumed by orders, pre-orders and drafts so the frontend can show which
+    branch each document belongs to without dragging along the letterhead
+    contact details (``address``/``phone``) on every row of a listing.
     """
 
-    id: int = Field(..., description="ID de la sucursal")
-    code: str = Field(..., description="Código único de la sucursal")
-    name: str = Field(..., description="Nombre de la sucursal")
+    id: int = Field(..., description="Branch ID")
+    code: str = Field(..., description="Unique branch code")
+    name: str = Field(..., description="Branch name")

@@ -16,7 +16,7 @@ from src.modules.settings.service import SettingsService, settings_service
 from src.modules.users.dependencies import require_permission
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-# Configuración del sistema: solo "administrador" (RESOURCE_ROLES["settings:manage"]).
+# System configuration: "administrador" only (RESOURCE_ROLES["settings:manage"]).
 router = APIRouter(
     prefix="/settings",
     tags=["settings"],
@@ -24,9 +24,9 @@ router = APIRouter(
     dependencies=[Depends(require_permission("settings:manage"))],
 )
 
-# Lectura de niveles de precio: la necesita quien cotiza (admin/vendedor) para poblar
-# el selector, así que va en un router aparte con el permiso "preorders" en vez del
-# "settings:manage" (solo admin) del router de configuración.
+# Price-tier reads are needed by whoever quotes (admin/vendedor) to populate the
+# selector, so they live in a separate router gated by the "preorders" permission
+# instead of the "settings:manage" (admin only) used by the configuration router.
 tiers_router = APIRouter(
     prefix="/settings",
     tags=["settings"],
@@ -37,7 +37,7 @@ tiers_router = APIRouter(
 
 @tiers_router.get("/price-tiers", response_model=DataResponse[List[PriceTier]])
 def get_price_tiers(svc: SettingsService = Depends(settings_service)):
-    """Niveles de precio activos (para el selector de cotización), por ``sortOrder``."""
+    """Active price tiers (for the quote selector), ordered by ``sortOrder``."""
     tiers = [t for t in svc.get_price_tiers() if t.get("is_active", True)]
     tiers.sort(key=lambda t: t.get("sort_order", 0))
     return ok(tiers)
@@ -45,7 +45,7 @@ def get_price_tiers(svc: SettingsService = Depends(settings_service)):
 
 @router.get("/cutting", response_model=DataResponse[CuttingSettingsResponse])
 def get_cutting_settings(svc: SettingsService = Depends(settings_service)):
-    """Devuelve los parámetros de corte vigentes (sembrados desde config si faltan)."""
+    """Returns the current cutting parameters (seeded from config if missing)."""
     return ok(svc.get_or_init())
 
 
@@ -53,13 +53,13 @@ def get_cutting_settings(svc: SettingsService = Depends(settings_service)):
 def update_cutting_settings(
     data: CuttingSettingsUpdate, svc: SettingsService = Depends(settings_service)
 ):
-    """Actualiza (parcialmente) los parámetros de corte."""
+    """Partially updates the cutting parameters."""
     return ok(svc.update_cutting(data))
 
 
 @router.get("/preorders", response_model=DataResponse[PreOrderSettingsResponse])
 def get_preorder_settings(svc: SettingsService = Depends(settings_service)):
-    """Devuelve la config de pre-órdenes vigente (sembrada desde config si falta)."""
+    """Returns the current pre-order config (seeded from config if missing)."""
     return ok(svc.get_or_init())
 
 
@@ -67,13 +67,13 @@ def get_preorder_settings(svc: SettingsService = Depends(settings_service)):
 def update_preorder_settings(
     data: PreOrderSettingsUpdate, svc: SettingsService = Depends(settings_service)
 ):
-    """Actualiza (parcialmente) la vigencia y el tope de pre-órdenes."""
+    """Partially updates the pre-order validity period and cap."""
     return ok(svc.update_preorders(data))
 
 
 @router.get("/company", response_model=DataResponse[CompanySettingsResponse])
 def get_company_settings(svc: SettingsService = Depends(settings_service)):
-    """Devuelve los datos de la empresa (membrete de la proforma)."""
+    """Returns the company data (proforma letterhead)."""
     return ok(svc.get_company())
 
 
@@ -81,7 +81,7 @@ def get_company_settings(svc: SettingsService = Depends(settings_service)):
 def update_company_settings(
     data: CompanySettingsUpdate, svc: SettingsService = Depends(settings_service)
 ):
-    """Actualiza (parcialmente) los datos de la empresa."""
+    """Partially updates the company data."""
     svc.update_company(data)
     return ok(svc.get_company())
 
@@ -90,6 +90,6 @@ def update_company_settings(
 def update_price_tiers(
     data: PriceTiersUpdate, svc: SettingsService = Depends(settings_service)
 ):
-    """Reemplaza la lista de niveles de precio (solo admin)."""
+    """Replaces the price-tier list (admin only)."""
     settings = svc.update_price_tiers(data)
     return ok(settings.price_tiers)

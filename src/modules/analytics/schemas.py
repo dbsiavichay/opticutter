@@ -1,7 +1,7 @@
-"""Contratos de respuesta de la analítica (chart-ready, camelCase vía ``CamelModel``).
+"""Analytics response contracts (chart-ready, camelCase via ``CamelModel``).
 
-Convenciones: ningún campo numérico es opcional (rango vacío → ceros, nunca nulos);
-las series temporales son arrays paralelos sobre un mismo eje ``buckets``.
+Conventions: no numeric field is optional (empty range → zeros, never nulls);
+time series are parallel arrays over the same ``buckets`` axis.
 """
 
 from datetime import date, datetime
@@ -12,25 +12,25 @@ from src.shared.schemas import CamelModel
 
 
 class RangeInfo(CamelModel):
-    """Ventana efectivamente aplicada (eco de los defaults resueltos)."""
+    """Window effectively applied (echo of the resolved defaults)."""
 
     date_from: date
     date_to: date
 
 
 class AnalyticsSummary(CamelModel):
-    """Tarjetas KPI: operación, pipeline y tendencia base del periodo."""
+    """KPI cards: operations, pipeline and base trend for the period."""
 
     range: RangeInfo
-    # Operación (sobre órdenes completadas).
+    # Operations (over completed orders).
     total_boards_consumed: int
-    average_efficiency: float  # ponderada por área, 0..100
+    average_efficiency: float  # area-weighted, 0..100
     total_area_cut_m2: float
     waste_estimate_m2: float
-    # Estados / pipeline.
+    # Status / pipeline.
     pending_orders_count: int
     cancellation_rate: float  # 0..1
-    # Tendencia base.
+    # Base trend.
     order_count: int
     realized_revenue: float
     average_ticket: float
@@ -38,24 +38,24 @@ class AnalyticsSummary(CamelModel):
 
 
 class TimeSeriesData(CamelModel):
-    """Series paralelas alineadas al eje ``buckets`` de ``TimeSeries``."""
+    """Parallel series aligned to ``TimeSeries``'s ``buckets`` axis."""
 
-    revenue: List[float]  # ingreso realizado por bucket
+    revenue: List[float]  # realized revenue per bucket
     order_count: List[int]
     boards_consumed: List[int]
     new_clients: List[int]
 
 
 class TimeSeries(CamelModel):
-    """Tendencias temporales con eje denso (huecos en cero)."""
+    """Time trends with a dense axis (gaps filled with zero)."""
 
     granularity: Granularity
-    buckets: List[str]  # fechas de bucket ISO (eje x)
+    buckets: List[str]  # ISO bucket dates (x axis)
     series: TimeSeriesData
 
 
 class BreakdownItem(CamelModel):
-    """Una categoría del desglose con sus métricas."""
+    """One breakdown category with its metrics."""
 
     key: str
     label: str
@@ -64,14 +64,14 @@ class BreakdownItem(CamelModel):
 
 
 class Breakdown(CamelModel):
-    """Desglose categórico (p. ej. embudo de estados)."""
+    """Categorical breakdown (e.g. status funnel)."""
 
     dimension: str
     items: List[BreakdownItem]
 
 
 class OperationsReport(CamelModel):
-    """Eficiencia de material de las órdenes (el ciclo de vida vive en ``/bottlenecks``)."""
+    """Material efficiency of the orders (the lifecycle lives in ``/bottlenecks``)."""
 
     average_efficiency: float
     total_area_cut_m2: float
@@ -80,26 +80,26 @@ class OperationsReport(CamelModel):
 
 # ------------------------------------------------------------------ bottlenecks
 class StageDuration(CamelModel):
-    """Duración agregada de una etapa del proceso (para hallar el cuello de botella)."""
+    """Aggregated duration of a process stage (to find the bottleneck)."""
 
     key: str
     label: str
     avg_hours: float
     median_hours: float
-    p90_hours: float  # cola lenta: lo que el promedio esconde
+    p90_hours: float  # slow tail: what the average hides
     sample_count: int
 
 
 class StageSeries(CamelModel):
-    """Duración media de una etapa por bucket (cuándo se ralentiza); ceros en huecos."""
+    """Average duration of a stage per bucket (when it slows down); zeros in gaps."""
 
     key: str
     label: str
-    avg_hours: List[float]  # paralelo a ``buckets`` de ``BottleneckReport``
+    avg_hours: List[float]  # parallel to ``BottleneckReport``'s ``buckets``
 
 
 class BottleneckReport(CamelModel):
-    """Qué proceso tarda más (``stages``, el más lento primero) y cuándo (``series``)."""
+    """Which process takes longest (``stages``, slowest first) and when (``series``)."""
 
     stages: List[StageDuration]
     buckets: List[str]
@@ -108,35 +108,35 @@ class BottleneckReport(CamelModel):
 
 # ----------------------------------------------------------- user productivity
 class UserProductivity(CamelModel):
-    """Trabajo y velocidad de un usuario en el periodo (no aplica → 0, nunca null)."""
+    """Work and speed of a user in the period (not applicable → 0, never null)."""
 
     user_id: int
     full_name: str
     role: str
     branch_name: Optional[str]
-    # Corte (operador).
+    # Cutting (operador).
     pieces_cut: int
     area_cut_m2: float
     orders_cut: int
     cutting_hours: float
     pieces_per_hour: float  # throughput
-    # Canteado (canteador).
+    # Banding (canteador).
     orders_banded: int
     banding_hours: float
-    # Comercial (vendedor).
+    # Sales (vendedor).
     orders_created: int
     revenue_generated: float
 
 
 class UserProductivityReport(CamelModel):
-    """Productividad por usuario (taller + comercial)."""
+    """Productivity per user (workshop + sales)."""
 
     users: List[UserProductivity]
 
 
 # --------------------------------------------------------------------- attendance
 class AttendanceDay(CamelModel):
-    """Asistencia de un usuario en un día: primer login (hora de entrada) y conteo."""
+    """A user's attendance on one day: first login (clock-in time) and count."""
 
     date: date
     first_login_at: datetime
@@ -144,7 +144,7 @@ class AttendanceDay(CamelModel):
 
 
 class UserAttendance(CamelModel):
-    """Días con login de un usuario en el rango (referencia de hora de entrada)."""
+    """Days with a login for a user in the range (clock-in time reference)."""
 
     user_id: int
     full_name: str
@@ -154,6 +154,6 @@ class UserAttendance(CamelModel):
 
 
 class AttendanceReport(CamelModel):
-    """Hora de entrada por usuario y día."""
+    """Clock-in time per user and day."""
 
     users: List[UserAttendance]

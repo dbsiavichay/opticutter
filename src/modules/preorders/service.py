@@ -27,15 +27,15 @@ _OPEN_VALUES = [s.value for s in OPEN_STATUSES]
 
 
 class PreOrderService(BranchScopedMixin):
-    """Gestiona pre-órdenes: CRUD mutable, recálculo cache-first y antiabuso.
+    """Manages pre-orders: mutable CRUD, cache-first recompute and anti-abuse.
 
-    No congela nada: guarda los inputs (``materials`` + ``requirements``) y delega
-    el cómputo en ``OptimizationService.compute`` (cache-first) cada vez que hace
-    falta mostrar la cotización o el PDF. La Orden inmutable se mintea aparte, al
-    confirmar el cliente (ver ``PreOrderReviewService``).
+    Freezes nothing: stores the inputs (``materials`` + ``requirements``) and
+    delegates the computation to ``OptimizationService.compute`` (cache-first)
+    every time the quote or the PDF needs to be shown. The immutable Order is
+    minted separately, when the client confirms (see ``PreOrderReviewService``).
 
-    Aislada por sucursal (``BranchScopedMixin``): el staff solo ve/edita las de su
-    sucursal; el admin (scope ``None``) todas.
+    Branch-scoped (``BranchScopedMixin``): staff only sees/edits the ones in their
+    branch; the admin (scope ``None``) sees all of them.
     """
 
     model = PreOrderModel
@@ -63,10 +63,10 @@ class PreOrderService(BranchScopedMixin):
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[PreOrderModel], int]:
-        """Lista pre-órdenes (más recientes primero) con conteo: ``(items, total)``.
+        """Lists pre-orders (newest first) with a count: ``(items, total)``.
 
-        ``branch_scope`` aísla al staff a su sucursal; el admin (``None``) ve todas y
-        puede estrechar con ``branch_filter``.
+        ``branch_scope`` confines staff to their branch; the admin (``None``) sees
+        all of them and can narrow with ``branch_filter``.
         """
         self._sweep_expired()
         query = self.db.query(PreOrderModel)
@@ -88,12 +88,13 @@ class PreOrderService(BranchScopedMixin):
         branch_scope: Optional[int] = None,
         default_branch_id: Optional[int] = None,
     ) -> PreOrderModel:
-        """Crea una pre-orden abierta (``draft``) con los inputs del optimizador.
+        """Creates an open (``draft``) pre-order with the optimizer inputs.
 
-        La sucursal se resuelve desde ``branch_scope``: el operador la fija a la suya;
-        los roles globales (admin/vendedor) usan ``data.branch_id`` si viene, o si no la
-        ``default_branch_id`` (sucursal base del creador — el vendedor la predetermina,
-        el admin no tiene y debe indicar ``branchId``). El tope antiabuso es por sucursal.
+        The branch is resolved from ``branch_scope``: the operator is pinned to
+        their own; global roles (admin/seller) use ``data.branch_id`` if given,
+        otherwise ``default_branch_id`` (the creator's base branch — the seller
+        defaults to one, the admin has none and must provide ``branchId``). The
+        anti-abuse cap is per branch.
         """
         actor = actor or system_actor()
         if self.db.get(ClientModel, data.client_id) is None:
@@ -102,7 +103,7 @@ class PreOrderService(BranchScopedMixin):
             self.db, branch_scope, data.branch_id, default_branch_id
         )
         self._enforce_open_cap(data.client_id, branch_id)
-        # Valida el nivel de precio (422 si no existe/está inactivo) y lo normaliza.
+        # Validates the price tier (422 if missing/inactive) and normalizes it.
         tier = self.settings_service.resolve_price_tier(data.price_tier_code)
 
         validity_days = self.settings_service.get_preorder_config()[
@@ -127,7 +128,7 @@ class PreOrderService(BranchScopedMixin):
             preorder, None, PreOrderStatus.draft, actor, note="Pre-orden creada"
         )
         self.db.add(preorder)
-        self.db.flush()  # asigna id para componer el code legible
+        self.db.flush()  # assigns the id needed to build the readable code
         preorder.code = f"PRE-{now.year}-{preorder.id:04d}"
         self.db.commit()
         self.db.refresh(preorder)
@@ -140,7 +141,7 @@ class PreOrderService(BranchScopedMixin):
         actor: Optional[Actor] = None,
         branch_scope: Optional[int] = None,
     ) -> PreOrderModel:
-        """Edita una pre-orden abierta; rechaza si ya es terminal (confirmed/etc.)."""
+        """Edits an open pre-order; rejects it if already terminal (confirmed/etc.)."""
         actor = actor or system_actor()
         preorder = self.get_scoped_or_404(preorder_id, branch_scope)
         self._ensure_open(preorder)
@@ -164,8 +165,8 @@ class PreOrderService(BranchScopedMixin):
             preorder.notes = data.notes
         if "source" in fields:
             preorder.source = data.source
-        # Si el cliente había pedido cambios, editar = "atendido": la pre-orden
-        # vuelve a 'sent' (la pelota regresa al cliente) y se limpia la solicitud.
+        # If the client had requested changes, editing = "addressed": the pre-order
+        # goes back to 'sent' (the ball returns to the client) and the request is cleared.
         if preorder.status == PreOrderStatus.changes_requested.value:
             self._record_transition(
                 preorder,
@@ -182,7 +183,7 @@ class PreOrderService(BranchScopedMixin):
         return preorder
 
     def delete(self, preorder_id: int, branch_scope: Optional[int] = None) -> None:
-        """Elimina una pre-orden (salvo si ya fue confirmada: tiene una orden viva)."""
+        """Deletes a pre-order (unless already confirmed: it has a live order)."""
         preorder = self.get_scoped_or_404(preorder_id, branch_scope)
         if preorder.status == PreOrderStatus.confirmed.value:
             raise BusinessRuleError(
@@ -193,11 +194,11 @@ class PreOrderService(BranchScopedMixin):
         self.db.commit()
 
     def build_request(self, preorder: PreOrderModel) -> OptimizeRequest:
-        """Reconstruye el ``OptimizeRequest`` desde los inputs guardados.
+        """Rebuilds the ``OptimizeRequest`` from the stored inputs.
 
-        Lleva el nivel de precio para que ``optimize_response`` adjunte el bloque
-        ``pricing`` (no afecta la geometría ni el hash) y la ``strategy`` guardada
-        para reproducir el mismo acomodo (sí afecta la geometría y el hash).
+        Carries the price tier so ``optimize_response`` attaches the ``pricing``
+        block (it doesn't affect geometry or the hash) and the stored ``strategy``
+        to reproduce the same layout (this one does affect geometry and the hash).
         """
         return OptimizeRequest(
             materials=preorder.materials,
@@ -208,20 +209,20 @@ class PreOrderService(BranchScopedMixin):
         )
 
     def compute_payload(self, preorder: PreOrderModel) -> Tuple[dict, str]:
-        """Payload del optimizador (cache-first) para la pre-orden."""
+        """Optimizer payload (cache-first) for the pre-order."""
         return self.optimization_service.compute(self.build_request(preorder))
 
     def build_pricing_for(self, preorder: PreOrderModel, payload: dict) -> dict:
-        """Bloque de descuento (vivo) del nivel de precio de la pre-orden."""
+        """Live discount block for the pre-order's price tier."""
         tier = self.settings_service.resolve_price_tier(preorder.price_tier_code)
         return build_pricing(payload, tier)
 
     def build_optimize_response(self, preorder: PreOrderModel) -> OptimizeResponse:
-        """Respuesta de optimización (con cliente) para el detalle interno."""
+        """Optimization response (with client) for the internal detail view."""
         return self.optimization_service.optimize_response(self.build_request(preorder))
 
     def build_carrier(self, preorder: PreOrderModel) -> ProformaCarrier:
-        """Portador de proforma (PDF) recalculado para la pre-orden (cotización)."""
+        """Recomputed proforma carrier (PDF) for the pre-order (quote)."""
         payload, _ = self.compute_payload(preorder)
         payload = {**payload, "pricing": self.build_pricing_for(preorder, payload)}
         return ProformaCarrier.from_payload(
@@ -243,7 +244,7 @@ class PreOrderService(BranchScopedMixin):
         actor: Actor,
         note: Optional[str] = None,
     ) -> None:
-        """Anexa una entrada de historial de transición (la persiste el llamador)."""
+        """Appends a transition history entry (the caller persists it)."""
         preorder.history.append(
             PreOrderStatusHistoryModel(
                 from_status=from_status,
@@ -263,7 +264,7 @@ class PreOrderService(BranchScopedMixin):
             )
 
     def _sweep_expired(self) -> None:
-        """Expira (y persiste) las abiertas vencidas antes de contar/paginar."""
+        """Expires (and persists) any open ones past their validity before count/page."""
         stale = (
             self.db.query(PreOrderModel)
             .filter(
@@ -276,7 +277,7 @@ class PreOrderService(BranchScopedMixin):
             self.db.commit()
 
     def _expire_if_stale(self, preorder: PreOrderModel) -> bool:
-        """Marca como ``expired`` una pre-orden abierta cuya vigencia ya venció."""
+        """Marks an open pre-order as ``expired`` once its validity period is over."""
         if (
             preorder.expires_at is not None
             and preorder.status in _OPEN_VALUES
@@ -294,10 +295,10 @@ class PreOrderService(BranchScopedMixin):
         return False
 
     def _enforce_open_cap(self, client_id: int, branch_id: int) -> None:
-        """Bloquea si el cliente excede el tope de pre-órdenes abiertas en la sucursal.
+        """Blocks if the client exceeds the open pre-orders cap for the branch.
 
-        El tope se cuenta por ``(sucursal, cliente)``: un mismo cliente puede tener
-        cotizaciones abiertas en sucursales distintas sin interferir entre sí.
+        The cap is counted per ``(branch, client)``: the same client can have open
+        quotes in different branches without them interfering with each other.
         """
         candidates = (
             self.db.query(PreOrderModel)
@@ -322,5 +323,5 @@ class PreOrderService(BranchScopedMixin):
 
 
 def preorder_service(db: Session = Depends(get_db)) -> PreOrderService:
-    """Provider de ``PreOrderService`` para inyección en rutas."""
+    """Provider for ``PreOrderService`` injection in routes."""
     return PreOrderService(db)

@@ -17,13 +17,13 @@ exclude = [
 [tool.ruff.lint]
 # E/W (pycodestyle), F (pyflakes = flake8 + autoflake), I (isort)
 select = ["E", "W", "F", "I"]
-ignore = ["E203", "E501"]  # E501 lo gestiona el formateador; E203 choca con format
+ignore = ["E203", "E501"]  # E501 is handled by the formatter; E203 conflicts with format
 
 [tool.ruff.lint.isort]
 known-first-party = ["src", "config"]
 
 [tool.ruff.format]
-# estilo equivalente a black (default)
+# black-equivalent style (default)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -31,8 +31,8 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 markers = [
-    "unit: prueba unitaria sin DB (mock/funciones puras); no requiere PostgreSQL",
-    "integration: prueba de integración contra PostgreSQL real",
+    "unit: unit test without DB (mock/pure functions); does not require PostgreSQL",
+    "integration: integration test against real PostgreSQL",
 ]
 addopts = [
     "-v",

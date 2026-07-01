@@ -17,11 +17,11 @@ from src.cutting.parameters import CuttingParameters
 
 
 def _sort_pieces(pieces: List[Piece], strategy: PackingStrategy) -> List[Piece]:
-    """Orden de colocación según la estrategia de empaquetado.
+    """Placement order based on the packing strategy.
 
-    ``MAX_EFFICIENCY`` ordena por área descendente (Decreasing Area).
-    ``LONG_OFFCUTS`` ordena por alto y luego ancho descendentes, de modo que las
-    piezas más altas anclan columnas completas a lo largo del eje largo.
+    ``MAX_EFFICIENCY`` sorts by decreasing area (Decreasing Area).
+    ``LONG_OFFCUTS`` sorts by decreasing height then width, so the tallest
+    pieces anchor full columns along the long axis.
     """
     if strategy == PackingStrategy.LONG_OFFCUTS:
         return sorted(pieces, key=lambda p: (-p.priority, -p.height, -p.width))
@@ -29,7 +29,7 @@ def _sort_pieces(pieces: List[Piece], strategy: PackingStrategy) -> List[Piece]:
 
 
 class GuillotineOptimizer:
-    """Optimizador de corte usando el algoritmo Guillotine para un solo tablero"""
+    """Cutting optimizer using the Guillotine algorithm for a single board"""
 
     def __init__(
         self,
@@ -41,7 +41,7 @@ class GuillotineOptimizer:
     ):
         self.material = material
         self.strategy = strategy
-        # ``split_rule`` explícito gana; si no, se deriva de la estrategia.
+        # Explicit ``split_rule`` wins; otherwise it's derived from the strategy.
         self.split_rule = (
             split_rule
             if split_rule is not None
@@ -60,13 +60,13 @@ class GuillotineOptimizer:
 
         if total_horizontal_trim >= material.width:
             raise ValueError(
-                f"Los trims horizontales ({total_horizontal_trim}) exceden "
-                f"el ancho del material ({material.width})"
+                f"Horizontal trims ({total_horizontal_trim}) exceed "
+                f"the material width ({material.width})"
             )
         if total_vertical_trim >= material.height:
             raise ValueError(
-                f"Los trims verticales ({total_vertical_trim}) exceden "
-                f"la altura del material ({material.height})"
+                f"Vertical trims ({total_vertical_trim}) exceed "
+                f"the material height ({material.height})"
             )
 
         usable_width = material.width - self.left_trim - self.right_trim
@@ -86,8 +86,8 @@ class GuillotineOptimizer:
         for piece in pieces:
             for i in range(piece.quantity):
                 piece_copy = Piece(
-                    # ``#`` es un separador reservado para la instancia: no colisiona
-                    # con etiquetas que terminan en ``_<n>`` (ver ``base_label``).
+                    # ``#`` is a reserved instance separator: it doesn't collide
+                    # with labels ending in ``_<n>`` (see ``base_label``).
                     id=f"{piece.id}#{i+1}" if piece.quantity > 1 else piece.id,
                     width=piece.width,
                     height=piece.height,
@@ -109,13 +109,14 @@ class GuillotineOptimizer:
         return self.placed_pieces, unplaced_pieces
 
     def _fit_score(self, rect: Rectangle, piece: Piece):
-        """Puntaje de ajuste de un hueco para una pieza (menor = mejor).
+        """Fit score of a gap for a piece (lower = better).
 
-        ``MAX_EFFICIENCY`` usa Best-Area-Fit: el sobrante de área tras colocar la
-        pieza (``rect.area - piece.area``). ``LONG_OFFCUTS`` usa Bottom-Left:
-        prioriza el hueco más a la izquierda y abajo (``rect.x``, ``rect.y``),
-        desempatando por ajuste de área — así pega las piezas contra una esquina y
-        deja el sobrante dominante como una tira continua al lado opuesto.
+        ``MAX_EFFICIENCY`` uses Best-Area-Fit: the leftover area after placing
+        the piece (``rect.area - piece.area``). ``LONG_OFFCUTS`` uses
+        Bottom-Left: it prioritizes the gap furthest left and down (``rect.x``,
+        ``rect.y``), breaking ties by area fit — this pushes pieces into a
+        corner and leaves the dominant leftover as a continuous strip on the
+        opposite side.
         """
         leftover = rect.area - piece.area
         if self.strategy == PackingStrategy.LONG_OFFCUTS:
@@ -210,15 +211,16 @@ class GuillotineOptimizer:
         height_leftover: float,
         orientation: str,
     ) -> List[Cut]:
-        """Segmentos de corte que separan la pieza del rectángulo, por orientación.
+        """Cut segments that separate the piece from the rectangle, by orientation.
 
-        ``vertical_first`` deja el sobrante superior a ancho completo (corte
-        horizontal de ``rect.width``) y el lateral derecho a la altura de la pieza
-        (corte vertical de ``placed.height``). ``horizontal_first`` deja el sobrante
-        derecho a alto completo (corte vertical de ``rect.height``) y el superior al
-        ancho de la pieza (corte horizontal de ``placed.width``). El ``kerf`` es ancho
-        de hoja (perpendicular) y no altera la longitud. Sin sobrante en un eje no hay
-        corte en ese eje (ya lo separó un corte previo o el borde del tablero).
+        ``vertical_first`` leaves the top leftover at full width (horizontal
+        cut of ``rect.width``) and the right leftover at the piece's height
+        (vertical cut of ``placed.height``). ``horizontal_first`` leaves the
+        right leftover at full height (vertical cut of ``rect.height``) and the
+        top leftover at the piece's width (horizontal cut of ``placed.width``).
+        ``kerf`` is the blade width (perpendicular) and doesn't change the
+        length. No leftover on an axis means no cut on that axis (it was
+        already separated by a previous cut or the board's edge).
         """
         cuts: List[Cut] = []
         if orientation == "vertical_first":
@@ -265,10 +267,10 @@ class GuillotineOptimizer:
         width_leftover: float,
         height_leftover: float,
     ) -> Tuple[List[Rectangle], str]:
-        """Crea los rectángulos sobrantes y devuelve la orientación de split elegida.
+        """Creates the leftover rectangles and returns the chosen split orientation.
 
-        La orientación (``"vertical_first"`` | ``"horizontal_first"``) la usa
-        ``_cuts_for`` para derivar la longitud de los cortes con la topología real.
+        The orientation (``"vertical_first"`` | ``"horizontal_first"``) is used
+        by ``_cuts_for`` to derive cut lengths from the actual topology.
         """
         new_rects = []
         orientation = "vertical_first"
@@ -424,7 +426,7 @@ class GuillotineOptimizer:
 
 
 class MultiSheetGuillotineOptimizer:
-    """Optimizador de corte usando el algoritmo Guillotine para múltiples tableros"""
+    """Cutting optimizer using the Guillotine algorithm for multiple boards"""
 
     def __init__(
         self,
@@ -437,7 +439,7 @@ class MultiSheetGuillotineOptimizer:
     ):
         self.material_template = material_template
         self.strategy = strategy
-        # ``split_rule`` explícito gana; si no, se deriva de la estrategia.
+        # Explicit ``split_rule`` wins; otherwise it's derived from the strategy.
         self.split_rule = (
             split_rule
             if split_rule is not None
@@ -457,8 +459,8 @@ class MultiSheetGuillotineOptimizer:
         for piece in pieces:
             for i in range(piece.quantity):
                 piece_copy = Piece(
-                    # ``#`` es un separador reservado para la instancia: no colisiona
-                    # con etiquetas que terminan en ``_<n>`` (ver ``base_label``).
+                    # ``#`` is a reserved instance separator: it doesn't collide
+                    # with labels ending in ``_<n>`` (see ``base_label``).
                     id=f"{piece.id}#{i+1}" if piece.quantity > 1 else piece.id,
                     width=piece.width,
                     height=piece.height,
@@ -492,7 +494,7 @@ class MultiSheetGuillotineOptimizer:
                     strategy=self.strategy,
                 )
             except ValueError as e:
-                print(f"Error al crear optimizador: {e}")
+                print(f"Error creating optimizer: {e}")
                 break
 
             placed, unplaced = optimizer.optimize(remaining_pieces)

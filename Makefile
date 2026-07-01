@@ -1,80 +1,80 @@
-# Makefile para Cutter API
+# Makefile for Cutter API
 .PHONY: help build start dev down tests tests-local create-test-db lint-fix lint-check install clean logs redis-cli redis-flush
 
-# Las pruebas corren SIEMPRE contra una base dedicada (cutter_test_db), nunca
-# contra la base de desarrollo (cutter_db): el conftest hace TRUNCATE por test.
+# Tests ALWAYS run against a dedicated database (cutter_test_db), never
+# against the development database (cutter_db): the conftest TRUNCATEs per test.
 DB_TEST_DOCKER = postgresql://cutter:cutter@postgres:5432/cutter_test_db
 DB_TEST_LOCAL = postgresql://cutter:cutter@localhost:5433/cutter_test_db
 
-help: ## Muestra esta ayuda
+help: ## Shows this help
 	@grep -E '^[A-Za-z0-9_.-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-install: ## Instala las dependencias
+install: ## Installs dependencies
 	pip install -r requirements_dev.txt
 
-build: ## Construye la imagen Docker
+build: ## Builds the Docker image
 	docker compose build
 
-start: ## Inicia los contenedores en modo daemon
+start: ## Starts the containers in daemon mode
 	docker compose up -d
 
-dev: ## Inicia en modo desarrollo con recarga automática
+dev: ## Starts development mode with hot-reload
 	docker compose up -d && docker rm -f api || true && docker compose run --rm -e ENVIRONMENT=local -p 3000:3000 api
 
-down: ## Detiene los contenedores
+down: ## Stops the containers
 	docker compose down
 
-logs: ## Muestra los logs de la aplicación
+logs: ## Shows the application logs
 	docker compose logs -f api
 
-create-test-db: ## Crea cutter_test_db si no existe (idempotente, no toca cutter_db)
+create-test-db: ## Creates cutter_test_db if missing (idempotent, never touches cutter_db)
 	docker compose up -d postgres
 	@until docker compose exec -T postgres pg_isready -U cutter >/dev/null 2>&1; do sleep 1; done
 	@docker compose exec -T postgres psql -U cutter -d cutter_db -tc "SELECT 1 FROM pg_database WHERE datname='cutter_test_db'" | grep -q 1 || \
 		docker compose exec -T postgres psql -U cutter -d cutter_db -c "CREATE DATABASE cutter_test_db"
 
-tests: create-test-db ## Ejecuta las pruebas (contra cutter_test_db; nunca toca cutter_db)
+tests: create-test-db ## Runs the tests (against cutter_test_db; never touches cutter_db)
 	docker compose run --no-deps --rm -e DATABASE_URL=$(DB_TEST_DOCKER) -e TEST_DATABASE_URL=$(DB_TEST_DOCKER) -e BCRYPT_ROUNDS=4 api pytest -q
 
-tests-local: create-test-db ## Ejecuta las pruebas localmente (PostgreSQL en localhost:5433)
+tests-local: create-test-db ## Runs the tests locally (PostgreSQL on localhost:5433)
 	DATABASE_URL=$(DB_TEST_LOCAL) TEST_DATABASE_URL=$(DB_TEST_LOCAL) BCRYPT_ROUNDS=4 pytest -q
 
-lint-fix: ## Corrige errores de formato y lint
+lint-fix: ## Fixes formatting and lint errors
 	source .venv/bin/activate && ruff check --fix . && ruff format .
 
-lint-check: ## Verifica el formato del código
+lint-check: ## Checks code formatting
 	docker compose run --no-deps --rm api ruff check .
 	docker compose run --no-deps --rm api ruff format --check .
 
-lint-check-local: ## Verifica el formato del código localmente
+lint-check-local: ## Checks code formatting locally
 	ruff check . && ruff format --check .
 
-clean: ## Limpia contenedores e imágenes no utilizadas
+clean: ## Cleans up unused containers and images
 	docker system prune -f
 	docker volume prune -f
 
-shell: ## Abre una shell en el contenedor
+shell: ## Opens a shell inside the container
 	docker compose run --rm api bash
 
-redis-cli: ## Abre redis-cli dentro del contenedor de Redis
+redis-cli: ## Opens redis-cli inside the Redis container
 	docker exec -it redis redis-cli
 
-redis-flush: ## Limpia toda la caché de Redis (FLUSHALL)
+redis-flush: ## Clears the whole Redis cache (FLUSHALL)
 	docker exec -it redis redis-cli FLUSHALL
 
-run-local: ## Ejecuta la aplicación localmente (requiere PostgreSQL en localhost:5433)
+run-local: ## Runs the application locally (requires PostgreSQL on localhost:5433)
 	ENVIRONMENT=local DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db python main.py
 
-seed-boards: ## Siembra tableros y tapacantos en PostgreSQL local (puerto 5433)
+seed-boards: ## Seeds boards and edge bandings into local PostgreSQL (port 5433)
 	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db .venv/bin/python scripts/seed_boards.py
 
-seed-admin: ## Crea el primer administrador desde ADMIN_EMAIL/ADMIN_PASSWORD en .env
+seed-admin: ## Creates the first administrator from ADMIN_EMAIL/ADMIN_PASSWORD in .env
 	.venv/bin/python scripts/seed_admin.py
 
-seed-demo: ## Siembra datos demo (sucursales/usuarios/clientes/pre-órdenes/órdenes por estado) en PostgreSQL local (5433). Usa reset=1 para regenerar.
+seed-demo: ## Seeds demo data (branches/users/clients/pre-orders/orders by status) into local PostgreSQL (5433). Use reset=1 to regenerate.
 	DATABASE_URL=postgresql://cutter:cutter@localhost:5433/cutter_db REDIS_URL=redis://localhost:6379/0 .venv/bin/python scripts/seed_demo.py $(if $(reset),--reset)
 
-setup: ## Configuración inicial del proyecto
+setup: ## Initial project setup
 	cp .env.example .env || true
 	@echo "Archivo .env creado. Edítalo según tus necesidades."
 

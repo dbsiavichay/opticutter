@@ -1,10 +1,10 @@
-"""Resolución de materiales agnóstica al origen para el motor de corte.
+"""Source-agnostic material resolution for the cutting engine.
 
-El optimizador solo necesita dimensiones y costo. Este resolver traduce cada
-``MaterialInput`` (catálogo / retazo / manual) a un ``ResolvedMaterial`` uniforme,
-aislando en un único punto el acoplamiento con el catálogo de productos. Para
-soportar una fuente nueva basta con añadir su ``source`` y su rama (en
-``schemas.py`` y aquí); el dominio ``cutting`` no cambia.
+The optimizer only needs dimensions and cost. This resolver translates each
+``MaterialInput`` (catalog / offcut / manual) into a uniform ``ResolvedMaterial``,
+isolating the coupling with the product catalog to a single point. Supporting a
+new source only requires adding its ``source`` and its branch (in ``schemas.py``
+and here); the ``cutting`` domain stays unchanged.
 """
 
 from dataclasses import dataclass
@@ -25,11 +25,11 @@ from src.shared.exceptions import BusinessRuleError, EntityNotFoundError
 
 @dataclass
 class ResolvedMaterial:
-    """Material listo para el optimizador: geometría + costo + metadatos de origen.
+    """Material ready for the optimizer: geometry + cost + origin metadata.
 
-    ``product_id``/``code``/``name`` solo se pueblan para materiales de catálogo
-    (insumo del cobro de órdenes y de la proforma); las fuentes inline los dejan en
-    ``None`` (``name`` puede llevar la etiqueta libre del material).
+    ``product_id``/``code``/``name`` are only populated for catalog materials
+    (used for order billing and the proforma); inline sources leave them as
+    ``None`` (``name`` may carry the material's free-text label).
     """
 
     key: str
@@ -47,7 +47,7 @@ class ResolvedMaterial:
         return self.source == MaterialSource.catalog.value
 
     def to_dict(self) -> dict:
-        """Forma serializable para el snapshot/payload de la optimización."""
+        """Serializable form for the optimization snapshot/payload."""
         return {
             "material_key": self.key,
             "source": self.source,
@@ -62,7 +62,7 @@ class ResolvedMaterial:
 
 
 class MaterialResolver:
-    """Resuelve cada ``MaterialInput`` a un ``ResolvedMaterial`` según su ``source``."""
+    """Resolves each ``MaterialInput`` to a ``ResolvedMaterial`` based on its ``source``."""
 
     def __init__(self, db: Session):
         self.product_service = ProductService(db)
@@ -70,7 +70,7 @@ class MaterialResolver:
     def resolve_all(
         self, materials: List[MaterialInput]
     ) -> Dict[str, ResolvedMaterial]:
-        """Resuelve la lista de materiales a un mapa ``key -> ResolvedMaterial``."""
+        """Resolves the material list into a ``key -> ResolvedMaterial`` map."""
         return {m.key: self.resolve(m) for m in materials}
 
     def resolve(self, material: MaterialInput) -> ResolvedMaterial:
@@ -79,7 +79,7 @@ class MaterialResolver:
         return self._resolve_inline(material)
 
     def _resolve_catalog(self, material: CatalogMaterialInput) -> ResolvedMaterial:
-        """Resuelve un tablero del catálogo: 404 si no existe, 422 si no es board."""
+        """Resolves a catalog board: 404 if it doesn't exist, 422 if it isn't a board."""
         product = self.product_service.get(material.product_id)
         if product is None:
             raise EntityNotFoundError("Product", material.product_id)
@@ -101,7 +101,7 @@ class MaterialResolver:
         )
 
     def _resolve_inline(self, material: InlineMaterialInput) -> ResolvedMaterial:
-        """Retazo (empresa/cliente) o medida manual: dimensiones y costo del input."""
+        """Company/client offcut or manual measurement: dimensions and cost from the input."""
         return ResolvedMaterial(
             key=material.key,
             width=material.width,

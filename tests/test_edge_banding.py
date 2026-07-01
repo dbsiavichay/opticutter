@@ -1,4 +1,4 @@
-"""Tests de tapacantos: metraje, validación, regla de rotación y cobro en órdenes."""
+"""Tests for edge banding: linear meters, validation, rotation rule and order charges."""
 
 import math
 
@@ -56,7 +56,7 @@ def _create_edge_banding(
 
 
 def _materials(board_id, key="b1"):
-    """Stock de catálogo: un tablero referenciado por ``materialKey``."""
+    """Catalog stock: one board referenced by ``materialKey``."""
     return [{"key": key, "source": "catalog", "productId": board_id}]
 
 
@@ -74,23 +74,23 @@ def _requirement(eb_id, sides, height=500, width=1000, quantity=1, material_key=
 
 
 def _expected_meters(net_m: float):
-    """Replica la fórmula del servicio: merma + redondeo al metro entero."""
+    """Mirrors the service's formula: waste factor + rounding to the whole meter."""
     with_waste = net_m * (1 + config.EDGE_BANDING_WASTE_FACTOR)
     return round(with_waste, 2), math.ceil(with_waste)
 
 
 # --------------------------------------------------------------------------- #
-# Notación de taller de los cantos (2L1C CS)
+# Workshop notation for edges (2L1C CS)
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "sides, band_type, expected",
     [
-        (["left", "right", "top"], "Soft", "2L1C CS"),  # 2 largos (alto) + 1 corto
-        (["left"], "Soft", "1L CS"),  # solo largo: omite la parte en cero
-        (["top", "bottom"], "Hard", "2C CD"),  # solo cortos (ancho), canto duro
-        (["left", "right", "top", "bottom"], "Soft", "4L CS"),  # todos los lados
-        ([], "Soft", ""),  # sin lados → vacío
-        (["left", "right"], None, "2L"),  # sin band_type → sin sufijo
+        (["left", "right", "top"], "Soft", "2L1C CS"),  # 2 long (height) + 1 short
+        (["left"], "Soft", "1L CS"),  # only long: omits the zero part
+        (["top", "bottom"], "Hard", "2C CD"),  # only short (width), hard edge
+        (["left", "right", "top", "bottom"], "Soft", "4L CS"),  # all sides
+        ([], "Soft", ""),  # no sides → empty
+        (["left", "right"], None, "2L"),  # no band_type → no suffix
     ],
 )
 def test_edge_banding_notation(sides, band_type, expected):
@@ -98,14 +98,14 @@ def test_edge_banding_notation(sides, band_type, expected):
 
 
 # --------------------------------------------------------------------------- #
-# Metraje y costo (endpoint /optimize)
+# Linear meters and cost (/optimize endpoint)
 # --------------------------------------------------------------------------- #
 def test_optimize_aggregates_edge_banding_meters_and_cost(client):
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, price=2.0)
 
-    # height=500 (alto), width=1000 (ancho); lados top+bottom = 2×ancho = 2000 mm.
+    # height=500, width=1000; top+bottom sides = 2×width = 2000 mm.
     resp = client.post(
         "/api/v1/optimize/",
         json={
@@ -133,12 +133,12 @@ def test_optimize_aggregates_edge_banding_meters_and_cost(client):
 
 
 def test_optimize_reports_edge_banding_linear_m_per_sheet(client):
-    """El metraje neto de canto se expone por plancha y como total general."""
+    """The net edge linear meters is exposed per sheet and as the overall total."""
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, price=2.0)
 
-    # top+bottom con width=1000 → 2×1000 = 2000 mm = 2.0 m neto (1 pieza, 1 plancha).
+    # top+bottom with width=1000 → 2×1000 = 2000 mm = 2.0 net m (1 piece, 1 sheet).
     resp = client.post(
         "/api/v1/optimize/",
         json={
@@ -154,9 +154,9 @@ def test_optimize_reports_edge_banding_linear_m_per_sheet(client):
 
 
 def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
-    """Regresión: una pieza SIN etiqueta y ``quantity=1`` usa el auto-label
-    ``piece_1``; el metraje por plancha y los ``edges`` de la pieza no deben
-    perderse (antes ``base_label`` mutilaba el ``_1`` y daba 0)."""
+    """Regression: a piece WITHOUT a label and ``quantity=1`` uses the auto-label
+    ``piece_1``; the per-sheet linear meters and the piece's ``edges`` must not be
+    lost (previously ``base_label`` mangled the ``_1`` and produced 0)."""
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, price=2.0)
@@ -180,20 +180,20 @@ def test_unlabeled_piece_still_reports_edge_banding_per_sheet(client):
         },
     )
     data = resp.json()["data"]
-    # top+bottom con width=1000 → 2×1000 = 2000 mm = 2.0 m neto.
+    # top+bottom with width=1000 → 2×1000 = 2000 mm = 2.0 net m.
     assert data["totalEdgeBandingLinearM"] == pytest.approx(2.0)
     layout = data["layouts"][0]
     assert layout["statistics"]["edgeBandingLinearM"] == pytest.approx(2.0)
-    # El canto se propaga a la pieza colocada (para el diagrama / hoja de taller).
+    # Edge banding propagates to the placed piece (for the diagram / shop sheet).
     placed = layout["placedPieces"][0]
     assert placed["edges"] is not None
     assert placed["edges"]["sides"] == ["top", "bottom"]
 
 
 def test_optimize_edge_banding_without_product_reports_length_only(client):
-    """Canto solo-geometría: ``edgeBanding`` con lados pero SIN ``productId`` calcula la
-    longitud de canto (lo que importa en el optimizador) sin resolver ni cobrar un
-    producto; este se asigna recién al cotizar."""
+    """Geometry-only edge banding: ``edgeBanding`` with sides but WITHOUT ``productId``
+    computes the edge length (what the optimizer cares about) without resolving or
+    charging a product; that's only assigned when quoting."""
     c = _create_client(client)
     b = _create_board(client)
 
@@ -217,33 +217,33 @@ def test_optimize_edge_banding_without_product_reports_length_only(client):
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
-    # La longitud sí se computa: top+bottom con width=1000 → 2.0 m neto.
+    # The length is still computed: top+bottom with width=1000 → 2.0 net m.
     assert data["totalEdgeBandingLinearM"] == pytest.approx(2.0)
-    # Sin producto: no hay costo de canto y el resumen va sin identidad ni precio.
+    # No product: no edge cost and the summary has no identity or price.
     assert data["totalEdgeBandingCost"] == 0.0
     entry = data["edgeBandingsSummary"][0]
     assert entry["productId"] is None
     assert entry["productCode"] is None
     assert entry["pricePerM"] == 0.0
     assert entry["netLinearM"] == pytest.approx(2.0)
-    # El canto se propaga a la pieza colocada (para el diagrama) sin producto.
-    # ``edges`` es un dict crudo (no modelo Pydantic): sus claves van en snake_case.
+    # Edge banding propagates to the placed piece (for the diagram) with no product.
+    # ``edges`` is a raw dict (not a Pydantic model): its keys are snake_case.
     placed = data["layouts"][0]["placedPieces"][0]
     assert placed["edges"]["sides"] == ["top", "bottom"]
     assert placed["edges"]["product_id"] is None
 
 
 def test_same_label_pieces_keep_their_own_edge_banding(client):
-    """Regresión: varias piezas con la MISMA etiqueta y ``quantity=1`` pero cantos
-    distintos NO se colapsan. Antes el canto se indexaba por etiqueta, así que todas
-    heredaban el último spec (los 4 lados) y el metraje por plancha salía inflado;
-    ahora cada pieza colocada conserva sus propios lados gracias al id único."""
+    """Regression: several pieces with the SAME label and ``quantity=1`` but different
+    edge banding must NOT collapse. Edge banding used to be indexed by label, so all
+    of them inherited the last spec (all 4 sides) and the per-sheet linear meters came
+    out inflated; now each placed piece keeps its own sides thanks to the unique id."""
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, price=2.0)
 
-    # Mismo label "Puerta", ancho distinto por pieza (identidad geométrica) y cantos
-    # distintos; canRotate=False para que el lado geométrico == nominal.
+    # Same label "Puerta", different width per piece (geometric identity) and
+    # different edge banding; canRotate=False so the geometric side == nominal.
     sides_by_width = {
         300: {"left"},
         301: {"left", "right"},
@@ -274,14 +274,14 @@ def test_same_label_pieces_keep_their_own_edge_banding(client):
     assert resp.status_code == 200
     data = resp.json()["data"]
 
-    # Cada pieza colocada conserva SUS lados, no los 4 del último requerimiento.
+    # Each placed piece keeps ITS sides, not the 4 from the last requirement.
     placed = data["layouts"][0]["placedPieces"]
     assert len(placed) == len(sides_by_width)
     got = {p["originalWidth"]: set(p["edges"]["sides"]) for p in placed}
     assert got == sides_by_width
 
-    # El metraje por plancha coincide con el neto del resumen (no inflado ×nº piezas).
-    # net por pieza: 500 + 1000 + 302 + (303+303+500+500) = 3408 mm = 3.41 m.
+    # The per-sheet linear meters matches the summary's net (not inflated ×#pieces).
+    # net per piece: 500 + 1000 + 302 + (303+303+500+500) = 3408 mm = 3.41 m.
     net_summary = data["edgeBandingsSummary"][0]["netLinearM"]
     assert net_summary == pytest.approx(3.41)
     stats = data["layouts"][0]["statistics"]
@@ -290,12 +290,12 @@ def test_same_label_pieces_keep_their_own_edge_banding(client):
 
 
 def test_optimize_uses_height_for_left_right_sides(client):
-    """left/right miden el alto; top/bottom el ancho."""
+    """left/right measure the height; top/bottom the width."""
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, price=1.0)
 
-    # alto=500: left+right = 2×500 = 1000 mm = 1.0 m neto.
+    # height=500: left+right = 2×500 = 1000 mm = 1.0 net m.
     resp = client.post(
         "/api/v1/optimize/",
         json={
@@ -359,7 +359,7 @@ def test_optimize_without_edge_banding_has_empty_summary(client):
 
 
 # --------------------------------------------------------------------------- #
-# Validación del producto de tapacanto
+# Edge-banding product validation
 # --------------------------------------------------------------------------- #
 def test_edge_banding_unknown_product_returns_404(client):
     c = _create_client(client)
@@ -377,7 +377,7 @@ def test_edge_banding_unknown_product_returns_404(client):
 
 
 def test_edge_banding_non_edge_banding_product_rejected(client):
-    """Si edgeBanding.productId apunta a un tablero → regla de negocio 422."""
+    """If edgeBanding.productId points to a board → business rule 422."""
     c = _create_client(client)
     b = _create_board(client)
     other_board = _create_board(client, code="MEL15")
@@ -409,7 +409,7 @@ def test_edge_banding_rejects_duplicate_sides(client):
 
 
 # --------------------------------------------------------------------------- #
-# Lados geométricos y remapeo al rotar
+# Geometric sides and remapping on rotation
 # --------------------------------------------------------------------------- #
 def test_geometric_edges_mapping(db_session):
     svc = OptimizationService(db_session)
@@ -419,17 +419,17 @@ def test_geometric_edges_mapping(db_session):
         product_id=2, sides=[EdgeSide.top, EdgeSide.left, EdgeSide.right]
     )
 
-    # Sin rotar: identidad.
+    # Not rotated: identity.
     assert svc._geometric_edges(spec_tb, {}, False)["sides"] == ["top", "bottom"]
     assert svc._geometric_edges(spec_asym, {}, False)["sides"] == [
         "top",
         "left",
         "right",
     ]
-    # Rotada (giro 90° horario): top→right, right→bottom, bottom→left, left→top.
+    # Rotated (90° clockwise): top→right, right→bottom, bottom→left, left→top.
     assert svc._geometric_edges(spec_tb, {}, True)["sides"] == ["left", "right"]
     assert svc._geometric_edges(spec_lr, {}, True)["sides"] == ["top", "bottom"]
-    # Asimétrico también se remapea (no se bloquea la rotación).
+    # Asymmetric is also remapped (rotation isn't blocked).
     assert svc._geometric_edges(spec_asym, {}, True)["sides"] == [
         "top",
         "bottom",
@@ -438,10 +438,10 @@ def test_geometric_edges_mapping(db_session):
 
 
 def test_geometric_edges_notation_is_rotation_invariant(db_session):
-    """La notación se calcula desde los lados NOMINALES, así que no cambia al rotar."""
+    """The notation is computed from the NOMINAL sides, so it doesn't change on rotation."""
     svc = OptimizationService(db_session)
-    # top+left+right: 2 largos (left/right=alto) + 1 corto (top=ancho). Sin producto
-    # en el mapa → sin band_type → sin sufijo CS/CD.
+    # top+left+right: 2 long (left/right=height) + 1 short (top=width). No product
+    # in the map → no band_type → no CS/CD suffix.
     spec = EdgeBandingSpec(
         product_id=2, sides=[EdgeSide.top, EdgeSide.left, EdgeSide.right]
     )
@@ -450,13 +450,13 @@ def test_geometric_edges_notation_is_rotation_invariant(db_session):
 
 
 def test_asymmetric_banding_rotates_and_swaps_edges(client):
-    """Canteado asimétrico NO bloquea la rotación: si la pieza sale rotada, los
-    cantos se intercambian al lado físico correspondiente."""
+    """Asymmetric edge banding does NOT block rotation: if the piece ends up
+    rotated, the edges swap to the corresponding physical side."""
     c = _create_client(client)
-    b = _create_board(client)  # 2440 (alto) × 1220 (ancho)
+    b = _create_board(client)  # 2440 (height) × 1220 (width)
     eb = _create_edge_banding(client)
 
-    # Pieza 1000(alto) × 2000(ancho): solo entra rotada (ancho 2000 > tablero 1220).
+    # Piece 1000(height) × 2000(width): only fits rotated (width 2000 > board 1220).
     resp = client.post(
         "/api/v1/optimize/",
         json={
@@ -469,18 +469,18 @@ def test_asymmetric_banding_rotates_and_swaps_edges(client):
     )
     placed = resp.json()["data"]["layouts"][0]["placedPieces"][0]
     assert placed["rotated"] is True
-    # CW: top→right, left→top ⇒ lados geométricos {top, right}.
+    # CW: top→right, left→top ⇒ geometric sides {top, right}.
     assert placed["edges"]["sides"] == ["top", "right"]
     assert placed["edges"]["code"] == "TAP22"
 
 
 def test_placed_piece_notation_includes_band_type(client):
-    """La pieza colocada lleva la notación de cantos con sufijo CS/CD del band_type."""
+    """The placed piece carries the edge notation with the CS/CD suffix from band_type."""
     c = _create_client(client)
     b = _create_board(client)
     eb = _create_edge_banding(client, band_type="Soft")
 
-    # alto=500, ancho=1000, sin rotar: left+right = 2 largos, top = 1 corto; Soft → CS.
+    # height=500, width=1000, not rotated: left+right = 2 long, top = 1 short; Soft → CS.
     req = _requirement(eb["id"], ["left", "right", "top"])
     req["canRotate"] = False
     resp = client.post(
@@ -494,16 +494,16 @@ def test_placed_piece_notation_includes_band_type(client):
     placed = resp.json()["data"]["layouts"][0]["placedPieces"][0]
     assert placed["rotated"] is False
     assert placed["edges"]["notation"] == "2L1C CS"
-    # El tipo canónico viaja en la pieza colocada (diferencia suave/duro en el diagrama).
-    # ``edges`` es un dict crudo → la clave se serializa tal cual (snake_case).
+    # The canonical type travels with the placed piece (soft/hard distinction in the diagram).
+    # ``edges`` is a raw dict → the key is serialized as-is (snake_case).
     assert placed["edges"]["band_type"] == "Soft"
 
 
 # --------------------------------------------------------------------------- #
-# Cobro durable en órdenes
+# Durable charge on orders
 # --------------------------------------------------------------------------- #
 def _mint_order(client, db_session, payload):
-    """Mintea una orden por el servicio (la creación HTTP se retiró) y la lee vía GET."""
+    """Mints an order via the service (HTTP creation was removed) and reads it back via GET."""
     order = OrderService(db_session).create(OrderCreate.model_validate(payload))
     return client.get(f"/api/v1/orders/{order.id}").json()["data"]
 
@@ -524,7 +524,7 @@ def test_order_charges_edge_banding(client, db_session):
         },
     )
 
-    # Dos líneas de cobro: tablero + tapacanto.
+    # Two charge lines: board + edge banding.
     lines = {line["productCode"]: line for line in data["lines"]}
     assert "MEL18" in lines and "TAP22" in lines
 
@@ -535,14 +535,14 @@ def test_order_charges_edge_banding(client, db_session):
     assert eb_line["lineTotal"] == pytest.approx(round(billed * 2.0, 2))
     assert eb_line["linearM"] is not None
 
-    # Totales inmutables = tableros + tapacantos.
+    # Immutable totals = boards + edge bandings.
     expected_total = round(sum(line["lineTotal"] for line in data["lines"]), 2)
     assert data["subtotal"] == data["total"] == pytest.approx(expected_total)
 
-    # La pieza congela su canteado (lados nominales).
+    # The piece freezes its edge banding (nominal sides).
     assert data["pieces"][0]["edges"]["sides"] == ["top", "bottom"]
 
-    # El export de facturación incluye la línea de tapacanto.
+    # The billing export includes the edge-banding line.
     exported = client.get(f"/api/v1/orders/{data['id']}/export").json()["data"]
     codes = {line["productCode"] for line in exported["lines"]}
     assert {"MEL18", "TAP22"} <= codes
@@ -573,8 +573,8 @@ def test_order_document_with_edge_banding_renders(client, db_session):
 
 
 def test_production_sheet_renders_soft_and_hard_bands(client, db_session):
-    """La hoja de producción (B/N) renderiza piezas con canto suave y duro: ejercita
-    el rayado del canto duro y ambas entradas de leyenda. El summary expone bandType."""
+    """The production sheet (B/W) renders pieces with soft and hard edges: exercises
+    the hard-edge hatching and both legend entries. The summary exposes bandType."""
     c = _create_client(client)
     b = _create_board(client)
     soft = _create_edge_banding(client, code="TAP-SOFT", price=2.0, band_type="Soft")
@@ -590,7 +590,7 @@ def test_production_sheet_renders_soft_and_hard_bands(client, db_session):
         ],
     }
 
-    # El resumen de tapacantos expone el tipo (campo Pydantic → camelCase ``bandType``).
+    # The edge-banding summary exposes the type (Pydantic field → camelCase ``bandType``).
     summary = client.post("/api/v1/optimize/", json=payload).json()["data"][
         "edgeBandingsSummary"
     ]

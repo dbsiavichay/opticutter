@@ -1,10 +1,10 @@
-"""Middlewares ASGI puros para contexto por request.
+"""Pure ASGI middlewares for per-request context.
 
-Se usa ASGI puro (no ``BaseHTTPMiddleware``): este último ejecuta el endpoint en
-otra task y el ``ContextVar`` fijado antes de ``call_next`` no siempre propaga.
-ASGI puro corre en la misma task, así que el requestId queda visible durante la
-serialización del ``response_model`` (donde ``Meta`` lo lee) y el id de usuario
-queda visible para los servicios invocados desde el handler.
+Pure ASGI is used (not ``BaseHTTPMiddleware``): the latter runs the endpoint
+in a different task, and the ``ContextVar`` set before ``call_next`` doesn't
+always propagate. Pure ASGI runs in the same task, so the requestId stays
+visible during ``response_model`` serialization (where ``Meta`` reads it) and
+the user id stays visible to services invoked from the handler.
 """
 
 from uuid import uuid4
@@ -14,10 +14,10 @@ from src.shared.security import decode_access_token
 
 
 class RequestIDMiddleware:
-    """Asigna un requestId por request y lo devuelve en el header ``X-Request-ID``.
+    """Assigns a requestId per request and returns it in the ``X-Request-ID`` header.
 
-    Respeta un ``X-Request-ID`` entrante (continuidad de traza, p. ej. desde el
-    bot) o genera uno nuevo.
+    Honors an incoming ``X-Request-ID`` (trace continuity, e.g. from the bot)
+    or generates a new one.
     """
 
     def __init__(self, app):
@@ -44,12 +44,12 @@ class RequestIDMiddleware:
 
 
 class CurrentUserMiddleware:
-    """Fija el id del usuario autenticado en el contexto para auditoría genérica.
+    """Sets the authenticated user's id in context for generic auditing.
 
-    Decodifica el ``Authorization: Bearer`` de forma best-effort: un token ausente
-    o inválido deja ``current_user_ctx`` en ``None`` (la dependencia de auth sigue
-    devolviendo 401 donde corresponda). Solo necesita el ``sub`` (id) del JWT, que
-    ``CRUDService`` usa para estampar ``created_by``/``updated_by``.
+    Decodes the ``Authorization: Bearer`` header on a best-effort basis: a
+    missing or invalid token leaves ``current_user_ctx`` as ``None`` (the auth
+    dependency still returns 401 where applicable). It only needs the JWT's
+    ``sub`` (id), which ``CRUDService`` uses to stamp ``created_by``/``updated_by``.
     """
 
     def __init__(self, app):

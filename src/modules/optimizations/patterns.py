@@ -1,33 +1,33 @@
-"""Agrupación de layouts por patrón de corte.
+"""Grouping of layouts by cutting pattern.
 
-Varias hojas pueden compartir exactamente la misma disposición de cortes (misma
-geometría y mismas etiquetas de pieza). Estas utilidades detectan esos patrones
-repetidos para deduplicar la representación visual y el resumen, sin alterar el
-conteo físico de tableros.
+Multiple sheets can share the exact same cut arrangement (same geometry and
+same piece labels). These utilities detect those repeated patterns to
+deduplicate the visual representation and the summary, without altering the
+physical board count.
 """
 
 import re
 from typing import List, Tuple
 
-# El optimizador expande las piezas con sufijo de instancia ``#{i+1}`` cuando
-# ``quantity > 1`` (ver ``src/cutting/optimizer.py``). Para comparar patrones nos
-# interesa la etiqueta base, no la instancia concreta. Se usa ``#`` (no ``_``) para
-# no mutilar etiquetas que ya terminan en ``_<n>`` (p. ej. el auto-label ``piece_1``
-# o una etiqueta de usuario ``estante_2``).
+# The optimizer expands pieces with an instance suffix ``#{i+1}`` when
+# ``quantity > 1`` (see ``src/cutting/optimizer.py``). To compare patterns we
+# care about the base label, not the specific instance. ``#`` (not ``_``) is used
+# so labels that already end in ``_<n>`` (e.g. the auto-label ``piece_1`` or a
+# user label ``estante_2``) aren't mangled.
 _INSTANCE_SUFFIX = re.compile(r"#\d+$")
 
 
 def base_label(piece_id: str) -> str:
-    """Devuelve la etiqueta base quitando un único sufijo de instancia ``#N``."""
+    """Returns the base label, stripping a single ``#N`` instance suffix."""
     return _INSTANCE_SUFFIX.sub("", piece_id or "")
 
 
 def layout_signature(layout: dict) -> Tuple:
-    """Firma canónica del patrón de corte de un layout.
+    """Canonical signature of a layout's cutting pattern.
 
-    Dos layouts con la misma firma comparten geometría y etiquetas base de pieza.
-    Ignora el número de hoja, los remanentes (derivados de las piezas) y el sufijo
-    de instancia del ``piece_id``.
+    Two layouts with the same signature share geometry and base piece labels.
+    Ignores the sheet number, the remainders (derived from the pieces) and the
+    ``piece_id`` instance suffix.
     """
     material_key = layout.get("material", {}).get("material_key")
     pieces = [
@@ -46,10 +46,10 @@ def layout_signature(layout: dict) -> Tuple:
 
 
 def group_layouts(layouts: List[dict]) -> List[dict]:
-    """Agrupa los layouts por patrón de corte preservando el orden de aparición.
+    """Groups the layouts by cutting pattern, preserving the order of appearance.
 
-    Devuelve una lista de grupos; cada grupo conserva el layout representativo
-    (el primero del patrón) y cuántas hojas lo comparten::
+    Returns a list of groups; each group keeps the representative layout (the
+    first of the pattern) and how many sheets share it::
 
         {
             "pattern_id": 1,

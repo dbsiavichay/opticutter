@@ -8,11 +8,12 @@ from src.shared.schemas import CamelModel
 
 
 class DraftCreate(CamelModel):
-    """Crear un borrador del optimizador.
+    """Create an optimizer draft.
 
-    Los campos mapean 1:1 a columnas para que ``CRUDService.create`` funcione con
-    ``self.model(**data.model_dump())``. ``payload`` es un objeto JSON opaco: el
-    backend no valida su forma interna (la define el frontend).
+    Fields map 1:1 to columns so ``CRUDService.create`` works with
+    ``self.model(**data.model_dump())``. ``payload`` is an opaque JSON object:
+    the backend doesn't validate its internal shape (it's defined by the
+    frontend).
     """
 
     name: str = Field(..., min_length=1, max_length=128, description="Draft name")
@@ -33,7 +34,7 @@ class DraftCreate(CamelModel):
 
 
 class DraftUpdate(CamelModel):
-    """Actualizar (sobrescribir) un borrador. Todos los campos son opcionales."""
+    """Update (overwrite) a draft. All fields are optional."""
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     client_id: Optional[int] = None
@@ -41,7 +42,7 @@ class DraftUpdate(CamelModel):
 
 
 class DraftResponse(CamelModel):
-    """Detalle de un borrador, incluido el ``payload`` completo."""
+    """Draft detail, including the full ``payload``."""
 
     id: int
     name: str
@@ -53,7 +54,7 @@ class DraftResponse(CamelModel):
 
 
 class DraftSummaryResponse(CamelModel):
-    """Resumen liviano para el listado: el ``payload`` se omite a propósito."""
+    """Lightweight summary for the listing: ``payload`` is deliberately omitted."""
 
     id: int
     name: str

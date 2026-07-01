@@ -1,7 +1,7 @@
-"""Endpoints read-only de analítica para el dashboard.
+"""Read-only analytics endpoints for the dashboard.
 
-Cuatro endpoints cohesivos, uno por familia de gráfico. Todos devuelven payloads
-agregados listos para graficar, envueltos en ``DataResponse[T]``.
+Cohesive endpoints, one per chart family. All return aggregated,
+chart-ready payloads wrapped in ``DataResponse[T]``.
 """
 
 from typing import Optional
@@ -24,8 +24,8 @@ from src.modules.users.dependencies import require_permission
 from src.modules.users.enums import UserRole
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
-# Analítica del dashboard: solo "administrador" (RESOURCE_ROLES["analytics"]). El
-# admin es global, así que ``branchId`` es un filtro OPCIONAL para revisar un almacén.
+# Dashboard analytics: "administrador" only (RESOURCE_ROLES["analytics"]). The
+# admin is global, so ``branchId`` is an OPTIONAL filter to review one warehouse.
 router = APIRouter(
     prefix="/analytics",
     tags=["analytics"],
@@ -36,14 +36,14 @@ router = APIRouter(
 _BRANCH_QUERY = Query(
     default=None,
     alias="branchId",
-    description="Filtra las métricas a una sucursal (vacío = todas)",
+    description="Restricts metrics to a branch (empty = all)",
 )
 
 _GRANULARITY_QUERY = Query(
-    Granularity.day, description="Tamaño de bucket: day | week | month"
+    Granularity.day, description="Bucket size: day | week | month"
 )
 
-_ROLE_QUERY = Query(default=None, description="Filtra por rol (vacío = todos)")
+_ROLE_QUERY = Query(default=None, description="Filters by role (empty = all)")
 
 
 @router.get("/summary", response_model=DataResponse[AnalyticsSummary])
@@ -52,7 +52,7 @@ def get_summary(
     branch_id: Optional[int] = _BRANCH_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Tarjetas KPI del periodo: operación, pipeline y tendencia base."""
+    """KPI cards for the period: operations, pipeline and base trend."""
     return ok(svc.summary(dr, branch_id=branch_id))
 
 
@@ -63,7 +63,7 @@ def get_timeseries(
     branch_id: Optional[int] = _BRANCH_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Tendencias temporales (eje denso, huecos en cero)."""
+    """Time trends (dense axis, gaps filled with zero)."""
     return ok(svc.timeseries(dr, granularity, branch_id=branch_id))
 
 
@@ -73,7 +73,7 @@ def get_breakdown_status(
     branch_id: Optional[int] = _BRANCH_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Embudo de estados: conteo e ingreso por estado (todos los estados, incl. cero)."""
+    """Status funnel: count and revenue per status (every status, incl. zero)."""
     return ok(svc.breakdown_status(dr, branch_id=branch_id))
 
 
@@ -82,7 +82,7 @@ def get_breakdown_branch(
     dr: DateRange = Depends(),
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Comparativo por sucursal: conteo e ingreso por almacén (revisión gerencial)."""
+    """Branch comparison: count and revenue per warehouse (management review)."""
     return ok(svc.breakdown_branch(dr))
 
 
@@ -92,7 +92,7 @@ def get_operations(
     branch_id: Optional[int] = _BRANCH_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Eficiencia de material (ponderada por área) y merma."""
+    """Material efficiency (area-weighted) and waste."""
     return ok(svc.operations(dr, branch_id=branch_id))
 
 
@@ -103,7 +103,7 @@ def get_bottlenecks(
     branch_id: Optional[int] = _BRANCH_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Cuellos de botella: duración por proceso (avg/mediana/p90) y cuándo se ralentiza."""
+    """Bottlenecks: duration per process (avg/median/p90) and when it slows down."""
     return ok(svc.bottlenecks(dr, granularity, branch_id=branch_id))
 
 
@@ -114,7 +114,7 @@ def get_user_productivity(
     role: Optional[UserRole] = _ROLE_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Productividad por usuario: corte, canteado y trabajo comercial."""
+    """Productivity per user: cutting, banding and sales work."""
     return ok(
         svc.user_productivity(
             dr, branch_id=branch_id, role=role.value if role else None
@@ -129,7 +129,7 @@ def get_attendance(
     role: Optional[UserRole] = _ROLE_QUERY,
     svc: AnalyticsService = Depends(analytics_service),
 ):
-    """Hora de primer login por día y usuario (referencia de hora de entrada)."""
+    """First login time per day and user (clock-in time reference)."""
     return ok(
         svc.attendance(dr, branch_id=branch_id, role=role.value if role else None)
     )

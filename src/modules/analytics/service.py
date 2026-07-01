@@ -1,9 +1,9 @@
-"""Agregaciones read-only para el dashboard.
+"""Read-only aggregations for the dashboard.
 
-Único módulo que usa agregación SQL (``func.sum``/``func.count``/``group_by``); el
-bucketing temporal y la ponderación de eficiencia se hacen en Python para ser portables
-y explícitos. La única historia durable es la orden (las optimizaciones son efímeras en
-Redis), así que todo se construye sobre ``orders`` + ``order_lines`` + ``order_status_history``.
+The only module that uses SQL aggregation (``func.sum``/``func.count``/``group_by``);
+time bucketing and efficiency weighting are done in Python to stay portable and
+explicit. The only durable history is the order (optimizations are ephemeral in
+Redis), so everything is built on ``orders`` + ``order_lines`` + ``order_status_history``.
 """
 
 from collections import defaultdict
@@ -57,7 +57,7 @@ from src.shared.database import get_db
 
 
 class AnalyticsService:
-    """Calcula métricas agregadas sobre el agregado de órdenes."""
+    """Computes aggregated metrics over the orders aggregate."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -127,13 +127,13 @@ class AnalyticsService:
             if i is None:
                 continue
             order_count[i] += 1
-            if status == completed:  # ingreso/tableros realizados
+            if status == completed:  # realized revenue/boards
                 revenue[i] += total or 0.0
                 boards[i] += tboards or 0
 
-        # Clientes nuevos: primer pedido (MIN created_at) por cliente sobre TODA la
-        # historia; se cuenta en el bucket de ese primer pedido si cae en el rango.
-        # Con sucursal: el "primer pedido" se evalúa dentro de esa sucursal.
+        # New clients: first order (MIN created_at) per client over the ENTIRE
+        # history; counted in the bucket of that first order if it falls in range.
+        # With a branch: "first order" is evaluated within that branch.
         first_orders_q = self.db.query(
             OrderModel.client_id, func.min(OrderModel.created_at)
         )
@@ -179,16 +179,16 @@ class AnalyticsService:
                 revenue=round(by_status.get(st.value, (0, 0.0))[1], 2),
                 order_count=by_status.get(st.value, (0, 0.0))[0],
             )
-            for st in OrderStatus  # densifica: todos los estados, incluso en cero
+            for st in OrderStatus  # densify: every status, even zero ones
         ]
         return Breakdown(dimension="status", items=items)
 
     # ----------------------------------------------------------- breakdown/branch
     def breakdown_branch(self, dr: DateRange) -> Breakdown:
-        """Desglose por sucursal: conteo e ingreso por almacén (comparativo gerencial).
+        """Breakdown by branch: count and revenue per warehouse (management comparison).
 
-        Densifica con todas las sucursales (incluso las que no tuvieron órdenes en el
-        periodo) para que el comparativo sea estable.
+        Densifies with every branch (even ones with no orders in the period) so
+        the comparison stays stable.
         """
         rows = (
             self.db.query(
@@ -233,11 +233,11 @@ class AnalyticsService:
         granularity: Granularity,
         branch_id: Optional[int] = None,
     ) -> BottleneckReport:
-        """Duración por etapa del proceso: qué tarda más (avg/mediana/p90) y cuándo.
+        """Duration per process stage: what takes longest (avg/median/p90) and when.
 
-        Cinco etapas salen de pares consecutivos del historial de estados; la sexta
-        (``banding``) de las columnas de canteado (pista paralela). El cuello de
-        botella es la etapa más lenta; ``series`` muestra en qué bucket se ralentiza.
+        Five stages come from consecutive pairs in the status history; the sixth
+        (``banding``) comes from the banding columns (parallel track). The
+        bottleneck is the slowest stage; ``series`` shows in which bucket it slows down.
         """
         buckets = iter_buckets(dr.date_from, dr.date_to, granularity)
         labels = [b.isoformat() for b in buckets]
@@ -250,7 +250,7 @@ class AnalyticsService:
         }
 
         def add_sample(stage: str, hours: float, closed_at) -> None:
-            # Agrega siempre al total; al bucket solo si el cierre cae en el eje.
+            # Always added to the total; added to the bucket only if the close falls within the axis.
             samples[stage].append(hours)
             i = index.get(bucket_key(closed_at.date(), granularity))
             if i is not None:
@@ -267,7 +267,7 @@ class AnalyticsService:
                     continue
                 hours = (cur.created_at - prev.created_at).total_seconds() / 3600.0
                 add_sample(stage, hours, cur.created_at)
-            # Canteado: pista paralela, no en el historial → desde columnas.
+            # Banding: parallel track, not in the history → from columns.
             if o.banding_started_at and o.banding_finished_at:
                 hours = (
                     o.banding_finished_at - o.banding_started_at
@@ -285,7 +285,7 @@ class AnalyticsService:
             )
             for key in STAGE_ORDER
         ]
-        # El más lento primero: prioriza dónde intervenir.
+        # Slowest first: prioritizes where to intervene.
         stages.sort(key=lambda s: s.median_hours, reverse=True)
 
         series = [
@@ -308,10 +308,10 @@ class AnalyticsService:
         branch_id: Optional[int] = None,
         role: Optional[str] = None,
     ) -> UserProductivityReport:
-        """Trabajo y velocidad por usuario: corte, canteado y trabajo comercial.
+        """Work and speed per user: cutting, banding and sales work.
 
-        Corte por pieza se mide por ``cut_at`` en el rango; las métricas a nivel de
-        orden (tiempo de corte, canteado, comercial) por órdenes creadas en el rango.
+        Per-piece cutting is measured by ``cut_at`` within the range; order-level
+        metrics (cutting time, banding, sales) by orders created in the range.
         """
         acc: dict[int, dict] = defaultdict(
             lambda: {
@@ -326,7 +326,7 @@ class AnalyticsService:
             }
         )
 
-        # 1) Corte por pieza física marcada en el rango → operario que la cortó.
+        # 1) Per physical piece marked cut in the range → operator who cut it.
         piece_q = self.db.query(
             OrderPlacedPieceModel.cut_by,
             OrderPlacedPieceModel.width,
@@ -347,11 +347,11 @@ class AnalyticsService:
             a["area_cut_m2"] += (width * height) / 1_000_000.0
             a["orders_cut"].add(order_id)
 
-        # 2-4) Métricas a nivel de orden (orden creada en el rango).
+        # 2-4) Order-level metrics (order created in the range).
         realized = status_values(REALIZED_STATUSES)
         orders = self.db.query(OrderModel).filter(*self._range(dr, branch_id)).all()
         for o in orders:
-            # Tiempo de corte (cutting → cut) → operador asignado.
+            # Cutting time (cutting → cut) → assigned operator.
             if o.assigned_to_id is not None:
                 cutting_ts = cut_ts = None
                 for h in o.history:
@@ -363,7 +363,7 @@ class AnalyticsService:
                     acc[o.assigned_to_id]["cutting_hours"] += (
                         cut_ts - cutting_ts
                     ).total_seconds() / 3600.0
-            # Canteado → canteador que lo terminó.
+            # Banding → canteador who finished it.
             if o.banding_finished_by is not None:
                 a = acc[o.banding_finished_by]
                 a["orders_banded"] += 1
@@ -371,7 +371,7 @@ class AnalyticsService:
                     a["banding_hours"] += (
                         o.banding_finished_at - o.banding_started_at
                     ).total_seconds() / 3600.0
-            # Trabajo comercial → vendedor creador.
+            # Sales work → creating vendedor.
             if o.created_by is not None:
                 a = acc[o.created_by]
                 a["orders_created"] += 1
@@ -387,7 +387,7 @@ class AnalyticsService:
         branch_id: Optional[int] = None,
         role: Optional[str] = None,
     ) -> AttendanceReport:
-        """Primer login por usuario y día (referencia de hora de entrada)."""
+        """First login per user and day (clock-in time reference)."""
         rows = (
             self.db.query(UserLoginEventModel.user_id, UserLoginEventModel.created_at)
             .filter(
@@ -426,10 +426,10 @@ class AnalyticsService:
 
     # --------------------------------------------------------------------- helpers
     def _range(self, dr: DateRange, branch_id: Optional[int] = None) -> list:
-        """Filtro medio-abierto ``[start, end)`` sobre ``created_at`` (+ sucursal).
+        """Half-open ``[start, end)`` filter on ``created_at`` (+ branch).
 
-        Cuando ``branch_id`` no es ``None``, restringe a esa sucursal: así el gerente
-        puede revisar el desempeño de un almacén concreto (``None`` = todas).
+        When ``branch_id`` is not ``None``, restricts to that branch: this lets
+        the manager review the performance of a specific warehouse (``None`` = all).
         """
         filters = [OrderModel.created_at >= dr.start, OrderModel.created_at < dr.end]
         if branch_id is not None:
@@ -458,7 +458,7 @@ class AnalyticsService:
         return round(val or 0.0, 2)
 
     def _boards_consumed(self, dr: DateRange, branch_id: Optional[int] = None) -> int:
-        """Tableros de órdenes completadas (producción realizada)."""
+        """Boards from completed orders (realized production)."""
         val = (
             self.db.query(func.coalesce(func.sum(OrderModel.total_boards_used), 0))
             .filter(*self._range(dr, branch_id))
@@ -470,10 +470,10 @@ class AnalyticsService:
     def _efficiency_and_area(
         self, dr: DateRange, branch_id: Optional[int] = None
     ) -> tuple[float, float]:
-        """Eficiencia ponderada por área (0..100) y área total (m²) de líneas de tablero.
+        """Area-weighted efficiency (0..100) and total area (m²) of board lines.
 
-        Excluye líneas de tapacanto (``total_area_m2``/``avg_efficiency`` nulos). El
-        promedio se pondera por área: una orden de 1 tablero no pesa igual que una de 50.
+        Excludes edge-banding lines (null ``total_area_m2``/``avg_efficiency``). The
+        average is weighted by area: a 1-board order doesn't weigh the same as a 50-board one.
         """
         rows = (
             self.db.query(OrderLineModel.avg_efficiency, OrderLineModel.total_area_m2)
@@ -493,7 +493,7 @@ class AnalyticsService:
     def _productivity_rows(
         self, acc: dict[int, dict], role: Optional[str]
     ) -> list[UserProductivity]:
-        """Proyecta el acumulador por usuario a filas, filtrando por rol."""
+        """Projects the per-user accumulator to rows, filtering by role."""
         if not acc:
             return []
         users, branches = self._users_and_branches(acc.keys())
@@ -521,7 +521,7 @@ class AnalyticsService:
                     revenue_generated=round(a["revenue_generated"], 2),
                 )
             )
-        # Más trabajo primero (corte + canteado + comercial).
+        # Most work first (cutting + banding + sales).
         rows.sort(
             key=lambda r: r.pieces_cut + r.orders_banded + r.orders_created,
             reverse=True,
@@ -529,7 +529,7 @@ class AnalyticsService:
         return rows
 
     def _users_and_branches(self, user_ids) -> tuple[dict, dict]:
-        """Carga usuarios por id y el mapa ``branch_id → nombre`` en dos consultas."""
+        """Loads users by id and the ``branch_id → name`` map in two queries."""
         ids = list(user_ids)
         users = {
             u.id: u
@@ -542,7 +542,7 @@ class AnalyticsService:
     def _matches(
         user: UserModel, branch_id: Optional[int], role: Optional[str]
     ) -> bool:
-        """¿El usuario pasa los filtros opcionales de sucursal y rol?"""
+        """Does the user pass the optional branch and role filters?"""
         if branch_id is not None and user.branch_id != branch_id:
             return False
         if role is not None and user.role != role:
@@ -551,5 +551,5 @@ class AnalyticsService:
 
 
 def analytics_service(db: Session = Depends(get_db)) -> AnalyticsService:
-    """Provider de ``AnalyticsService`` para inyección en rutas."""
+    """``AnalyticsService`` provider for injection into routes."""
     return AnalyticsService(db)

@@ -1,8 +1,8 @@
-"""Mixins declarativos reutilizables para columnas de auditoría.
+"""Reusable declarative mixins for audit columns.
 
-``TimestampMixin`` aporta ``created_at``/``updated_at``; ``AuditMixin`` aporta
-``created_by``/``updated_by`` (FK nullable a ``users``), que ``CRUDService``
-estampa automáticamente desde ``current_user_ctx``.
+``TimestampMixin`` provides ``created_at``/``updated_at``; ``AuditMixin``
+provides ``created_by``/``updated_by`` (nullable FK to ``users``), which
+``CRUDService`` stamps automatically from ``current_user_ctx``.
 """
 
 from datetime import datetime
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 
 class TimestampMixin:
-    """``created_at`` y ``updated_at`` gestionados por la aplicación."""
+    """``created_at`` and ``updated_at`` managed by the application."""
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -22,11 +22,11 @@ class TimestampMixin:
 
 
 class AuditMixin:
-    """``created_by``/``updated_by``: FK nullable al usuario que tocó la fila.
+    """``created_by``/``updated_by``: nullable FK to the user who touched the row.
 
-    Nullable porque los flujos públicos (cliente) o del sistema crean/modifican
-    filas sin un usuario autenticado. ``declared_attr`` da a cada tabla su propia
-    ``ForeignKey`` en vez de compartir el objeto entre modelos.
+    Nullable because public (client) or system flows create/modify rows without
+    an authenticated user. ``declared_attr`` gives each table its own
+    ``ForeignKey`` instead of sharing the object across models.
     """
 
     @declared_attr
