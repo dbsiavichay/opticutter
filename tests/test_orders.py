@@ -325,6 +325,18 @@ def test_list_orders_filter_by_multiple_statuses(client, db_session):
     assert resp["meta"]["pagination"]["total"] == 2
 
 
+def test_list_orders_is_fifo_oldest_first(client, db_session):
+    """The workshop operates FIFO: orders list oldest to newest."""
+    c = _create_client(client)
+    b = _create_board(client)
+    o1 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=600))
+    o2 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=500))
+    o3 = _create_order(client, db_session, _order_payload(c["id"], b["id"], width=400))
+
+    resp = client.get("/api/v1/orders/").json()
+    assert [o["id"] for o in resp["data"]] == [o1["id"], o2["id"], o3["id"]]
+
+
 def test_get_order_404(client):
     assert client.get("/api/v1/orders/999999").status_code == 404
 

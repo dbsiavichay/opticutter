@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
+from src.modules.clients.schemas import ClientResponse
 from src.modules.clients.service import require_phone
 from src.modules.notifications.emitter import notify_order_transition
 from src.modules.optimizations.patterns import base_label
@@ -90,7 +91,7 @@ class OrderService(BranchScopedMixin):
         limit: int = 20,
         offset: int = 0,
     ) -> Tuple[List[OrderModel], int]:
-        """Lists orders (most recent first) with total count: ``(items, total)``.
+        """Lists orders (oldest first, FIFO) with total count: ``(items, total)``.
 
         ``status`` filters by one or more statuses (empty list/``None`` = all).
         ``branch_scope`` isolates staff to their branch; the admin (``None``)
@@ -101,7 +102,7 @@ class OrderService(BranchScopedMixin):
             query = query.filter(OrderModel.status.in_([s.value for s in status]))
         query = self._apply_branch_scope(query, branch_scope, branch_filter)
         total = query.count()
-        orders = query.order_by(OrderModel.id.desc()).offset(offset).limit(limit).all()
+        orders = query.order_by(OrderModel.id.asc()).offset(offset).limit(limit).all()
         return orders, total
 
     def create(self, data: OrderCreate, actor: Optional[Actor] = None) -> OrderModel:
@@ -417,13 +418,14 @@ class OrderService(BranchScopedMixin):
 
         Minimal view for the bander (no prices or detail): only orders in
         ``cutting``/``cut`` whose banding hasn't finished yet. Branch-isolated.
+        Oldest first (FIFO): the bander works the queue in arrival order.
         """
         query = self.db.query(OrderModel).filter(
             OrderModel.status.in_([s.value for s in BANDING_MUTABLE_ORDER_STATUSES]),
             OrderModel.banding_status.in_([s.value for s in BANDING_PENDING_STATUSES]),
         )
         query = self._apply_branch_scope(query, branch_scope, None)
-        orders = query.order_by(OrderModel.id.desc()).all()
+        orders = query.order_by(OrderModel.id.asc()).all()
         return [
             BandingQueueItem(
                 order_id=o.id,
@@ -431,6 +433,8 @@ class OrderService(BranchScopedMixin):
                 status=OrderStatus(o.status),
                 banding_status=BandingStatus(o.banding_status),
                 created_at=o.created_at,
+                client=ClientResponse.model_validate(o.client),
+                board_names=_board_names(o.boards),
             )
             for o in orders
         ]
@@ -661,6 +665,16 @@ def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
                 )
             )
         order.boards.append(board)
+
+
+def _board_names(boards: List[OrderBoardModel]) -> List[str]:
+    """Distinct board names in first-seen order (name, else code, else material key)."""
+    names: List[str] = []
+    for board in boards:
+        name = board.product_name or board.product_code or board.material_key
+        if name not in names:
+            names.append(name)
+    return names
 
 
 def _progress(pieces: List[OrderPlacedPieceModel]) -> CuttingProgress:

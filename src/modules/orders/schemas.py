@@ -350,3 +350,9 @@ class BandingQueueItem(CamelModel):
     status: OrderStatus = Field(..., description="Cutting-track status of the order")
     banding_status: BandingStatus
     created_at: datetime
+    client: ClientResponse = Field(..., description="Client the order belongs to")
+    board_names: List[str] = Field(
+        default_factory=list,
+        description="Distinct board names (product_name, falling back to "
+        "product_code/material_key) used in the order",
+    )

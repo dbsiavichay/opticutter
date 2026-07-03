@@ -295,6 +295,22 @@ def test_banding_queue_lists_pending_orders(client, db_session):
     item = next(i for i in queue if i["orderId"] == order["id"])
     assert item["bandingStatus"] == "pending"
     assert item["status"] == "cutting"
+    assert item["client"]["firstName"] == "Ada"
+    assert item["client"]["lastName"] == "Lovelace"
+    assert item["boardNames"] == ["Melamina MEL2233"]
+
+
+def test_banding_queue_is_fifo_oldest_first(client, db_session):
+    """The bander works the queue in arrival order (oldest order first)."""
+    o1 = _order_with_banding(client, db_session, identifier="0990000003")
+    o2 = _order_with_banding(client, db_session, identifier="0990000004")
+    o3 = _order_with_banding(client, db_session, identifier="0990000005")
+    _to_cutting(client, o1["id"])
+    _to_cutting(client, o2["id"])
+    _to_cutting(client, o3["id"])
+
+    queue = client.get("/api/v1/orders/banding-queue").json()["data"]
+    assert [i["orderId"] for i in queue] == [o1["id"], o2["id"], o3["id"]]
 
 
 def test_banding_queue_excludes_finished_and_unstarted(client, db_session):
