@@ -603,10 +603,10 @@ def test_order_freezes_half_board_line_and_plan(client, db_session):
     line = data["lines"][0]
     assert line["halfBoard"] is True
     assert line["quantity"] == 1
-    assert line["unitPriceSnapshot"] == 22.75
-    assert line["lineTotal"] == 22.75
+    assert line["unitPriceSnapshot"] == 25.03  # price/2 * 1.10 (default markup)
+    assert line["lineTotal"] == 25.03
     assert line["productName"].endswith("(medio tablero)")
-    assert data["total"] == data["subtotal"] == 22.75
+    assert data["total"] == data["subtotal"] == 25.03
 
     # Cutting plan: the physical board is a half (width/2), flagged.
     plan = client.get(f"/api/v1/orders/{data['id']}/cutting-plan").json()["data"]

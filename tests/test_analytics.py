@@ -491,6 +491,7 @@ def test_user_productivity_operator_cutting(client, db_session):
     assert row["ordersCut"] == 1
     assert row["cuttingHours"] == 2.0
     assert row["piecesPerHour"] == 1.0  # 2 pieces / 2h
+    assert row["boardsCut"] == 2  # total_boards_used from _seed_order default
 
 
 def test_user_productivity_seller_and_bander(client, db_session):

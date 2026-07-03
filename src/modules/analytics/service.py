@@ -319,6 +319,7 @@ class AnalyticsService:
                 "area_cut_m2": 0.0,
                 "orders_cut": set(),
                 "cutting_hours": 0.0,
+                "boards_cut": 0,
                 "orders_banded": 0,
                 "banding_hours": 0.0,
                 "orders_created": 0,
@@ -363,6 +364,7 @@ class AnalyticsService:
                     acc[o.assigned_to_id]["cutting_hours"] += (
                         cut_ts - cutting_ts
                     ).total_seconds() / 3600.0
+                    acc[o.assigned_to_id]["boards_cut"] += o.total_boards_used or 0
             # Banding → canteador who finished it.
             if o.banding_finished_by is not None:
                 a = acc[o.banding_finished_by]
@@ -515,6 +517,7 @@ class AnalyticsService:
                     pieces_per_hour=round(
                         safe_div(a["pieces_cut"], a["cutting_hours"]), 2
                     ),
+                    boards_cut=a["boards_cut"],
                     orders_banded=a["orders_banded"],
                     banding_hours=round(a["banding_hours"], 2),
                     orders_created=a["orders_created"],

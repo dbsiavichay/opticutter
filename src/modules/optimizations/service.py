@@ -123,6 +123,7 @@ class OptimizationService:
             right_trim=settings.right_trim,
         )
         waste_factor = settings.edge_banding_waste_factor
+        half_board_markup_pct = settings.half_board_markup_pct
 
         # Resolves only the materials actually referenced into dimensions+cost,
         # agnostic of source (catalog/offcut/manual). This is the only point that
@@ -136,7 +137,12 @@ class OptimizationService:
         eb_products = self._resolve_edge_banding_products(request.requirements)
 
         optimization_hash = self._compute_hash(
-            request, cutting_params, resolved, eb_products, waste_factor
+            request,
+            cutting_params,
+            resolved,
+            eb_products,
+            waste_factor,
+            half_board_markup_pct,
         )
 
         cached = cache.get_json(optimization_hash)
@@ -156,8 +162,10 @@ class OptimizationService:
             results.append((edge_map, net_map, layouts))
 
         # Half-board billing: catalog sheets whose content fits on a half board are
-        # replaced by the half (width/2, cost/2) before the payload is assembled.
-        apply_half_boards(results, resolved, cutting_params, strategy)
+        # replaced by the half (width/2, cost/2 + markup) before the payload is assembled.
+        apply_half_boards(
+            results, resolved, cutting_params, strategy, half_board_markup_pct
+        )
 
         payload = self._build_result_payload(
             request, results, resolved, eb_products, waste_factor
@@ -199,6 +207,7 @@ class OptimizationService:
         resolved: Dict[str, ResolvedMaterial],
         eb_products: Dict[int, ProductModel],
         waste_factor: float,
+        half_board_markup_pct: float,
     ) -> str:
         """Deterministic sha256 hash of the inputs that affect the result.
 
@@ -230,6 +239,7 @@ class OptimizationService:
                 "left_trim": cutting_params.left_trim,
                 "right_trim": cutting_params.right_trim,
                 "edge_banding_waste_factor": waste_factor,
+                "half_board_markup_pct": half_board_markup_pct,
                 "strategy": request.strategy.value,
             },
             "edge_prices": edge_prices,

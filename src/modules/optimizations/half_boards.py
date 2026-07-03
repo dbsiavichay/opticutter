@@ -1,15 +1,18 @@
-"""Half-board detection (charged at half price) as a post-optimization step.
+"""Half-board detection (charged at half price + markup) as a post-optimization step.
 
 The business sells half catalog boards, split **lengthwise** (the
 length/``height`` is kept and the width/``width`` is cut in half). The client
 doesn't request them explicitly: they request pieces. So, after optimizing
 against full boards, this module checks each sheet (layout) and, if **all**
 of its pieces fit on a single half board, replaces it with the half-board
-layout (re-packed geometry + cuts) and halves its cost.
+layout (re-packed geometry + cuts) and charges ``price/2 * (1 + markup)``.
 
-It's deterministic (depends only on inputs already included in the cache hash)
-and reuses the pure cutting engine, so the half board flows through to costs,
-summary, discount, order snapshot and cutting plan. It only applies to
+It's deterministic given its inputs — the resolved material's cost/dimensions,
+the cutting parameters, and ``half_board_markup_pct`` — all of which the caller
+(``OptimizationService._compute_hash``) must include in the Redis cache-key
+hash; a caller that forgets to do so will serve stale markup values from
+cache. It reuses the pure cutting engine, so the half board flows through to
+costs, summary, discount, order snapshot and cutting plan. It only applies to
 **catalog** materials: offcuts/manual measurements are already charged at cost.
 """
 
@@ -30,15 +33,17 @@ def apply_half_boards(
     resolved: Dict[str, ResolvedMaterial],
     cutting_params: CuttingParameters,
     strategy: PackingStrategy,
+    half_board_markup_pct: float,
     min_rect_size: float = 0.1,
 ) -> None:
     """Replaces in place the catalog sheets that fit on a half board.
 
     Each layout whose content fully fits on a half board (same length, width/2)
-    is replaced by the half-board layout: ``half_board=True``, half width and
-    cost, and pieces re-placed by the re-pack. ``material.id`` (= ``material_key``)
-    is preserved, so the board stays linked to its product; the full/half
-    distinction lives solely in the ``half_board`` flag.
+    is replaced by the half-board layout: ``half_board=True``, half width,
+    ``price/2 * (1 + half_board_markup_pct)`` cost, and pieces re-placed by the
+    re-pack. ``material.id`` (= ``material_key``) is preserved, so the board
+    stays linked to its product; the full/half distinction lives solely in the
+    ``half_board`` flag.
     """
     for _edge_map, _net_map, layouts in results:
         if not layouts:
@@ -50,7 +55,12 @@ def apply_half_boards(
             continue
         for idx, layout in enumerate(layouts):
             half = _fit_on_half_board(
-                layout, rm, cutting_params, strategy, min_rect_size
+                layout,
+                rm,
+                cutting_params,
+                strategy,
+                half_board_markup_pct,
+                min_rect_size,
             )
             if half is not None:
                 layouts[idx] = half
@@ -61,6 +71,7 @@ def _fit_on_half_board(
     rm: ResolvedMaterial,
     cutting_params: CuttingParameters,
     strategy: PackingStrategy,
+    half_board_markup_pct: float,
     min_rect_size: float,
 ) -> Optional[CuttingLayout]:
     """Returns the half-board layout if every piece fits; otherwise ``None``."""
@@ -73,7 +84,7 @@ def _fit_on_half_board(
         width=rm.width / 2.0,
         height=rm.height,
         thickness=rm.thickness,
-        cost_per_unit=rm.cost_per_unit / 2.0,
+        cost_per_unit=round(rm.cost_per_unit / 2.0 * (1 + half_board_markup_pct), 2),
         half_board=True,
     )
 

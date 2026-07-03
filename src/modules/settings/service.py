@@ -59,6 +59,7 @@ class SettingsService:
             left_trim=config.LEFT_TRIM,
             right_trim=config.RIGHT_TRIM,
             edge_banding_waste_factor=config.EDGE_BANDING_WASTE_FACTOR,
+            half_board_markup_pct=config.HALF_BOARD_MARKUP_PCT,
             preorder_validity_days=config.PREORDER_VALIDITY_DAYS,
             max_open_preorders_per_client=config.MAX_OPEN_PREORDERS_PER_CLIENT,
             price_tiers=config.PRICE_TIERS,
