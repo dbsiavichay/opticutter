@@ -120,6 +120,7 @@ class UserProductivity(CamelModel):
     orders_cut: int
     cutting_hours: float
     pieces_per_hour: float  # throughput
+    boards_cut: int
     # Banding (canteador).
     orders_banded: int
     banding_hours: float

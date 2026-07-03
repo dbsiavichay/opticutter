@@ -110,8 +110,9 @@ class Material:
     thickness: float
     cost_per_unit: float = 0.0
     # Descriptive metadata: ``True`` if this sheet is a half board (width/2,
-    # cost/2). The algorithm ignores it; upper layers use it to group billing
-    # and label the document/cutting plan.
+    # cost = price/2 plus a configurable markup, e.g. cost/2 * 1.15). The
+    # algorithm ignores it; upper layers use it to group billing and label
+    # the document/cutting plan.
     half_board: bool = False
 
     def __post_init__(self):

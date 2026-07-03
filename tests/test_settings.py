@@ -53,6 +53,7 @@ def test_get_cutting_seeds_from_config(client):
     assert data["kerf"] == config.KERF
     assert data["topTrim"] == config.TOP_TRIM
     assert data["edgeBandingWasteFactor"] == config.EDGE_BANDING_WASTE_FACTOR
+    assert data["halfBoardMarkupPct"] == config.HALF_BOARD_MARKUP_PCT
 
 
 def test_patch_cutting_persists_and_is_partial(client):
@@ -75,6 +76,22 @@ def test_patch_cutting_rejects_negative(client):
     assert (
         client.patch("/api/v1/settings/cutting", json={"kerf": -1}).status_code == 422
     )
+    assert (
+        client.patch(
+            "/api/v1/settings/cutting", json={"halfBoardMarkupPct": -1}
+        ).status_code
+        == 422
+    )
+
+
+def test_patch_cutting_half_board_markup_persists(client):
+    """The half-board markup is partially patchable like the other cutting fields."""
+    resp = client.patch("/api/v1/settings/cutting", json={"halfBoardMarkupPct": 0.20})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["halfBoardMarkupPct"] == 0.20
+
+    after = client.get("/api/v1/settings/cutting").json()["data"]
+    assert after["halfBoardMarkupPct"] == 0.20
 
 
 def test_cutting_settings_drive_optimization(client):
@@ -86,6 +103,20 @@ def test_cutting_settings_drive_optimization(client):
     first = client.post("/api/v1/optimize/", json=payload).json()["data"]
 
     client.patch("/api/v1/settings/cutting", json={"kerf": 99.0})
+    second = client.post("/api/v1/optimize/", json=payload).json()["data"]
+
+    assert first["optimizationHash"] != second["optimizationHash"]
+
+
+def test_half_board_markup_drives_optimization_hash(client):
+    """Changing the half-board markup changes the optimization hash too."""
+    created_client = _create_client(client)
+    board = _create_board(client)
+    payload = _optimize_payload(created_client["id"], board["id"])
+
+    first = client.post("/api/v1/optimize/", json=payload).json()["data"]
+
+    client.patch("/api/v1/settings/cutting", json={"halfBoardMarkupPct": 0.30})
     second = client.post("/api/v1/optimize/", json=payload).json()["data"]
 
     assert first["optimizationHash"] != second["optimizationHash"]

@@ -29,6 +29,7 @@ class SettingsModel(TimestampMixin, AuditMixin, Base):
     left_trim: Mapped[float] = mapped_column(Float)
     right_trim: Mapped[float] = mapped_column(Float)
     edge_banding_waste_factor: Mapped[float] = mapped_column(Float)
+    half_board_markup_pct: Mapped[float] = mapped_column(Float)
 
     # Pre-orders (mutable quote): validity period and open-orders cap per client
     preorder_validity_days: Mapped[int] = mapped_column(Integer)

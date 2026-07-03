@@ -609,7 +609,11 @@ def test_apply_half_boards_downgrades_fitting_board():
     layouts = _full_layouts([Piece(id="p1", width=300, height=300)])
     results = [({}, {}, layouts)]
     apply_half_boards(
-        results, _resolved(), CuttingParameters(kerf=5), PackingStrategy.MAX_EFFICIENCY
+        results,
+        _resolved(),
+        CuttingParameters(kerf=5),
+        PackingStrategy.MAX_EFFICIENCY,
+        half_board_markup_pct=0.10,
     )
 
     out = results[0][2]
@@ -618,7 +622,7 @@ def test_apply_half_boards_downgrades_fitting_board():
     assert board.material.half_board is True
     assert board.material.width == 610  # width/2, length unchanged
     assert board.material.height == 2440
-    assert board.material.cost_per_unit == 22.75  # price/2
+    assert board.material.cost_per_unit == 25.03  # price/2 * 1.10
     assert len(board.placed_pieces) == 1  # no pieces are lost
 
 
@@ -631,7 +635,11 @@ def test_apply_half_boards_keeps_wide_board_full():
     layouts = _full_layouts([Piece(id="p1", width=700, height=800)])
     results = [({}, {}, layouts)]
     apply_half_boards(
-        results, _resolved(), CuttingParameters(kerf=5), PackingStrategy.MAX_EFFICIENCY
+        results,
+        _resolved(),
+        CuttingParameters(kerf=5),
+        PackingStrategy.MAX_EFFICIENCY,
+        half_board_markup_pct=0.10,
     )
 
     board = results[0][2][0]
@@ -652,11 +660,31 @@ def test_apply_half_boards_skips_non_catalog():
         _resolved(source="manual", product_id=None),
         CuttingParameters(kerf=5),
         PackingStrategy.MAX_EFFICIENCY,
+        half_board_markup_pct=0.10,
     )
 
     board = results[0][2][0]
     assert board.material.half_board is False
     assert board.material.width == 1220
+
+
+def test_apply_half_boards_applies_configurable_markup():
+    """The markup formula is price/2 * (1 + pct), independent of the default value."""
+    from src.cutting import CuttingParameters, PackingStrategy, Piece
+    from src.modules.optimizations.half_boards import apply_half_boards
+
+    layouts = _full_layouts([Piece(id="p1", width=300, height=300)])
+    results = [({}, {}, layouts)]
+    apply_half_boards(
+        results,
+        _resolved(),
+        CuttingParameters(kerf=5),
+        PackingStrategy.MAX_EFFICIENCY,
+        half_board_markup_pct=0.20,
+    )
+
+    board = results[0][2][0]
+    assert board.material.cost_per_unit == round(45.5 / 2 * 1.20, 2) == 27.3
 
 
 def test_optimize_charges_half_board_for_sparse_job(client):
@@ -688,9 +716,9 @@ def test_optimize_charges_half_board_for_sparse_job(client):
     summary = data["materialsSummary"]
     assert len(summary) == 1
     assert summary[0]["halfBoard"] is True
-    assert summary[0]["costPerUnit"] == 22.75
+    assert summary[0]["costPerUnit"] == 25.03  # price/2 * 1.10 (default markup)
     assert summary[0]["productName"].endswith("(medio tablero)")
-    assert data["totalBoardsCost"] == 22.75
+    assert data["totalBoardsCost"] == 25.03
 
     material = data["layouts"][0]["material"]
     assert material["halfBoard"] is True

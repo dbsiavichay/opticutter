@@ -17,6 +17,11 @@ class CuttingSettingsResponse(CamelModel):
     edge_banding_waste_factor: float = Field(
         ..., ge=0, description="Edge banding waste over net length (0.10 = +10%)"
     )
+    half_board_markup_pct: float = Field(
+        ...,
+        ge=0,
+        description="Markup over price/2 when billing a half board (0.10 = +10%)",
+    )
 
 
 class CuttingSettingsUpdate(CamelModel):
@@ -28,6 +33,7 @@ class CuttingSettingsUpdate(CamelModel):
     left_trim: Optional[float] = Field(None, ge=0)
     right_trim: Optional[float] = Field(None, ge=0)
     edge_banding_waste_factor: Optional[float] = Field(None, ge=0)
+    half_board_markup_pct: Optional[float] = Field(None, ge=0)
 
 
 # --- Pre-orders (mutable quote) -------------------------------------------------

@@ -89,6 +89,12 @@ class Config:
     # length before rounding up to the whole meter that gets billed. 0.10 = +10%.
     EDGE_BANDING_WASTE_FACTOR = env.float("EDGE_BANDING_WASTE_FACTOR", 0.10)
 
+    # Half boards (medio tablero): markup applied over price/2 when billing a job
+    # as half a catalog board. 0.10 = +10%. Only seeds the `settings` singleton
+    # row on its first read; the runtime source of truth is the `settings` table
+    # (editable via PATCH /settings/cutting).
+    HALF_BOARD_MARKUP_PCT = env.float("HALF_BOARD_MARKUP_PCT", 0.10)
+
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
     # Pre-orders (mutable quote): validity period and open-count cap per client.
