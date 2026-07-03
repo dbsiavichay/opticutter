@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.clients.service import require_phone
+from src.modules.notifications.emitter import notify_order_transition
 from src.modules.optimizations.patterns import base_label
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import OptimizeRequest
@@ -328,6 +329,11 @@ class OrderService(BranchScopedMixin):
 
         self.db.commit()
         self.db.refresh(order)
+
+        # Best-effort side-effect on the committed transition: notify the staff
+        # that should react (admins/sellers on completion, branch operators on
+        # enqueue). Never raises — a failure here can't undo the commit above.
+        notify_order_transition(self.db, order, current, to_status, actor)
         return order
 
     def get_cutting_plan(

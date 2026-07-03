@@ -113,6 +113,29 @@ class UserService(CRUDService[UserModel, UserCreate, UserUpdate]):
         )
         return self._paginate(query, limit, offset)
 
+    def list_by_roles(self, roles: List[UserRole]) -> List[UserModel]:
+        """Active users whose role is one of ``roles`` (notification recipients)."""
+        values = [role.value for role in roles]
+        return (
+            self.db.query(UserModel)
+            .filter(UserModel.role.in_(values), UserModel.is_active.is_(True))
+            .all()
+        )
+
+    def list_by_role_and_branch(
+        self, role: UserRole, branch_id: int
+    ) -> List[UserModel]:
+        """Active users of ``role`` bound to ``branch_id`` (workshop recipients)."""
+        return (
+            self.db.query(UserModel)
+            .filter(
+                UserModel.role == role.value,
+                UserModel.branch_id == branch_id,
+                UserModel.is_active.is_(True),
+            )
+            .all()
+        )
+
 
 def user_service(db: Session = Depends(get_db)) -> UserService:
     """``UserService`` provider for route injection."""

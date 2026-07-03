@@ -1,4 +1,4 @@
-"""Demo seed: branches, users, clients, pre-orders and orders.
+"""Demo seed: branches, users, clients, pre-orders, orders and analytics history.
 
 Generates a complete, realistic dataset to populate the dashboard / do QA:
 
@@ -18,10 +18,16 @@ Generates a complete, realistic dataset to populate the dashboard / do QA:
   marked cut before closing the cut, etc.). Workshop orders
   (cutting/cut/completed) include edge banding and demonstrate the banding
   track with each branch's bander.
+- **Analytics history**: extra orders per status per branch, driven through the
+  same state machine and then backdated (order/history/piece/banding timestamps)
+  over the last ~2 months with randomized stage durations, so ``/analytics/bottlenecks``
+  and ``/analytics/users`` have enough spread to be meaningful (not everything
+  happening "now"). Plus synthetic login events for every seeded user over the
+  last ``ATTENDANCE_DAYS`` business days, to populate ``/analytics/attendance``.
 
 Idempotent for the foundations (branches/users/clients/boards: get-or-create).
-Pre-orders/orders are only generated if no demo data exists yet (flagged with
-``source="seed"``); use ``--reset`` to delete and regenerate them.
+Pre-orders/orders/login events are only generated if no demo data exists yet
+(flagged with ``source="seed"``); use ``--reset`` to delete and regenerate them.
 
 Requires the schema to already exist (migrations applied). Examples:
 
@@ -33,6 +39,7 @@ Requires the schema to already exist (migrations applied). Examples:
 import argparse
 import itertools
 import os
+import random
 import sys
 import unicodedata
 
@@ -46,7 +53,10 @@ from environs import Env  # noqa: E402
 
 Env().read_env(os.path.join(os.path.dirname(__file__), "..", ".env"), recurse=False)
 
-from datetime import datetime, timedelta  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from sqlalchemy import or_  # noqa: E402
 
 from src.modules.branches.model import BranchModel  # noqa: E402
 from src.modules.clients.model import ClientModel  # noqa: E402
@@ -66,11 +76,15 @@ from src.modules.preorders.schemas import PreOrderCreate  # noqa: E402
 from src.modules.preorders.service import PreOrderService  # noqa: E402
 from src.modules.products.model import ProductModel, ProductType  # noqa: E402
 from src.modules.users.enums import UserRole  # noqa: E402
+from src.modules.users.login_event_model import UserLoginEventModel  # noqa: E402
 from src.modules.users.model import UserModel  # noqa: E402
 from src.shared.audit import staff_actor  # noqa: E402
 from src.shared.config import config  # noqa: E402
 from src.shared.database import SessionLocal  # noqa: E402
 from src.shared.security import hash_password  # noqa: E402
+
+# Fixed seed: the demo dataset is reproducible across runs/environments.
+random.seed(20260701)
 
 # Single password for all seeded users (override with SEED_PASSWORD).
 SEED_PASSWORD = os.getenv("SEED_PASSWORD") or config.ADMIN_PASSWORD or "Cutter2026!"
@@ -122,9 +136,175 @@ ORDER_STATUSES = [
     OrderStatus.cancelled,
 ]
 
+# How many extra backdated orders to generate per status, per branch, to give
+# /analytics/bottlenecks and /analytics/users enough volume/spread to be meaningful.
+ORDERS_PER_STATUS_ANALYTICS = 6
+
+# How far back (in days) an order in a given FINAL status is placed, before
+# walking backward through its stage durations. Kept within ~2 months so the
+# order code's year (stamped from the real creation instant) never drifts.
+FINAL_AGE_DAYS_RANGE = {
+    OrderStatus.confirmed: (0, 2),
+    OrderStatus.queued: (0, 4),
+    OrderStatus.cutting: (0, 6),
+    OrderStatus.cut: (1, 10),
+    OrderStatus.completed: (3, 30),
+    OrderStatus.dispatched: (5, 55),
+    OrderStatus.cancelled: (0, 15),
+}
+
+# Randomized duration (hours) of each stage transition; keys name the stage
+# being ENTERED (e.g. "cutting" = queued -> cutting).
+STAGE_DURATION_HOURS_RANGE = {
+    "queued": (1, 24),  # confirmed -> queued
+    "cutting": (1, 48),  # queued -> cutting
+    "cut": (1, 12),  # cutting -> cut (actual cutting time)
+    "completed": (1, 72),  # cut -> completed
+    "dispatched": (1, 48),  # completed -> dispatched
+    "cancelled": (1, 72),  # confirmed -> cancelled
+}
+
+# Business days of synthetic login history for /analytics/attendance.
+ATTENDANCE_DAYS = 45
+
+# Approximate clock-in hour per role (24h, fractional, LOCAL time), jittered per day.
+ROLE_BASE_HOUR = {
+    UserRole.ADMIN.value: 8.5,
+    UserRole.SELLER.value: 8.75,
+    UserRole.OPERATOR.value: 7.5,
+    UserRole.BANDER.value: 7.75,
+}
+
+# Everything else in the app (utcnow()) stores naive UTC; login events are the
+# only seed data with an absolute "wall-clock hour" meaning, so they need an
+# explicit local -> UTC conversion (the dashboard renders them in this zone).
+LOCAL_TZ = ZoneInfo(config.DEFAULT_TIMEZONE)
+
 # Global counter: guarantees a unique optimization hash per entity (via the
 # pieces' ``label``), so order dedupe never collapses them.
 _seq = itertools.count(1)
+
+
+def _stage_hours(key: str) -> timedelta:
+    lo, hi = STAGE_DURATION_HOURS_RANGE[key]
+    return timedelta(hours=random.uniform(lo, hi))
+
+
+def build_order_timeline(target_status: OrderStatus) -> dict[str, datetime]:
+    """Backdated timestamp per stage reached on the way to ``target_status``.
+
+    Walks BACKWARD from a randomized "final age" so every timestamp lands
+    safely in the past (never after ``utcnow()``), then derives earlier stages
+    by subtracting randomized stage durations. Keys are stage names
+    (``created``/``queued``/``cutting``/``cut``/``completed``/``dispatched``/
+    ``cancelled``); only the stages actually reached are present.
+    """
+    lo, hi = FINAL_AGE_DAYS_RANGE[target_status]
+    final_ts = datetime.utcnow() - timedelta(days=random.uniform(lo, hi))
+
+    if target_status == OrderStatus.confirmed:
+        timeline = {"created": final_ts}
+    elif target_status == OrderStatus.cancelled:
+        timeline = {
+            "created": final_ts - _stage_hours("cancelled"),
+            "cancelled": final_ts,
+        }
+    elif target_status == OrderStatus.queued:
+        timeline = {"created": final_ts - _stage_hours("queued"), "queued": final_ts}
+    elif target_status == OrderStatus.cutting:
+        queued_ts = final_ts - _stage_hours("cutting")
+        timeline = {
+            "created": queued_ts - _stage_hours("queued"),
+            "queued": queued_ts,
+            "cutting": final_ts,
+        }
+    elif target_status == OrderStatus.cut:
+        cutting_ts = final_ts - _stage_hours("cut")
+        queued_ts = cutting_ts - _stage_hours("cutting")
+        timeline = {
+            "created": queued_ts - _stage_hours("queued"),
+            "queued": queued_ts,
+            "cutting": cutting_ts,
+            "cut": final_ts,
+        }
+    elif target_status == OrderStatus.completed:
+        cut_ts = final_ts - _stage_hours("completed")
+        cutting_ts = cut_ts - _stage_hours("cut")
+        queued_ts = cutting_ts - _stage_hours("cutting")
+        timeline = {
+            "created": queued_ts - _stage_hours("queued"),
+            "queued": queued_ts,
+            "cutting": cutting_ts,
+            "cut": cut_ts,
+            "completed": final_ts,
+        }
+    else:  # dispatched
+        completed_ts = final_ts - _stage_hours("dispatched")
+        cut_ts = completed_ts - _stage_hours("completed")
+        cutting_ts = cut_ts - _stage_hours("cut")
+        queued_ts = cutting_ts - _stage_hours("cutting")
+        timeline = {
+            "created": queued_ts - _stage_hours("queued"),
+            "queued": queued_ts,
+            "cutting": cutting_ts,
+            "cut": cut_ts,
+            "completed": completed_ts,
+            # Key must match OrderStatus.dispatched.value ("despachado"), not
+            # the enum member name, since it's matched against history.to_status.
+            OrderStatus.dispatched.value: final_ts,
+        }
+
+    # The initial history row (None -> confirmed) always matches "created": every
+    # order is born 'confirmed', regardless of how far it advanced from there.
+    timeline["confirmed"] = timeline["created"]
+    return timeline
+
+
+def backdate_order(db, order, timeline: dict[str, datetime], has_banding: bool) -> None:
+    """Rewrites an already-driven order's timestamps to match ``timeline``.
+
+    Spreads piece ``cut_at`` across the ``[cutting, cut]`` window (instead of
+    "all cut at once") so per-user cutting throughput has real variance, and
+    places the banding start/finish inside the same window.
+    """
+    order.created_at = timeline["created"]
+    order.confirmed_at = timeline["created"]
+    for h in order.history:
+        if h.to_status in timeline:
+            h.created_at = timeline[h.to_status]
+
+    if "cutting" in timeline:
+        order.assigned_at = timeline["cutting"]
+    if OrderStatus.dispatched.value in timeline:
+        order.dispatched_at = timeline[OrderStatus.dispatched.value]
+
+    if has_banding and "cutting" in timeline:
+        cutting_ts = timeline["cutting"]
+        if "cut" in timeline:
+            span = (timeline["cut"] - cutting_ts).total_seconds()
+            started = cutting_ts + timedelta(seconds=random.uniform(0.2, 0.6) * span)
+            finished = started + timedelta(hours=random.uniform(0.5, 3))
+            if order.banding_started_at is not None:
+                order.banding_started_at = started
+            if order.banding_finished_at is not None:
+                order.banding_finished_at = finished
+        elif order.banding_started_at is not None:
+            # Still cutting: banding only started, somewhere after it began.
+            order.banding_started_at = min(
+                cutting_ts + timedelta(hours=random.uniform(0.5, 3)),
+                datetime.utcnow(),
+            )
+
+    if "cut" in timeline and "cutting" in timeline:
+        span = (timeline["cut"] - timeline["cutting"]).total_seconds()
+        for board in order.boards:
+            for piece in board.pieces:
+                if piece.cut_at is not None:
+                    piece.cut_at = timeline["cutting"] + timedelta(
+                        seconds=random.uniform(0, span)
+                    )
+
+    db.commit()
 
 
 def slugify(name: str) -> str:
@@ -263,9 +443,9 @@ def ensure_user(db, email, full_name, role, branch_id) -> UserModel:
     return user
 
 
-def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
-    """Global admin + seller, operator and bander per branch. Returns staff per branch."""
-    ensure_user(
+def ensure_users(db, branches) -> tuple[UserModel, dict[int, dict[str, UserModel]]]:
+    """Global admin + seller, operator and bander per branch. Returns (admin, staff per branch)."""
+    admin = ensure_user(
         db, "admin@empresa.com", "Administrador General", UserRole.ADMIN.value, None
     )
     staff: dict[int, dict[str, UserModel]] = {}
@@ -297,7 +477,7 @@ def ensure_users(db, branches) -> dict[int, dict[str, UserModel]]:
             "operator": operator,
             "bander": bander,
         }
-    return staff
+    return admin, staff
 
 
 def ensure_clients(db) -> list[ClientModel]:
@@ -629,9 +809,94 @@ def seed_transactional(db, branches, clients, staff, boards, edge_bands):
             print(f"    + Order {order.code} [{order.status}]{banding_note}")
 
 
+def seed_analytics_orders(db, branches, clients, staff, boards, edge_bands):
+    """Extra backdated orders per status, per branch: volume/spread for analytics.
+
+    Reuses ``seed_order`` (the real state machine, so business fields like
+    ``assigned_to_id``/billing lines stay correct) and then rewrites its
+    timestamps via ``build_order_timeline``/``backdate_order`` so
+    ``/analytics/bottlenecks`` (stage durations) and ``/analytics/users``
+    (per-operator cutting throughput) show realistic variance instead of
+    everything happening in the same instant.
+    """
+    BANDING_STATUSES = {
+        OrderStatus.cutting,
+        OrderStatus.cut,
+        OrderStatus.completed,
+        OrderStatus.dispatched,
+    }
+    total = 0
+    for branch in branches:
+        seller = staff[branch.id]["seller"]
+        operator = staff[branch.id]["operator"]
+        bander = staff[branch.id]["bander"]
+
+        for status in ORDER_STATUSES:
+            for _ in range(ORDERS_PER_STATUS_ANALYTICS):
+                client = random.choice(clients)
+                board = random.choice(boards)
+                use_banding = bool(
+                    status in BANDING_STATUSES and edge_bands and random.random() < 0.6
+                )
+                edge_band = random.choice(edge_bands) if use_banding else None
+                order = seed_order(
+                    db,
+                    status,
+                    branch,
+                    client,
+                    seller,
+                    operator,
+                    board,
+                    bander=bander if use_banding else None,
+                    edge_band=edge_band,
+                )
+                timeline = build_order_timeline(status)
+                backdate_order(db, order, timeline, has_banding=use_banding)
+                total += 1
+        print(
+            f"    + {ORDERS_PER_STATUS_ANALYTICS * len(ORDER_STATUSES)} backdated orders in {branch.name}"
+        )
+    print(f"  Analytics history: {total} extra orders generated.")
+
+
+def seed_login_events(db, users):
+    """Synthetic login history (last ``ATTENDANCE_DAYS`` business days) per user.
+
+    Approximates a daily clock-in around the user's role hour (jittered), with
+    occasional absences and occasional second logins later in the day, so
+    ``/analytics/attendance`` has something to chart.
+    """
+    now = datetime.utcnow()
+    created = 0
+    for user in users:
+        base_hour = ROLE_BASE_HOUR.get(user.role, 8.0)
+        for days_ago in range(ATTENDANCE_DAYS, -1, -1):
+            day = (now - timedelta(days=days_ago)).date()
+            if day.weekday() >= 5:  # skip weekends
+                continue
+            if random.random() < 0.06:  # occasional absence
+                continue
+            hour = max(0.0, base_hour + random.uniform(-0.4, 0.6))
+            local_login = datetime.combine(
+                day, datetime.min.time(), tzinfo=LOCAL_TZ
+            ) + timedelta(hours=hour)
+            first_login = local_login.astimezone(timezone.utc).replace(tzinfo=None)
+            db.add(UserLoginEventModel(user_id=user.id, created_at=first_login))
+            created += 1
+            if random.random() < 0.3:  # occasional second login later in the day
+                second = first_login + timedelta(hours=random.uniform(2, 6))
+                db.add(UserLoginEventModel(user_id=user.id, created_at=second))
+                created += 1
+    db.commit()
+    print(f"  + {created} login events for {len(users)} user(s)")
+
+
 def reset_demo(db):
-    """Deletes the demo pre-orders/orders (``source='seed'``). Pre-orders first
-    (they reference the order via ``order_id``)."""
+    """Deletes the demo pre-orders/orders (``source='seed'``) and login events.
+
+    Pre-orders first (they reference the order via ``order_id``). Login events
+    are matched by the seeded users' well-known email patterns.
+    """
     pres = db.query(PreOrderModel).filter(PreOrderModel.source == SEED_SOURCE).all()
     for p in pres:
         db.delete(p)
@@ -639,9 +904,32 @@ def reset_demo(db):
     orders = db.query(OrderModel).filter(OrderModel.source == SEED_SOURCE).all()
     for o in orders:
         db.delete(o)
+
+    demo_user_ids = [
+        u.id
+        for u in db.query(UserModel)
+        .filter(
+            or_(
+                UserModel.email == "admin@empresa.com",
+                UserModel.email.like("vendedor%@empresa.com"),
+                UserModel.email.like("operador%@empresa.com"),
+                UserModel.email.like("canteador%@empresa.com"),
+            )
+        )
+        .all()
+    ]
+    deleted_logins = 0
+    if demo_user_ids:
+        deleted_logins = (
+            db.query(UserLoginEventModel)
+            .filter(UserLoginEventModel.user_id.in_(demo_user_ids))
+            .delete(synchronize_session=False)
+        )
+
     db.commit()
     print(
-        f"Reset: deleted {len(pres)} demo pre-orders and {len(orders)} demo orders.\n"
+        f"Reset: deleted {len(pres)} demo pre-orders, {len(orders)} demo orders "
+        f"and {deleted_logins} login events.\n"
     )
 
 
@@ -662,7 +950,7 @@ def main():
         print("Branches:")
         branches = ensure_branches(db)
         print("Users:")
-        staff = ensure_users(db, branches)
+        admin, staff = ensure_users(db, branches)
         print("Clients:")
         clients = ensure_clients(db)
         print("Boards and edge bandings:")
@@ -681,6 +969,19 @@ def main():
         else:
             print("\nPre-orders and orders (one per status, per branch):")
             seed_transactional(db, branches, clients, staff, boards, edge_bands)
+            db.commit()
+
+            print(
+                "\nAnalytics history (extra backdated orders for bottlenecks/productivity):"
+            )
+            seed_analytics_orders(db, branches, clients, staff, boards, edge_bands)
+            db.commit()
+
+            print("\nAttendance (login events):")
+            all_users = [admin] + [
+                u for role_map in staff.values() for u in role_map.values()
+            ]
+            seed_login_events(db, all_users)
             db.commit()
 
         print("\n✅ Seed complete.")
