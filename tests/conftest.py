@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 # Importing the models populates ``Base.metadata`` before ``create_all``.
 import src.modules.branches.model  # noqa: F401,E402
 import src.modules.clients.model  # noqa: F401,E402
+import src.modules.notifications.model  # noqa: F401,E402
 import src.modules.optimization_drafts.model  # noqa: F401,E402
 import src.modules.optimizations.model  # noqa: F401,E402
 import src.modules.orders.model  # noqa: F401,E402
