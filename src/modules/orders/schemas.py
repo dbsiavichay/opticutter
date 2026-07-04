@@ -342,17 +342,27 @@ class BandingStatusResponse(CamelModel):
     banding_finished_at: Optional[datetime] = None
 
 
-class BandingQueueItem(CamelModel):
-    """Banding queue item: the minimum needed for the bander to identify the order."""
+class WorkshopQueueItem(CamelModel):
+    """Shop-floor board item: orders from the queue up to "cut", for a card list.
+
+    Self-sufficient (embeds client + board names) so the bander -- who lacks
+    ``orders:read`` -- can drive both banding and completion from it. Carries no
+    prices: it is a workshop surface, not a commercial one.
+    """
 
     order_id: int
     order_code: Optional[str] = None
     status: OrderStatus = Field(..., description="Cutting-track status of the order")
-    banding_status: BandingStatus
+    banding_status: BandingStatus = Field(
+        ..., description="Parallel banding-track status (drives the banding actions)"
+    )
     created_at: datetime
     client: ClientResponse = Field(..., description="Client the order belongs to")
     board_names: List[str] = Field(
         default_factory=list,
         description="Distinct board names (product_name, falling back to "
         "product_code/material_key) used in the order",
+    )
+    progress: CuttingProgress = Field(
+        ..., description="Cut pieces out of the total (0/0 if not yet materialized)"
     )

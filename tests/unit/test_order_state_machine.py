@@ -104,6 +104,27 @@ def test_completed_blocked_when_banding_pending(mock_session):
     mock_session.commit.assert_not_called()
 
 
+# --- Completion by the shop floor (operator / bander) ----------------------------
+@pytest.mark.parametrize("role", [UserRole.OPERATOR, UserRole.BANDER])
+def test_shop_floor_can_complete_when_banding_settled(mock_session, role):
+    # No banding (not_applicable) or banding done → operator and bander may complete.
+    order = _order(OrderStatus.cut, banding_status="done")
+    svc = _service(mock_session, order)
+    svc.transition(1, OrderStatus.completed, actor=_actor(role))
+    assert order.status == OrderStatus.completed.value
+    mock_session.commit.assert_called_once()
+
+
+def test_operator_cannot_complete_while_bander_still_banding(mock_session):
+    # Scenario 1: the operator finished cutting but the bander is still banding;
+    # Gate B blocks the operator from closing the order early.
+    order = _order(OrderStatus.cut, banding_status="in_progress")
+    svc = _service(mock_session, order)
+    with pytest.raises(BusinessRuleError):
+        svc.transition(1, OrderStatus.completed, actor=_actor(UserRole.OPERATOR))
+    mock_session.commit.assert_not_called()
+
+
 # --- Pure helpers -----------------------------------------------------------------
 def test_has_payment_true_only_when_some_amount_positive():
     assert _has_payment(None) is False

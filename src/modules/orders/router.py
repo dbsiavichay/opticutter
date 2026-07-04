@@ -7,7 +7,6 @@ from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.schemas import (
-    BandingQueueItem,
     BandingStatusResponse,
     BandingUpdate,
     CuttingPlanResponse,
@@ -17,6 +16,7 @@ from src.modules.orders.schemas import (
     OrderStatusUpdate,
     PieceCutResponse,
     PieceCutUpdate,
+    WorkshopQueueItem,
 )
 from src.modules.orders.service import OrderService, order_service
 from src.modules.settings.service import SettingsService, settings_service
@@ -44,6 +44,7 @@ _TRANSITION = Depends(require_permission("orders:transition"))
 _CUTTING = Depends(require_permission("cutting_plan"))
 _CUT = Depends(require_permission("orders:cut"))
 _BAND = Depends(require_permission("orders:band"))
+_WORKSHOP = Depends(require_permission("orders:workshop"))
 
 _FORMAT_QUERY = Query(
     default="pdf",
@@ -84,19 +85,20 @@ def list_orders(
 
 
 @router.get(
-    "/banding-queue",
-    response_model=DataResponse[List[BandingQueueItem]],
-    dependencies=[_BAND],
+    "/workshop-queue",
+    response_model=DataResponse[List[WorkshopQueueItem]],
+    dependencies=[_WORKSHOP],
 )
-def get_banding_queue(
+def get_workshop_queue(
     svc: OrderService = Depends(order_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Bander's banding queue: orders with pending banding (their branch).
+    """Shared shop-floor board (operator + bander): orders queued → cut, their branch.
 
-    Declared before ``/{order_id}`` so the parametric route doesn't capture it.
+    Self-sufficient card list (embeds client + board names + progress). Declared
+    before ``/{order_id}`` so the parametric route doesn't capture it.
     """
-    return ok(svc.list_banding_queue(branch_scope=branch_scope))
+    return ok(svc.list_workshop_queue(branch_scope=branch_scope))
 
 
 @router.get(

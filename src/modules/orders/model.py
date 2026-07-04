@@ -62,6 +62,11 @@ BANDING_PENDING_STATUSES = {BandingStatus.pending, BandingStatus.in_progress}
 # Cutting statuses in which banding can be registered (pieces are already released).
 BANDING_MUTABLE_ORDER_STATUSES = {OrderStatus.cutting, OrderStatus.cut}
 
+# Statuses shown on the shared workshop board (operator + bander): from the queue
+# up to "cut" (ready to complete). Excludes ``confirmed`` (not yet in the shop) and
+# the closed states (``completed``/``despachado``/``cancelled``).
+WORKSHOP_QUEUE_STATUSES = {OrderStatus.queued, OrderStatus.cutting, OrderStatus.cut}
+
 # Statuses with no outgoing transition: the order no longer changes.
 # ``dispatched`` (goods handed to the client) is the real end of the cycle;
 # ``completed`` is no longer terminal in the graph (it advances to
@@ -97,7 +102,16 @@ TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = 
     ),
     (OrderStatus.cutting, OrderStatus.queued): (UserRole.ADMIN,),
     (OrderStatus.cutting, OrderStatus.cut): (UserRole.ADMIN, UserRole.OPERATOR),
-    (OrderStatus.cut, OrderStatus.completed): (UserRole.ADMIN, UserRole.SELLER),
+    # Completing the order can be done by the shop floor too: the operator (own
+    # cutting) or the bander (after finishing the banding). Gate B still blocks
+    # completion while banding is pending/in_progress, so an operator can't close
+    # an order the bander is still working on.
+    (OrderStatus.cut, OrderStatus.completed): (
+        UserRole.ADMIN,
+        UserRole.SELLER,
+        UserRole.OPERATOR,
+        UserRole.BANDER,
+    ),
     # Dispatch (physical handover) can be registered by any role: whoever hands
     # over the goods. All roles are listed explicitly instead of omitting the entry.
     (OrderStatus.completed, OrderStatus.dispatched): (
