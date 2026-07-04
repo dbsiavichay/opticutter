@@ -1,9 +1,8 @@
 """Tests for the PARALLEL edge-banding track: initial state, overlap with
-cutting, completion gate, guards, idempotency, canteador queue and role RBAC."""
+cutting, completion gate (incl. completion by the shop floor), guards,
+idempotency and canteador role RBAC. The workshop board that lists these orders
+is covered in ``test_order_workshop_queue.py``."""
 
-from sqlalchemy.orm import Session
-
-from src.modules.branches.model import BranchModel
 from src.modules.orders.schemas import OrderCreate
 from src.modules.orders.service import OrderService
 from src.modules.users.schemas import UserCreate
@@ -283,82 +282,6 @@ def test_banding_in_progress_is_idempotent(client, db_session):
 
 
 # --------------------------------------------------------------------------- #
-# Banding queue + branch isolation
-# --------------------------------------------------------------------------- #
-def test_banding_queue_lists_pending_orders(client, db_session):
-    order = _order_with_banding(client, db_session)
-    _to_cutting(client, order["id"])
-
-    queue = client.get("/api/v1/orders/banding-queue").json()["data"]
-    ids = {item["orderId"] for item in queue}
-    assert order["id"] in ids
-    item = next(i for i in queue if i["orderId"] == order["id"])
-    assert item["bandingStatus"] == "pending"
-    assert item["status"] == "cutting"
-    assert item["client"]["firstName"] == "Ada"
-    assert item["client"]["lastName"] == "Lovelace"
-    assert item["boardNames"] == ["Melamina MEL2233"]
-
-
-def test_banding_queue_is_fifo_oldest_first(client, db_session):
-    """The bander works the queue in arrival order (oldest order first)."""
-    o1 = _order_with_banding(client, db_session, identifier="0990000003")
-    o2 = _order_with_banding(client, db_session, identifier="0990000004")
-    o3 = _order_with_banding(client, db_session, identifier="0990000005")
-    _to_cutting(client, o1["id"])
-    _to_cutting(client, o2["id"])
-    _to_cutting(client, o3["id"])
-
-    queue = client.get("/api/v1/orders/banding-queue").json()["data"]
-    assert [i["orderId"] for i in queue] == [o1["id"], o2["id"], o3["id"]]
-
-
-def test_banding_queue_excludes_finished_and_unstarted(client, db_session):
-    """Only orders with pending banding and cutting already started are included."""
-    # Pending but still 'queued' (cutting hasn't started) → excluded.
-    not_cutting = _order_with_banding(client, db_session, identifier="0990000001")
-    assert _patch_status(client, not_cutting["id"], "queued").status_code == 200
-
-    # Cutting and banding already finished → excluded.
-    done = _order_with_banding(client, db_session, identifier="0990000002")
-    _to_cutting(client, done["id"])
-    _patch_banding(client, done["id"], "in_progress")
-    _patch_banding(client, done["id"], "done")
-
-    ids = {
-        i["orderId"] for i in client.get("/api/v1/orders/banding-queue").json()["data"]
-    }
-    assert not_cutting["id"] not in ids
-    assert done["id"] not in ids
-
-
-def test_banding_queue_is_branch_scoped(client, db_session: Session):
-    """The canteador only sees their own branch's queue."""
-    # Order with pending banding in the default branch (1), in cutting.
-    order = _order_with_banding(client, db_session)
-    _to_cutting(client, order["id"])
-
-    # A canteador from ANOTHER branch doesn't see this order in their queue.
-    db_session.add(BranchModel(code="SUC2", name="Sucursal Dos", is_active=True))
-    db_session.commit()
-    branch2 = db_session.query(BranchModel).filter(BranchModel.code == "SUC2").one()
-    headers = _token_for(
-        client,
-        db_session,
-        "canteador",
-        branch_id=branch2.id,
-        email="canteador2@empresa.com",
-    )
-    queue = client.get("/api/v1/orders/banding-queue", headers=headers).json()["data"]
-    assert order["id"] not in {i["orderId"] for i in queue}
-
-    # The canteador from branch 1 does see it.
-    h1 = _token_for(client, db_session, "canteador")
-    q1 = client.get("/api/v1/orders/banding-queue", headers=h1).json()["data"]
-    assert order["id"] in {i["orderId"] for i in q1}
-
-
-# --------------------------------------------------------------------------- #
 # canteador role RBAC
 # --------------------------------------------------------------------------- #
 def test_canteador_can_band_but_not_read_order_detail(client, db_session):
@@ -366,13 +289,13 @@ def test_canteador_can_band_but_not_read_order_detail(client, db_session):
     _to_cutting(client, order["id"])
     headers = _token_for(client, db_session, "canteador")
 
-    # Can register banding and see their queue...
+    # Can register banding and see their workshop board...
     assert (
         _patch_banding(client, order["id"], "in_progress", headers=headers).status_code
         == 200
     )
     assert (
-        client.get("/api/v1/orders/banding-queue", headers=headers).status_code == 200
+        client.get("/api/v1/orders/workshop-queue", headers=headers).status_code == 200
     )
     # ...but NOT the order detail (no orders:read).
     assert (
@@ -387,3 +310,49 @@ def test_operator_and_seller_cannot_band(client, db_session):
         headers = _token_for(client, db_session, role)
         resp = _patch_banding(client, order["id"], "in_progress", headers=headers)
         assert resp.status_code == 403, role
+
+
+# --------------------------------------------------------------------------- #
+# Completion by the shop floor (operador / canteador)
+# --------------------------------------------------------------------------- #
+def test_operator_completes_order_without_banding(client, db_session):
+    """Scenario 3: the operator cuts and completes a no-banding order end to end."""
+    order = _order_without_banding(client, db_session)
+    op = _token_for(client, db_session, "operador")
+    _to_cutting(client, order["id"])
+    _cut_all_pieces(client, order["id"])
+    assert _patch_status(client, order["id"], "cut", headers=op).status_code == 200
+    assert (
+        _patch_status(client, order["id"], "completed", headers=op).status_code == 200
+    )
+
+
+def test_canteador_completes_after_finishing_banding(client, db_session):
+    """Scenario 1: the operator moves on to another order; the canteador completes
+    this one only after finishing the banding (Gate B blocks it before)."""
+    order = _order_with_banding(client, db_session)
+    _to_cutting(client, order["id"])
+    _cut_all_pieces(client, order["id"])
+    assert _patch_status(client, order["id"], "cut").status_code == 200
+
+    canteador = _token_for(client, db_session, "canteador")
+    # Blocked while banding is unfinished, even for the canteador.
+    blocked = _patch_status(client, order["id"], "completed", headers=canteador)
+    assert blocked.status_code == 422
+    assert "canteado" in blocked.json()["errors"][0]["message"].lower()
+
+    # After finishing banding, the canteador completes it from their own token.
+    assert (
+        _patch_banding(
+            client, order["id"], "in_progress", headers=canteador
+        ).status_code
+        == 200
+    )
+    assert (
+        _patch_banding(client, order["id"], "done", headers=canteador).status_code
+        == 200
+    )
+    assert (
+        _patch_status(client, order["id"], "completed", headers=canteador).status_code
+        == 200
+    )

@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from fastapi import Depends
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.modules.branches.service import resolve_branch_for_create
@@ -21,6 +22,7 @@ from src.modules.orders.model import (
     TERMINAL_STATUSES,
     TRANSITION_ROLES,
     TRANSITIONS,
+    WORKSHOP_QUEUE_STATUSES,
     BandingStatus,
     OrderBoardModel,
     OrderLineModel,
@@ -31,7 +33,6 @@ from src.modules.orders.model import (
     OrderStatusHistoryModel,
 )
 from src.modules.orders.schemas import (
-    BandingQueueItem,
     BandingStatusResponse,
     CuttingPlanResponse,
     CuttingProgress,
@@ -42,6 +43,7 @@ from src.modules.orders.schemas import (
     OrderPaymentInput,
     PieceCutResponse,
     PlacedPieceResponse,
+    WorkshopQueueItem,
 )
 from src.modules.settings.service import SettingsService
 from src.shared.audit import Actor, system_actor
@@ -411,23 +413,24 @@ class OrderService(BranchScopedMixin):
             board_progress=_progress(piece.board.pieces),
         )
 
-    def list_banding_queue(
+    def list_workshop_queue(
         self, branch_scope: Optional[int] = None
-    ) -> List[BandingQueueItem]:
-        """Banding queue: orders with pending banding whose cutting has started.
+    ) -> List[WorkshopQueueItem]:
+        """Shared shop-floor board: orders from the queue up to "cut".
 
-        Minimal view for the bander (no prices or detail): only orders in
-        ``cutting``/``cut`` whose banding hasn't finished yet. Branch-isolated.
-        Oldest first (FIFO): the bander works the queue in arrival order.
+        Self-sufficient card list for the operator and the bander (the latter has
+        no ``orders:read``): embeds the client, board names and cutting progress so
+        both can drive their actions -- take/cut, band, complete -- from one place.
+        Branch-isolated, oldest first (FIFO).
         """
         query = self.db.query(OrderModel).filter(
-            OrderModel.status.in_([s.value for s in BANDING_MUTABLE_ORDER_STATUSES]),
-            OrderModel.banding_status.in_([s.value for s in BANDING_PENDING_STATUSES]),
+            OrderModel.status.in_([s.value for s in WORKSHOP_QUEUE_STATUSES]),
         )
         query = self._apply_branch_scope(query, branch_scope, None)
         orders = query.order_by(OrderModel.id.asc()).all()
+        progress_by_order = self._cutting_progress_by_order([o.id for o in orders])
         return [
-            BandingQueueItem(
+            WorkshopQueueItem(
                 order_id=o.id,
                 order_code=o.code,
                 status=OrderStatus(o.status),
@@ -435,9 +438,37 @@ class OrderService(BranchScopedMixin):
                 created_at=o.created_at,
                 client=ClientResponse.model_validate(o.client),
                 board_names=_board_names(o.boards),
+                progress=progress_by_order.get(
+                    o.id, CuttingProgress(cut_pieces=0, total_pieces=0)
+                ),
             )
             for o in orders
         ]
+
+    def _cutting_progress_by_order(
+        self, order_ids: List[int]
+    ) -> dict[int, CuttingProgress]:
+        """Cut/total placed-piece counts per order in a single grouped query.
+
+        Avoids N+1: ``count(cut_at)`` tallies only non-null timestamps (cut pieces).
+        Orders with no materialized pieces are absent from the map (caller → 0/0).
+        """
+        if not order_ids:
+            return {}
+        rows = (
+            self.db.query(
+                OrderPlacedPieceModel.order_id,
+                func.count(OrderPlacedPieceModel.id).label("total"),
+                func.count(OrderPlacedPieceModel.cut_at).label("cut"),
+            )
+            .filter(OrderPlacedPieceModel.order_id.in_(order_ids))
+            .group_by(OrderPlacedPieceModel.order_id)
+            .all()
+        )
+        return {
+            row.order_id: CuttingProgress(cut_pieces=row.cut, total_pieces=row.total)
+            for row in rows
+        }
 
     def transition_banding(
         self,

@@ -17,6 +17,7 @@ route is protected with ``require_role(*RESOURCE_ROLES[key])`` (see ``dependenci
 | orders:write (create/quote)   | yes           | yes      | no       | no        |
 | orders:read                   | yes           | yes      | yes      | no        |
 | orders:transition (status change) | yes       | yes      | yes*     | yes*      |
+| orders:workshop (shop board)  | yes           | no       | yes      | yes       |
 | cutting_plan (view plan)      | yes           | yes      | yes      | no        |
 | orders:cut (mark pieces)      | yes           | no       | yes      | no        |
 | orders:band (edge banding)    | yes           | no       | no       | yes       |
@@ -28,7 +29,8 @@ route is protected with ``require_role(*RESOURCE_ROLES[key])`` (see ``dependenci
   (``completed -> despachado``); every other transition stays off-limits there.
 
 The bander doesn't see order detail (no ``orders:read``): only their banding queue
-and the start/finish endpoints (``orders:band``).
+and start/finish endpoints (``orders:band``) plus the self-sufficient shop-floor
+board (``orders:workshop``), from which they also complete orders (``orders:transition``).
 """
 
 from src.modules.users.enums import UserRole
@@ -53,6 +55,9 @@ RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     "orders:write": (_ADMIN, _SELLER),
     "orders:read": (_ADMIN, _SELLER, _OPERATOR),
     "orders:transition": (_ADMIN, _SELLER, _OPERATOR, _BANDER),
+    # Shared shop-floor board (self-sufficient card list). The bander reaches it
+    # despite lacking ``orders:read``: it embeds the client + board names.
+    "orders:workshop": (_ADMIN, _OPERATOR, _BANDER),
     "cutting_plan": (_ADMIN, _SELLER, _OPERATOR),
     "orders:cut": (_ADMIN, _OPERATOR),
     "orders:band": (_ADMIN, _BANDER),
