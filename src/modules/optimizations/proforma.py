@@ -17,6 +17,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
     Image,
+    KeepTogether,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -448,8 +449,11 @@ class ProformaService:
             )
         )
 
-        story.append(Spacer(1, 0.5 * inch))
-        story.append(ProformaService._build_signature_block(styles))
+        story.append(
+            KeepTogether(
+                [Spacer(1, 0.5 * inch), ProformaService._build_signature_block(styles)]
+            )
+        )
 
         doc.build(
             story,
@@ -461,9 +465,10 @@ class ProformaService:
 
     @staticmethod
     def _build_signature_block(styles) -> Table:
-        """Two signature lines side by side: the deliverer and the receiver
-        (received in good order). The space to sign comes from the preceding
-        Spacer; the line goes above each label."""
+        """Three delivery signature slots side by side (multiple staff may hand
+        over the goods), plus the client's receipt signature below spanning the
+        full width. The space to sign comes from the padding above each line;
+        the line goes above each label."""
         label_style = ParagraphStyle(
             "SignLabel",
             parent=styles["Normal"],
@@ -480,29 +485,36 @@ class ProformaService:
             alignment=TA_CENTER,
             leading=11,
         )
-        left = [
-            Paragraph("Entregado por", label_style),
-            Paragraph("Nombre / Firma", sub_style),
-        ]
-        right = [
-            Paragraph("Recibí conforme — Cliente", label_style),
-            Paragraph("Nombre / C.I. / Firma / Fecha", sub_style),
-        ]
+
+        def _slot(label: str, sub: str) -> List[Paragraph]:
+            return [Paragraph(label, label_style), Paragraph(sub, sub_style)]
+
+        cliente = _slot("Recibí conforme — Cliente", "Nombre / C.I. / Firma / Fecha")
+
+        col_width = CONTENT_WIDTH / 3
         table = Table(
-            [[left, "", right]],
-            colWidths=[
-                CONTENT_WIDTH * 0.42,
-                CONTENT_WIDTH * 0.16,
-                CONTENT_WIDTH * 0.42,
+            [
+                [
+                    _slot("Entregado por", "Nombre / Firma"),
+                    _slot("Entregado por", "Nombre / Firma"),
+                    _slot("Entregado por", "Nombre / Firma"),
+                ],
+                [cliente, "", ""],
             ],
+            colWidths=[col_width, col_width, col_width],
         )
         table.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 1), (-1, 1), "CENTER"),
+                    ("SPAN", (0, 1), (-1, 1)),
                     ("LINEABOVE", (0, 0), (0, 0), 0.75, BRAND_BLACK),
+                    ("LINEABOVE", (1, 0), (1, 0), 0.75, BRAND_BLACK),
                     ("LINEABOVE", (2, 0), (2, 0), 0.75, BRAND_BLACK),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("LINEABOVE", (0, 1), (-1, 1), 0.75, BRAND_BLACK),
+                    ("TOPPADDING", (0, 0), (-1, 0), 6),
+                    ("TOPPADDING", (0, 1), (-1, 1), 40),
                 ]
             )
         )
