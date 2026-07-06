@@ -1,9 +1,9 @@
 """Tests for the 'despachado' (delivered to client) status and the dispatch sheet.
 
-Dispatch is the real close of the cycle: ``completed → despachado`` (terminal) and it
-can be registered by ANY role (whoever hands over the goods), unlike the rest of the
-transitions narrowed by ``TRANSITION_ROLES``. The dispatch sheet is a PDF with the
-pieces (no prices), the liability disclaimer, and the signature lines.
+Dispatch is the real close of the cycle: ``completed → despachado`` (terminal). It is
+a commercial act restricted to admin/seller by ``TRANSITION_ROLES`` — the shop floor
+(operador/canteador) cannot register it. The dispatch sheet is a PDF with the pieces
+(no prices), the liability disclaimer, and the signature lines.
 """
 
 from src.modules.orders.schemas import OrderCreate
@@ -131,8 +131,8 @@ def test_dispatch_from_completed_freezes_metadata(client, db_session):
     assert data["history"][-1]["toStatus"] == "despachado"
 
 
-def test_any_role_can_dispatch(client, db_session):
-    """operador and canteador (roles that normally don't close the order) can still dispatch."""
+def test_shop_floor_cannot_dispatch(client, db_session):
+    """operador and canteador cannot register the dispatch (commercial act, admin/seller only)."""
     for idx, role in enumerate(("operador", "canteador")):
         order = _mint_order(
             client,
@@ -144,8 +144,24 @@ def test_any_role_can_dispatch(client, db_session):
         _to_completed(client, order["id"])
         headers = _token_for(client, db_session, role)
         resp = _patch_status(client, order["id"], "despachado", headers=headers)
-        assert resp.status_code == 200, role
-        assert resp.json()["data"]["status"] == "despachado"
+        assert resp.status_code == 403, role
+        # The order stays completed: the rejected transition doesn't advance it.
+        assert (
+            client.get(f"/api/v1/orders/{order['id']}").json()["data"]["status"]
+            == "completed"
+        )
+
+
+def test_seller_can_dispatch(client, db_session):
+    """The seller (a commercial role) can register the dispatch."""
+    order = _mint_order(
+        client, db_session, identifier="0990000199", code="MELS0", width=550
+    )
+    _to_completed(client, order["id"])
+    headers = _token_for(client, db_session, "vendedor")
+    resp = _patch_status(client, order["id"], "despachado", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "despachado"
 
 
 def test_dispatched_is_terminal(client, db_session):

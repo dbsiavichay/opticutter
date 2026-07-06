@@ -105,7 +105,7 @@ every role) — every other transition stays closed to it.
 | `cutting → queued` (admin rollback) | administrador |
 | `cutting → cut` | administrador, operador |
 | `cut → completed` | administrador, vendedor |
-| `completed → dispatched` | administrador, vendedor, operador, canteador (any role) |
+| `completed → dispatched` | administrador, vendedor (commercial act; the shop floor cannot dispatch) |
 
 Note: the order status wire value for the final state is the literal string
 `"despachado"` (`OrderStatus.dispatched`), kept in Spanish for backward

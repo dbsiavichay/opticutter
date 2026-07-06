@@ -112,13 +112,11 @@ TRANSITION_ROLES: dict[tuple[OrderStatus, OrderStatus], tuple[UserRole, ...]] = 
         UserRole.OPERATOR,
         UserRole.BANDER,
     ),
-    # Dispatch (physical handover) can be registered by any role: whoever hands
-    # over the goods. All roles are listed explicitly instead of omitting the entry.
+    # Dispatch (physical handover to the client) is a commercial act: only
+    # admin/seller register it, never the shop floor (operator/bander).
     (OrderStatus.completed, OrderStatus.dispatched): (
         UserRole.ADMIN,
         UserRole.SELLER,
-        UserRole.OPERATOR,
-        UserRole.BANDER,
     ),
 }
 
@@ -241,6 +239,12 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         back_populates="order",
         cascade="all, delete-orphan",
         order_by="OrderBoardModel.id",
+    )
+    attachments: Mapped[list["OrderAttachmentModel"]] = relationship(
+        "OrderAttachmentModel",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderAttachmentModel.id",
     )
 
 
@@ -385,6 +389,31 @@ class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
     order: Mapped["OrderModel"] = relationship("OrderModel")
     board: Mapped["OrderBoardModel"] = relationship(
         "OrderBoardModel", back_populates="pieces"
+    )
+
+
+class OrderAttachmentModel(TimestampMixin, AuditMixin, Base):
+    """File annex (anexo) attached to an order: a PDF or a screenshot.
+
+    Only metadata lives here; the bytes are on local disk under
+    ``config.ATTACHMENTS_DIR`` at ``stored_key`` (``{order_id}/{uuid}.{ext}``).
+    Attachments can only be added/removed while the order isn't in a terminal
+    state (not completed/dispatched/cancelled).
+    """
+
+    __tablename__ = "order_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    # Original client-supplied file name (display only; never used as a path).
+    filename: Mapped[str] = mapped_column(String(255))
+    # Relative on-disk key, unique per file: ``{order_id}/{uuid4}.{ext}``.
+    stored_key: Mapped[str] = mapped_column(String(255), unique=True)
+    content_type: Mapped[str] = mapped_column(String(128))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+
+    order: Mapped["OrderModel"] = relationship(
+        "OrderModel", back_populates="attachments"
     )
 
 

@@ -342,6 +342,21 @@ class BandingStatusResponse(CamelModel):
     banding_finished_at: Optional[datetime] = None
 
 
+class AttachmentResponse(CamelModel):
+    """Order attachment (anexo) metadata. Bytes are fetched via the download route."""
+
+    id: int
+    filename: str = Field(..., description="Original file name (display only)")
+    content_type: str = Field(
+        ..., description="MIME type: application/pdf | image/png | image/jpeg"
+    )
+    size_bytes: int = Field(..., description="File size in bytes")
+    created_at: datetime
+    created_by: Optional[int] = Field(
+        default=None, description="User id who uploaded the file"
+    )
+
+
 class WorkshopQueueItem(CamelModel):
     """Shop-floor board item: orders from the queue up to "cut", for a card list.
 
