@@ -97,6 +97,17 @@ class Config:
 
     OPT_RESULT_TTL_SECONDS = env.int("OPT_RESULT_TTL_SECONDS", 259200)
 
+    # Order attachments (anexos): PDFs/screenshots stored on local disk under
+    # ATTACHMENTS_DIR (one subfolder per order). Only their metadata lives in
+    # Postgres; the bytes stay on the filesystem (a Docker volume in prod).
+    # Allowed types are closed to PDF + PNG/JPEG; MAX_ATTACHMENT_MB caps each file.
+    ATTACHMENTS_DIR = env("ATTACHMENTS_DIR", "uploads")
+    MAX_ATTACHMENT_MB = env.int("MAX_ATTACHMENT_MB", 10)
+    ATTACHMENT_ALLOWED_TYPES = env.list(
+        "ATTACHMENT_ALLOWED_TYPES",
+        ["application/pdf", "image/png", "image/jpeg"],
+    )
+
     # Pre-orders (mutable quote): validity period and open-count cap per client.
     # Only seed the "preorders" section of the `settings` singleton row on its
     # first read; the runtime source of truth is the `settings` table (editable

@@ -125,6 +125,27 @@ def test_operator_cannot_complete_while_bander_still_banding(mock_session):
     mock_session.commit.assert_not_called()
 
 
+# --- Dispatch (completed -> despachado): admin/seller only -----------------------
+@pytest.mark.parametrize("role", [UserRole.OPERATOR, UserRole.BANDER])
+def test_shop_floor_cannot_dispatch(mock_session, role):
+    # Dispatch is a commercial act: the shop floor (operator/bander) can't register it.
+    order = _order(OrderStatus.completed)
+    svc = _service(mock_session, order)
+    with pytest.raises(AuthorizationError):
+        svc.transition(1, OrderStatus.dispatched, actor=_actor(role))
+    mock_session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize("role", [UserRole.ADMIN, UserRole.SELLER])
+def test_admin_and_seller_can_dispatch(mock_session, role):
+    order = _order(OrderStatus.completed)
+    svc = _service(mock_session, order)
+    svc.transition(1, OrderStatus.dispatched, actor=_actor(role))
+    assert order.status == OrderStatus.dispatched.value
+    assert order.dispatched_by_label == "Tester"
+    mock_session.commit.assert_called_once()
+
+
 # --- Pure helpers -----------------------------------------------------------------
 def test_has_payment_true_only_when_some_amount_positive():
     assert _has_payment(None) is False

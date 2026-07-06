@@ -11,8 +11,12 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - OPT_RESULT_TTL_SECONDS=259200
+      - ATTACHMENTS_DIR=/src/uploads
     volumes:
       - ./:/src/
+      # Named volume so uploaded annexes survive rebuilds and don't leak into
+      # the bind-mounted repo tree.
+      - uploads_data:/src/uploads
     ports:
       - "3000:3000"
     depends_on:
@@ -48,3 +52,4 @@ networks:
 
 volumes:
   postgres_data:
+  uploads_data:

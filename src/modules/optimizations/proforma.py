@@ -3,15 +3,17 @@ import io
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 from fastapi.responses import StreamingResponse
+from pypdf import PdfReader, PdfWriter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     HRFlowable,
     Image,
@@ -204,13 +206,19 @@ def _new_doc(
 class ProformaService:
     @staticmethod
     def generate_proforma_pdf(
-        carrier: ProformaCarrier, title: str = "PROFORMA"
+        carrier: ProformaCarrier,
+        title: str = "PROFORMA",
+        include_diagram: bool = True,
     ) -> io.BytesIO:
         """Commercial document: requirements, priced materials and layout.
 
         The same render serves both the quote (``title="PROFORMA"``, non-binding)
         and the confirmed order (``title="ORDEN DE PEDIDO"``, committed); only the
         header label changes.
+
+        ``include_diagram=False`` drops the cut-layout pages: used by the
+        consolidated print packet, where the diagram lives once in the production
+        sheet and would otherwise be duplicated here.
         """
         buffer = io.BytesIO()
         doc = _new_doc(buffer)
@@ -242,10 +250,11 @@ class ProformaService:
             story.append(Spacer(1, 0.2 * inch))
             story.extend(payment_block)
 
-        story.append(PageBreak())
-        story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
-        story.append(Spacer(1, 0.08 * inch))
-        story.extend(ProformaService._build_layout_pages(carrier))
+        if include_diagram:
+            story.append(PageBreak())
+            story.extend(_section("DISPOSICIÓN DE CORTES", heading_style))
+            story.append(Spacer(1, 0.08 * inch))
+            story.extend(ProformaService._build_layout_pages(carrier))
 
         story.append(Spacer(1, 0.3 * inch))
         # Validity only applies to quotes (pre-order / live optimization); an
@@ -325,6 +334,42 @@ class ProformaService:
         story.append(ProformaService._build_cut_summary_table(carrier, pal, pad))
 
         story.append(PageBreak())
+        story.extend(
+            _section("DISPOSICIÓN DE CORTES", heading_style, pal, space_after=4)
+        )
+        story.append(Spacer(1, 0.08 * inch))
+        story.extend(ProformaService._build_layout_pages(carrier, mono=True))
+
+        doc.build(
+            story,
+            onFirstPage=_draw_page_decoration_plain,
+            onLaterPages=_draw_page_decoration_plain,
+        )
+        buffer.seek(0)
+        return buffer
+
+    @staticmethod
+    def generate_diagram_pdf(carrier: ProformaCarrier) -> io.BytesIO:
+        """Cutting diagram only (the *gráfico*), B/W, WITHOUT the piece/board lists.
+
+        Used by the consolidated print packet: the cut list, boards and edge
+        banding already appear in the ORDEN DE PEDIDO, so here we print just the
+        visual layout (``DISPOSICIÓN DE CORTES``) under a compact identifying header.
+        """
+        buffer = io.BytesIO()
+        doc = _new_doc(buffer, top=0.4 * inch, bottom=0.45 * inch)
+        pal = MONO_PALETTE
+
+        styles = getSampleStyleSheet()
+        heading_style = _heading_style(styles)
+
+        story = []
+        story.extend(
+            ProformaService._build_production_header(
+                carrier, styles, pal, title="DIAGRAMA DE DESPIECE"
+            )
+        )
+        story.append(Spacer(1, 0.12 * inch))
         story.extend(
             _section("DISPOSICIÓN DE CORTES", heading_style, pal, space_after=4)
         )
@@ -595,7 +640,10 @@ class ProformaService:
 
     @staticmethod
     def _build_production_header(
-        carrier: ProformaCarrier, styles, palette: Palette = MONO_PALETTE
+        carrier: ProformaCarrier,
+        styles,
+        palette: Palette = MONO_PALETTE,
+        title: str = "HOJA DE PRODUCCIÓN",
     ) -> List:
         """Compact workshop header: title + No./date/client, no logo or
         letterhead. The client name goes here (the sheet has no CLIENT section).
@@ -628,7 +676,7 @@ class ProformaService:
         header = Table(
             [
                 [
-                    Paragraph("HOJA DE PRODUCCIÓN", title_style),
+                    Paragraph(title, title_style),
                     Paragraph(
                         f"N° {carrier.reference}<br/>"
                         f"Fecha: {datetime.now().strftime('%d/%m/%Y')}<br/>"
@@ -1030,6 +1078,66 @@ class ProformaService:
             flowables.append(image)
 
         return flowables
+
+
+def merge_pdfs(buffers: List[io.BytesIO]) -> io.BytesIO:
+    """Concatenates every page of each PDF buffer into a single PDF.
+
+    Used by the consolidated print packet to stitch the order document, the
+    production sheet, the dispatch sheet and the attachment pages into one file.
+    """
+    writer = PdfWriter()
+    for buf in buffers:
+        buf.seek(0)
+        for page in PdfReader(buf).pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out
+
+
+def image_to_pdf_buffer(data: bytes) -> io.BytesIO:
+    """Wraps a raster image (a screenshot annex) into a one-page A4 PDF.
+
+    The image is scaled to fit the page margins (never upscaled) and centered, so
+    it merges cleanly into the consolidated packet like any other PDF page.
+    """
+    reader = ImageReader(io.BytesIO(data))
+    img_w, img_h = reader.getSize()
+    max_w = PAGE_WIDTH - 2 * LEFT_MARGIN
+    max_h = PAGE_HEIGHT - 2 * LEFT_MARGIN
+    scale = min(max_w / img_w, max_h / img_h, 1.0)
+    draw_w, draw_h = img_w * scale, img_h * scale
+    x = (PAGE_WIDTH - draw_w) / 2
+    y = (PAGE_HEIGHT - draw_h) / 2
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    pdf.drawImage(
+        reader, x, y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask="auto"
+    )
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer
+
+
+def attachment_to_pdf_part(data: bytes, content_type: str) -> Optional[io.BytesIO]:
+    """Turns an attachment's bytes into a mergeable PDF buffer, or ``None``.
+
+    A PDF is passed through (after a structural read); an image is wrapped into a
+    page. Returns ``None`` if the bytes can't be parsed/rendered, so a single
+    corrupt annex is skipped instead of breaking the whole consolidated packet.
+    """
+    try:
+        if content_type == "application/pdf":
+            buffer = io.BytesIO(data)
+            PdfReader(buffer)  # validate it has a readable page structure
+            buffer.seek(0)
+            return buffer
+        return image_to_pdf_buffer(data)
+    except Exception:
+        return None
 
 
 def pdf_response(

@@ -24,9 +24,10 @@ route is protected with ``require_role(*RESOURCE_ROLES[key])`` (see ``dependenci
 | analytics                     | yes           | no       | no       | no        |
 | notifications:read            | yes           | yes      | yes      | yes       |
 
-* Per-transition validation lives in TRANSITION_ROLES (orders/model.py). The bander
-  only enters ``orders:transition`` to register the dispatch
-  (``completed -> despachado``); every other transition stays off-limits there.
+* Per-transition validation lives in TRANSITION_ROLES (orders/model.py). The operator
+  and bander enter ``orders:transition`` to complete orders (``cut -> completed``) from
+  the shop-floor board; dispatch (``completed -> despachado``) is a commercial act
+  restricted to admin/seller. Every other transition stays off-limits to them.
 
 The bander doesn't see order detail (no ``orders:read``): only their banding queue
 and start/finish endpoints (``orders:band``) plus the self-sufficient shop-floor

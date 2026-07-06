@@ -66,7 +66,9 @@ COPY --from=builder /opt/venv /opt/venv
 RUN useradd --create-home --uid 1000 appuser
 
 COPY . .
-RUN chown -R appuser:appuser /src
+# Attachments dir (anexos): created owned by appuser so a fresh named volume
+# mounted here inherits writable ownership (uid 1000).
+RUN mkdir -p /src/uploads && chown -R appuser:appuser /src
 
 USER appuser
 

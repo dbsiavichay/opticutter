@@ -1,12 +1,25 @@
 from typing import List, Optional
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import StreamingResponse
 
 from src.modules.branches.service import branch_letterhead
 from src.modules.optimizations.carrier import ProformaCarrier
-from src.modules.optimizations.proforma import ProformaService, pdf_response
+from src.modules.optimizations.proforma import (
+    ProformaService,
+    attachment_to_pdf_part,
+    merge_pdfs,
+    pdf_response,
+)
+from src.modules.orders import attachment_storage
+from src.modules.orders.attachment_service import (
+    AttachmentService,
+    attachment_service,
+)
 from src.modules.orders.model import OrderStatus
 from src.modules.orders.schemas import (
+    AttachmentResponse,
     BandingStatusResponse,
     BandingUpdate,
     CuttingPlanResponse,
@@ -301,3 +314,131 @@ def get_order_dispatch_sheet(
     )
     pdf_buffer = ProformaService.generate_dispatch_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"despacho_{order.code or order.id}.pdf", format)
+
+
+@router.get("/{order_id}/consolidated", dependencies=[_READ])
+def get_order_consolidated(
+    order_id: int,
+    format: str = _FORMAT_QUERY,
+    svc: OrderService = Depends(order_service),
+    att_svc: AttachmentService = Depends(attachment_service),
+    settings_svc: SettingsService = Depends(settings_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Consolidated print packet: one PDF for the printer.
+
+    Merges, in order: the order document (ORDEN DE PEDIDO, with the cut list and
+    materials but without its embedded diagram), the cut diagram only (DIAGRAMA DE
+    DESPIECE — just the gráfico, no repeated piece/board lists), the dispatch sheet,
+    and every attachment (PDFs as-is, screenshots wrapped one per page).
+    """
+    order = svc.get_scoped_or_404(order_id, branch_scope)
+    carrier = ProformaCarrier.from_order(
+        order,
+        company=settings_svc.get_company(),
+        branch=branch_letterhead(svc.db, order.branch_id),
+    )
+    parts = [
+        ProformaService.generate_proforma_pdf(
+            carrier, title="ORDEN DE PEDIDO", include_diagram=False
+        ),
+        ProformaService.generate_diagram_pdf(carrier),
+        ProformaService.generate_dispatch_sheet_pdf(carrier),
+    ]
+    for att in att_svc.list_attachments(order_id, branch_scope=branch_scope):
+        try:
+            data = attachment_storage.read(att.stored_key)
+        except OSError:
+            continue  # file missing on disk: skip, still print the rest
+        part = attachment_to_pdf_part(data, att.content_type)
+        if part is not None:
+            parts.append(part)
+
+    merged = merge_pdfs(parts)
+    return pdf_response(merged, f"consolidado_{order.code or order.id}.pdf", format)
+
+
+# --------------------------------------------------------------------------- #
+# Attachments (anexos): PDFs/screenshots attached while the order is still open
+# (not completed/dispatched/cancelled). Upload/delete = admin+seller
+# (orders:write); listing/download = anyone who reads the order (orders:read).
+# --------------------------------------------------------------------------- #
+@router.post(
+    "/{order_id}/attachments",
+    response_model=DataResponse[AttachmentResponse],
+    status_code=201,
+)
+def add_order_attachment(
+    order_id: int,
+    file: UploadFile = File(..., description="PDF or image (PNG/JPEG) to attach"),
+    svc: AttachmentService = Depends(attachment_service),
+    current_user: UserModel = Depends(require_permission("orders:write")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Attaches a PDF or screenshot to an order (only while it's not closed)."""
+    return ok(
+        svc.add_attachment(
+            order_id, file, actor=staff_actor(current_user), branch_scope=branch_scope
+        )
+    )
+
+
+@router.get(
+    "/{order_id}/attachments",
+    response_model=DataResponse[List[AttachmentResponse]],
+    dependencies=[_READ],
+)
+def list_order_attachments(
+    order_id: int,
+    svc: AttachmentService = Depends(attachment_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Lists an order's attachments (metadata only; bytes via the download route)."""
+    return ok(svc.list_attachments(order_id, branch_scope=branch_scope))
+
+
+def _content_disposition(filename: str, disposition: str = "inline") -> str:
+    """Builds a ``Content-Disposition`` header safe for any filename.
+
+    HTTP header values must be latin-1 encodable, but user filenames can carry
+    other characters (e.g. macOS screenshots use U+202F). Emits an ASCII-only
+    ``filename`` fallback plus the RFC 5987 ``filename*`` with the real UTF-8 name.
+    """
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii").replace('"', "")
+    ascii_fallback = ascii_fallback or "archivo"
+    encoded = quote(filename, safe="")
+    return f"{disposition}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+
+
+# Exempt from the JSON envelope: this streams the raw file bytes.
+@router.get("/{order_id}/attachments/{attachment_id}", dependencies=[_READ])
+def download_order_attachment(
+    order_id: int,
+    attachment_id: int,
+    svc: AttachmentService = Depends(attachment_service),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Downloads (inline) the attachment's bytes with its original content type."""
+    att = svc.get_attachment(order_id, attachment_id, branch_scope=branch_scope)
+    return StreamingResponse(
+        attachment_storage.open_stream(att.stored_key),
+        media_type=att.content_type,
+        headers={"Content-Disposition": _content_disposition(att.filename, "inline")},
+    )
+
+
+@router.delete("/{order_id}/attachments/{attachment_id}", status_code=204)
+def delete_order_attachment(
+    order_id: int,
+    attachment_id: int,
+    svc: AttachmentService = Depends(attachment_service),
+    current_user: UserModel = Depends(require_permission("orders:write")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Removes an attachment (only while the order is not closed)."""
+    svc.delete_attachment(
+        order_id,
+        attachment_id,
+        actor=staff_actor(current_user),
+        branch_scope=branch_scope,
+    )

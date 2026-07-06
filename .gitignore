@@ -22,6 +22,9 @@ venv/
 .env
 *.db
 
+# Order attachments (anexos) stored on local disk
+uploads/
+
 # Editors and IDEs
 *~
 *.swp
