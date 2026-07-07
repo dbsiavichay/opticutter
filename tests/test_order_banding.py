@@ -53,6 +53,7 @@ def _create_edge_banding(client, code="TAP22", price=2.0):
                 "width": 22,
                 "color": "Blanco",
                 "length": 50000,
+                "bandType": "Suave",
             },
         },
     ).json()["data"]

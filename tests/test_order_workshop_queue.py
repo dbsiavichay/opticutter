@@ -12,6 +12,7 @@ from src.modules.branches.model import BranchModel
 from tests.test_order_banding import (
     _cut_all_pieces,
     _order_with_banding,
+    _order_without_banding,
     _patch_banding,
     _patch_status,
     _to_cutting,
@@ -43,6 +44,8 @@ def test_workshop_queue_lists_queued_through_cut(client, db_session):
     assert item["bandingStatus"] == "pending"
     assert item["client"]["firstName"] == "Ada"
     assert item["boardNames"]  # non-empty (self-sufficient for the canteador)
+    # suffix "0023" → product "Tapacanto TAP0023", bandType Suave.
+    assert item["bandingNames"] == ["Tapacanto TAP0023 (Suave)"]
     # Every piece was cut → progress is complete.
     assert item["progress"]["totalPieces"] >= 1
     assert item["progress"]["cutPieces"] == item["progress"]["totalPieces"]
@@ -66,6 +69,21 @@ def test_workshop_queue_excludes_confirmed_and_completed(client, db_session):
     ids = {i["orderId"] for i in client.get(_URL).json()["data"]}
     assert confirmed["id"] not in ids  # not yet in the shop
     assert completed["id"] not in ids  # already closed
+
+
+def test_workshop_queue_lists_banding_names(client, db_session):
+    """The card lists the tapacanto names (+ Suave/Duro) so the canteador knows
+    which material to apply; an order without banding yields an empty list."""
+    banded = _order_with_banding(client, db_session, identifier="0990000030")
+    assert _patch_status(client, banded["id"], "queued").status_code == 200
+
+    plain = _order_without_banding(client, db_session)
+    assert _patch_status(client, plain["id"], "queued").status_code == 200
+
+    by_id = {i["orderId"]: i for i in client.get(_URL).json()["data"]}
+    # suffix "0030" → product "Tapacanto TAP0030", bandType Suave.
+    assert by_id[banded["id"]]["bandingNames"] == ["Tapacanto TAP0030 (Suave)"]
+    assert by_id[plain["id"]]["bandingNames"] == []
 
 
 def test_workshop_queue_is_fifo_oldest_first(client, db_session):

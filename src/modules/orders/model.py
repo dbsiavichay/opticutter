@@ -139,8 +139,10 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
-    # Branch that owns the order: immutable historical fact (inherited from the
-    # pre-order on confirmation). Reassigning a seller's branch doesn't move their past orders.
+    # Branch that owns the order: inherited from the pre-order on confirmation.
+    # Reassigning a seller's branch doesn't move their past orders. Admin/seller
+    # can reassign it (load rebalancing) while the order is 'confirmed'/'queued'
+    # via change_branch(); frozen once the shop floor starts.
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
     status: Mapped[str] = mapped_column(String(32), default=OrderStatus.confirmed.value)
 
