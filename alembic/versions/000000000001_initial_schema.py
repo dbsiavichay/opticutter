@@ -1,21 +1,21 @@
-"""consolidated initial schema
+"""initial schema
 
 Revision ID: 000000000001
 Revises:
-Create Date: 2026-07-06 18:08:41.350833
+Create Date: 2026-07-07 14:45:59.388627
 
-Squashes the previous 5-migration chain (000000000001 initial_schema ->
-d9e3f7a21b58 -> 2066bce4a9e8 -> 062613728d5e -> a3f9c1d24b7e) into a single
-migration reflecting the current models. Any database already migrated with
-the old chain has an identical schema; stamp it directly to this revision
+Squashes the previous 2-migration chain (000000000001 consolidated_initial_schema
+-> f1a2b3c4d5e6 drop_vestigial_optimizations_table) into a single migration
+reflecting the current models. Any database already migrated with the old
+chain has an identical schema; stamp it directly to this revision
 (`alembic stamp head`) instead of running upgrade from scratch.
 """
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "000000000001"
@@ -245,35 +245,6 @@ def upgrade() -> None:
         "optimization_drafts",
         ["branch_id"],
         unique=False,
-    )
-    op.create_table(
-        "optimizations",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("total_boards_used", sa.Integer(), nullable=False),
-        sa.Column("total_boards_cost", sa.Float(), nullable=False),
-        sa.Column("requirements", sa.JSON(), nullable=False),
-        sa.Column("layouts", sa.JSON(), nullable=False),
-        sa.Column("materials_summary", sa.JSON(), nullable=True),
-        sa.Column("layout_groups", sa.JSON(), nullable=True),
-        sa.Column("optimization_hash", sa.String(length=64), nullable=True),
-        sa.Column("client_id", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.Column("created_by", sa.Integer(), nullable=True),
-        sa.Column("updated_by", sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(
-            ["client_id"],
-            ["clients.id"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["created_by"],
-            ["users.id"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["updated_by"],
-            ["users.id"],
-        ),
-        sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
         "orders",
@@ -789,7 +760,6 @@ def downgrade() -> None:
     op.drop_table("notifications")
     op.drop_index(op.f("ix_orders_branch_id"), table_name="orders")
     op.drop_table("orders")
-    op.drop_table("optimizations")
     op.drop_index(
         op.f("ix_optimization_drafts_branch_id"), table_name="optimization_drafts"
     )
