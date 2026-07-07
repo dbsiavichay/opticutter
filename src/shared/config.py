@@ -1,5 +1,3 @@
-from typing import List
-
 from environs import Env
 
 env = Env()
@@ -20,9 +18,6 @@ class Config:
             ENVIRONMENT, "INFO"
         ),
     )
-    DEBUG = env.bool("DEBUG", ENVIRONMENT == "local")
-    RELOAD = ENVIRONMENT == "local"
-
     HOST = env("HOST", "0.0.0.0")
     PORT = env.int("PORT", 3000)
 
@@ -166,16 +161,5 @@ class Config:
             {"name": "Sucursal 2", "address": "Av. Central y Transversal"},
         ],
     )
-
-    def get_cors_origins(self) -> List[str]:
-        """List of allowed CORS origins."""
-        return self.CORS_ORIGINS
-
-    def is_development(self) -> bool:
-        return self.ENVIRONMENT in ["local", "development"]
-
-    def is_production(self) -> bool:
-        return self.ENVIRONMENT == "production"
-
 
 config = Config()

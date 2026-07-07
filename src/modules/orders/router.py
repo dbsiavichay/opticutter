@@ -53,10 +53,7 @@ router = APIRouter(prefix="/orders", tags=["orders"], responses=ERROR_RESPONSES)
 # sheet): admin + seller + operator. Marking pieces: admin + operator.
 _READ = Depends(require_permission("orders:read"))
 _WRITE = Depends(require_permission("orders:write"))
-_TRANSITION = Depends(require_permission("orders:transition"))
 _CUTTING = Depends(require_permission("cutting_plan"))
-_CUT = Depends(require_permission("orders:cut"))
-_BAND = Depends(require_permission("orders:band"))
 _WORKSHOP = Depends(require_permission("orders:workshop"))
 
 _FORMAT_QUERY = Query(

@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, Query
 from src.modules.clients.schemas import ClientCreate, ClientResponse, ClientUpdate
 from src.modules.clients.service import ClientService, client_service
 from src.modules.users.dependencies import require_permission
-from src.shared.exceptions import EntityNotFoundError
 from src.shared.pagination import PageParams
 from src.shared.responses import (
     ERROR_RESPONSES,
@@ -30,16 +29,6 @@ def create_client(data: ClientCreate, svc: ClientService = Depends(client_servic
     return ok(svc.create(data))
 
 
-@router.post("/resolve", response_model=DataResponse[ClientResponse])
-def resolve_client(data: ClientCreate, svc: ClientService = Depends(client_service)):
-    """Gets the client by identifier or creates it (idempotent).
-
-    Meant for the bot: it resolves the client right before a commercial action
-    (proforma or order) in a single call, without a conditional GET + POST.
-    """
-    return ok(svc.resolve(data))
-
-
 @router.get("/", response_model=PaginatedResponse[ClientResponse])
 def list_clients(
     paging: PageParams = Depends(),
@@ -60,17 +49,6 @@ def list_clients(
 def get_client(client_id: int, svc: ClientService = Depends(client_service)):
     """Gets a client by ID."""
     return ok(svc.get_or_404(client_id))
-
-
-@router.get("/identifier/{identifier}", response_model=DataResponse[ClientResponse])
-def get_client_by_identifier(
-    identifier: str, svc: ClientService = Depends(client_service)
-):
-    """Gets a client by identifier."""
-    client = svc.get_by_identifier(identifier)
-    if client is None:
-        raise EntityNotFoundError("Client", identifier)
-    return ok(client)
 
 
 @router.put("/{client_id}", response_model=DataResponse[ClientResponse])
