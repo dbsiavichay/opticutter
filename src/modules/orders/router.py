@@ -23,6 +23,7 @@ from src.modules.orders.schemas import (
     BandingStatusResponse,
     BandingUpdate,
     CuttingPlanResponse,
+    OrderBranchUpdate,
     OrderExportResponse,
     OrderInvoiceUpdate,
     OrderResponse,
@@ -229,6 +230,33 @@ def set_order_invoice(
     return ok(
         svc.set_external_invoice_id(
             order_id, data.external_invoice_id, branch_scope=branch_scope
+        )
+    )
+
+
+@router.patch(
+    "/{order_id}/branch",
+    response_model=DataResponse[OrderResponse],
+)
+def change_order_branch(
+    order_id: int,
+    data: OrderBranchUpdate,
+    svc: OrderService = Depends(order_service),
+    current_user: UserModel = Depends(require_permission("orders:write")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Reassigns the order to another branch (load rebalancing on saturation).
+
+    Admin/seller only; allowed while the order is ``confirmed``/``queued`` (before
+    the shop floor starts). Documents reprint under the new branch's letterhead.
+    """
+    return ok(
+        svc.change_branch(
+            order_id,
+            data.branch_id,
+            actor=staff_actor(current_user),
+            note=data.note,
+            branch_scope=branch_scope,
         )
     )
 

@@ -95,6 +95,13 @@ class OrderInvoiceUpdate(CamelModel):
     )
 
 
+class OrderBranchUpdate(CamelModel):
+    """Reassigns the order to another branch (load rebalancing on saturation)."""
+
+    branch_id: int = Field(..., description="Target branch to move the order to")
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
 class OrderExportLine(CamelModel):
     """Invoice line for the external provider (billed by product)."""
 
@@ -377,6 +384,11 @@ class WorkshopQueueItem(CamelModel):
         default_factory=list,
         description="Distinct board names (product_name, falling back to "
         "product_code/material_key) used in the order",
+    )
+    banding_names: List[str] = Field(
+        default_factory=list,
+        description="Distinct edge-banding names to apply (product_name + "
+        "band type Suave/Duro), so the bander knows which material to use",
     )
     progress: CuttingProgress = Field(
         ..., description="Cut pieces out of the total (0/0 if not yet materialized)"

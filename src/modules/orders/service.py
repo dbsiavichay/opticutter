@@ -10,6 +10,7 @@ from src.modules.clients.model import ClientModel
 from src.modules.clients.schemas import ClientResponse
 from src.modules.clients.service import require_phone
 from src.modules.notifications.emitter import notify_order_transition
+from src.modules.optimizations.labels import BAND_TYPE_LABEL
 from src.modules.optimizations.patterns import base_label
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import OptimizeRequest
@@ -438,6 +439,7 @@ class OrderService(BranchScopedMixin):
                 created_at=o.created_at,
                 client=ClientResponse.model_validate(o.client),
                 board_names=_board_names(o.boards),
+                banding_names=_banding_names(o.optimization_snapshot or {}),
                 progress=progress_by_order.get(
                     o.id, CuttingProgress(cut_pieces=0, total_pieces=0)
                 ),
@@ -595,6 +597,66 @@ class OrderService(BranchScopedMixin):
         self.db.refresh(order)
         return order
 
+    def change_branch(
+        self,
+        order_id: int,
+        target_branch_id: int,
+        actor: Optional[Actor] = None,
+        note: Optional[str] = None,
+        branch_scope: Optional[int] = None,
+    ) -> OrderModel:
+        """Reassigns the order to another branch (load rebalancing on saturation).
+
+        Only allowed before the shop floor starts (``confirmed``/``queued``): in
+        those states there is no assigned operator nor cut pieces, so it's a
+        single write with no orphans. Documents reprint under the new branch
+        automatically (the letterhead is a live lookup; the snapshot has no
+        branch). If the order was already ``queued``, the new branch's operators
+        are notified it landed in their queue.
+        """
+        actor = actor or system_actor()
+        order = self.get_scoped_or_404(order_id, branch_scope)
+        current = OrderStatus(order.status)
+        if current not in (OrderStatus.confirmed, OrderStatus.queued):
+            raise BusinessRuleError(
+                "Solo se puede cambiar la sucursal de una orden en 'confirmed' o "
+                "'queued'"
+            )
+        # Validates the target exists and is active (reuses the create-time resolver).
+        target = resolve_branch_for_create(self.db, None, target_branch_id)
+        if target == order.branch_id:
+            return order  # idempotent: same branch, no-op
+        # Invariant: a single active identical order per branch (dedupe key is
+        # branch + client + hash + tier).
+        dup = self._find_active_duplicate(
+            target, order.client_id, order.optimization_hash, order.price_tier_code
+        )
+        if dup is not None and dup.id != order.id:
+            raise ConflictError(
+                "La sucursal destino ya tiene una orden activa idéntica"
+            )
+        old_branch = order.branch_id
+        order.branch_id = target
+        # Audit: a history row with from == to (not a state transition) + note.
+        order.history.append(
+            OrderStatusHistoryModel(
+                from_status=current.value,
+                to_status=current.value,
+                actor=actor.type,
+                actor_user_id=actor.user_id,
+                actor_label=actor.label,
+                note=note or f"Sucursal cambiada de {old_branch} a {target}",
+            )
+        )
+        self.db.commit()
+        self.db.refresh(order)
+        # Already in the queue: tell the NEW branch's operators (best-effort).
+        if current == OrderStatus.queued:
+            notify_order_transition(
+                self.db, order, OrderStatus.confirmed, OrderStatus.queued, actor
+            )
+        return order
+
     def build_export(
         self, order_id: int, branch_scope: Optional[int] = None
     ) -> OrderExportResponse:
@@ -705,6 +767,25 @@ def _board_names(boards: List[OrderBoardModel]) -> List[str]:
         name = board.product_name or board.product_code or board.material_key
         if name not in names:
             names.append(name)
+    return names
+
+
+def _banding_names(snapshot: dict) -> List[str]:
+    """Distinct edge-banding names to apply ('Name (Suave|Duro)'), first-seen order.
+
+    So the bander knows which tapacanto to use. Reads the already-loaded
+    ``edge_bandings_summary`` (no extra query); skips geometry-only entries with
+    no product, and omits the type suffix when the band type is unknown.
+    """
+    names: List[str] = []
+    for e in snapshot.get("edge_bandings_summary", []):
+        name = e.get("product_name")
+        if not name:
+            continue
+        label = BAND_TYPE_LABEL.get(e.get("band_type"))
+        display = f"{name} ({label})" if label else name
+        if display not in names:
+            names.append(display)
     return names
 
 
