@@ -14,7 +14,6 @@ from src.modules.notifications.model import NotificationModel  # noqa: F401
 from src.modules.optimization_drafts.model import (  # noqa: F401
     OptimizationDraftModel,
 )
-from src.modules.optimizations.model import OptimizationModel  # noqa: F401
 from src.modules.orders import model as orders_model  # noqa: F401
 from src.modules.preorders import model as preorders_model  # noqa: F401
 from src.modules.products.model import ProductModel  # noqa: F401

@@ -12,7 +12,7 @@ Auth contract for the Cutter API, consumed by the Maderable web dashboard
 | `administrador`  | Full access (management, settings, analytics). |
 | `vendedor`       | Sales: catalog (read), clients, optimizer, pre-orders, orders. |
 | `operador`       | Workshop (cutting): reads orders, drives the cutting plan, marks pieces cut. |
-| `canteador`      | Workshop (edge banding): its banding queue and the start/finish actions; does **not** see order detail. |
+| `canteador`      | Workshop (edge banding): the shared shop-floor board, the start/finish banding actions, and completing orders; does **not** see order detail. |
 
 `operador` and `canteador` are workshop roles bound to a single branch;
 `administrador` and `vendedor` are global (see
@@ -83,17 +83,18 @@ route is protected with `Depends(require_permission("<key>"))`.
 | `optimizer`          | ✅ | ✅ | ❌ | ❌ | `/optimize/*`, `/optimization-drafts/*` |
 | `preorders`          | ✅ | ✅ | ❌ | ❌ | `/preorders/*` (internal; the client-facing flow is public, see below) |
 | `orders:read`        | ✅ | ✅ | ✅ | ❌ | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/document`, `GET /orders/{id}/dispatch-sheet` |
-| `orders:write`       | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export` |
+| `orders:write`       | ✅ | ✅ | ❌ | ❌ | `POST /orders/{id}/invoice`, `GET /orders/{id}/export`, `POST/DELETE /orders/{id}/attachments[/{aid}]` |
 | `orders:transition`  | ✅ | ✅ | ✅* | ✅* | `PATCH /orders/{id}/status` (narrowed per-transition by `TRANSITION_ROLES`) |
 | `cutting_plan`       | ✅ | ✅ | ✅ | ❌ | `GET /orders/{id}/cutting-plan`, `GET /orders/{id}/production-sheet` |
 | `orders:cut`         | ✅ | ❌ | ✅ | ❌ | `PATCH /orders/{id}/cutting-plan/pieces/{id}` |
-| `orders:band`        | ✅ | ❌ | ❌ | ✅ | `GET /orders/banding-queue`, `PATCH /orders/{id}/banding` |
+| `orders:band`        | ✅ | ❌ | ❌ | ✅ | `PATCH /orders/{id}/banding` |
+| `orders:workshop`    | ✅ | ❌ | ✅ | ✅ | `GET /orders/workshop-queue` (shared shop-floor board) |
 
 \* `orders:transition` is the coarse gate; which role can perform each
 *specific* transition lives in `TRANSITION_ROLES`
-(`src/modules/orders/model.py`). `canteador` only gets into this permission
-to register dispatch (`completed → dispatched`, the one transition open to
-every role) — every other transition stays closed to it.
+(`src/modules/orders/model.py`). `operador`/`canteador` get into this permission
+to **complete** orders (`cut → completed`) from the shop-floor board — every
+other transition stays closed to them (dispatch is admin/vendedor only).
 
 ### Order status transitions and roles
 
@@ -104,7 +105,7 @@ every role) — every other transition stays closed to it.
 | `queued → cutting` | administrador, operador |
 | `cutting → queued` (admin rollback) | administrador |
 | `cutting → cut` | administrador, operador |
-| `cut → completed` | administrador, vendedor |
+| `cut → completed` | administrador, vendedor, operador, canteador (Gate B: banding must be `done`) |
 | `completed → dispatched` | administrador, vendedor (commercial act; the shop floor cannot dispatch) |
 
 Note: the order status wire value for the final state is the literal string

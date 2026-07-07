@@ -44,7 +44,7 @@ class PreOrderCreate(CamelModel):
         ),
     )
     notes: Optional[str] = Field(default=None, max_length=512)
-    source: Optional[str] = Field(default="telegram", max_length=32)
+    source: Optional[str] = Field(default="web", max_length=32)
     branch_id: Optional[int] = Field(
         default=None,
         description=(

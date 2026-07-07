@@ -17,8 +17,8 @@ class ClientModel(TimestampMixin, AuditMixin, Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     source: Mapped[Optional[str]] = mapped_column(String(64))
-    # Phone and email are nullable because the client is created lazily (resolve)
-    # before either is known. Requiring the phone is a business rule enforced when
-    # generating a proforma/order, not a creation-time constraint.
+    # Phone and email are nullable: a client can be registered before either is
+    # known. Requiring the phone is a business rule enforced when generating a
+    # proforma/order, not a creation-time constraint.
     phone: Mapped[Optional[str]] = mapped_column(String(32))
     email: Mapped[Optional[str]] = mapped_column(String(128))

@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -7,7 +7,7 @@ from src.modules.clients.model import ClientModel
 from src.modules.clients.schemas import ClientCreate, ClientUpdate
 from src.shared.crud import CRUDService
 from src.shared.database import get_db
-from src.shared.exceptions import BusinessRuleError, ConflictError
+from src.shared.exceptions import BusinessRuleError
 
 
 def require_phone(client: ClientModel) -> None:
@@ -28,34 +28,6 @@ class ClientService(CRUDService[ClientModel, ClientCreate, ClientUpdate]):
 
     model = ClientModel
     conflict_messages = {"identifier": "El identificador ya existe"}
-
-    def get_by_identifier(self, identifier: str) -> Optional[ClientModel]:
-        """Gets a client by identifier."""
-        return (
-            self.db.query(ClientModel)
-            .filter(ClientModel.identifier == identifier)
-            .first()
-        )
-
-    def resolve(self, data: ClientCreate) -> ClientModel:
-        """Gets the client by ``identifier`` or creates it (idempotent).
-
-        Lazy resolution for the bot: the client only materializes once there is
-        a commercial action. Safe against races — two near-simultaneous messages
-        from the same user — because the ``identifier`` unique constraint fails
-        the second creation; the conflict is caught and the already-created
-        client is re-read.
-        """
-        existing = self.get_by_identifier(data.identifier)
-        if existing is not None:
-            return existing
-        try:
-            return self.create(data)
-        except ConflictError:
-            client = self.get_by_identifier(data.identifier)
-            if client is None:
-                raise
-            return client
 
     def search_paginated(
         self, search: str, limit: int = 20, offset: int = 0

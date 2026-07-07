@@ -256,10 +256,8 @@ def test_optimize_unknown_client_returns_404(client):
     assert "Client 99999" in resp.json()["errors"][0]["message"]
 
 
-def test_optimize_does_not_persist(client, db_session):
-    """The dual-write was removed: ``POST /optimize`` does not write to the DB."""
-    from src.modules.optimizations.model import OptimizationModel
-
+def test_optimize_does_not_persist(client):
+    """``POST /optimize`` is cache-only: the response carries no persistent id."""
     created_client = _create_client(client)
     created_board = _create_board(client)
     resp = client.post(
@@ -268,7 +266,6 @@ def test_optimize_does_not_persist(client, db_session):
     )
     assert resp.status_code == 200
     assert resp.json()["data"]["id"] is None
-    assert db_session.query(OptimizationModel).count() == 0
 
 
 def test_service_rejects_empty_requirements(db_session):

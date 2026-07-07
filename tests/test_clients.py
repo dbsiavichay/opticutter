@@ -33,29 +33,6 @@ def test_get_missing_client_returns_404(client):
     assert "no encontrado" in error["message"]
 
 
-def test_resolve_creates_then_is_idempotent(client):
-    """``POST /clients/resolve`` creates the first time, then returns the same id."""
-    first = client.post("/api/v1/clients/resolve", json=_payload())
-    assert first.status_code == 200
-    created = first.json()["data"]
-    assert created["identifier"] == "0991112233"
-
-    second = client.post("/api/v1/clients/resolve", json=_payload(first="Ignored"))
-    assert second.status_code == 200
-    assert second.json()["data"]["id"] == created["id"]
-    # The existing client is neither duplicated nor overwritten.
-    assert second.json()["data"]["firstName"] == "Ada"
-    assert len(client.get("/api/v1/clients/").json()["data"]) == 1
-
-
-def test_resolve_returns_existing_created_client(client):
-    """If the client already exists (created via POST /clients), resolve reuses it."""
-    created = client.post("/api/v1/clients/", json=_payload()).json()["data"]
-    resolved = client.post("/api/v1/clients/resolve", json=_payload())
-    assert resolved.status_code == 200
-    assert resolved.json()["data"]["id"] == created["id"]
-
-
 def test_list_and_search_clients(client):
     client.post(
         "/api/v1/clients/", json=_payload(identifier="0990000001", first="Grace")
@@ -74,16 +51,6 @@ def test_list_and_search_clients(client):
     assert found.status_code == 200
     names = [c["firstName"] for c in found.json()["data"]]
     assert names == ["Grace"]
-
-
-def test_get_client_by_identifier(client):
-    client.post("/api/v1/clients/", json=_payload(identifier="0995554433"))
-    ok = client.get("/api/v1/clients/identifier/0995554433")
-    assert ok.status_code == 200
-    assert ok.json()["data"]["identifier"] == "0995554433"
-
-    missing = client.get("/api/v1/clients/identifier/0000000000")
-    assert missing.status_code == 404
 
 
 def test_update_client(client):
@@ -110,7 +77,7 @@ def test_client_phone_and_email_are_optional_on_create(client):
 
 
 def test_update_client_phone(client):
-    """``PUT`` allows registering the phone number later (used by the bot after sharing)."""
+    """``PUT`` allows registering the phone number later (e.g. once the client shares it)."""
     created = client.post("/api/v1/clients/", json=_payload()).json()["data"]
     resp = client.put(f"/api/v1/clients/{created['id']}", json={"phone": "0987654321"})
     assert resp.status_code == 200

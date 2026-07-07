@@ -22,12 +22,12 @@ def _product_payload(code="MEL18"):
 
 def test_app_mappers_configure_without_extra_model_imports():
     """Regression: the app must configure SQLAlchemy mappers using only the
-    models that ``main`` imports (via routers). It must not depend on something
-    else importing ``optimizations.model``.
+    models that ``main`` imports (via routers). A model that ``main`` does not
+    transitively import but that another mapper references by string would fail
+    only at runtime with a 500 ``failed to locate '<Model>'``.
 
     Runs in an isolated subprocess because ``conftest`` imports ALL models and
-    would mask the problem: the 500 ``failed to locate 'OptimizationModel'`` only
-    showed up in the real app runtime (e.g. ``GET /clients/identifier/...``).
+    would mask the problem.
     """
     code = (
         "import main; "

@@ -8,7 +8,7 @@ and here); the ``cutting`` domain stays unchanged.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -66,12 +66,6 @@ class MaterialResolver:
 
     def __init__(self, db: Session):
         self.product_service = ProductService(db)
-
-    def resolve_all(
-        self, materials: List[MaterialInput]
-    ) -> Dict[str, ResolvedMaterial]:
-        """Resolves the material list into a ``key -> ResolvedMaterial`` map."""
-        return {m.key: self.resolve(m) for m in materials}
 
     def resolve(self, material: MaterialInput) -> ResolvedMaterial:
         if isinstance(material, CatalogMaterialInput):
