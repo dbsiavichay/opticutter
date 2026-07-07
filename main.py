@@ -40,14 +40,19 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down FastAPI application")
 
 
+# Interactive docs (Swagger/ReDoc) and the OpenAPI schema are disabled in
+# production to reduce the exposed surface; enabled in every other environment.
+_DOCS_ENABLED = config.ENVIRONMENT != "production"
+
 # Create FastAPI application
 app = FastAPI(
     title="Cutter API",
     description="API for optimizing melamine board cuts",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
 
 # Middlewares
@@ -87,8 +92,10 @@ app.include_router(settings_tiers_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    """Redirects to the API documentation"""
-    return RedirectResponse("/docs")
+    """Redirects to the API docs (when enabled), else reports service status."""
+    if _DOCS_ENABLED:
+        return RedirectResponse("/docs")
+    return {"status": "ok", "service": "Cutter API"}
 
 
 @app.get("/health")

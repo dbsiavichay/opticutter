@@ -5,9 +5,11 @@ from typing import Optional
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     text,
@@ -135,6 +137,24 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     """Aggregate root: order with an immutable snapshot and a state machine."""
 
     __tablename__ = "orders"
+    __table_args__ = (
+        # The workshop board and every status check filter by branch + status;
+        # the composite also serves branch-only filters via its leftmost column
+        # (so no separate branch_id index is needed).
+        Index("ix_orders_branch_status", "branch_id", "status"),
+        # A client's order list / pending-cap / duplicate-detection queries.
+        Index("ix_orders_client_id", "client_id"),
+        CheckConstraint("subtotal >= 0", name="subtotal_non_negative"),
+        CheckConstraint("total >= 0", name="total_non_negative"),
+        CheckConstraint("discount_amount >= 0", name="discount_amount_non_negative"),
+        CheckConstraint(
+            "discount_rate >= 0 AND discount_rate <= 1", name="discount_rate_ratio"
+        ),
+        CheckConstraint("payment_cash_amount >= 0", name="payment_cash_non_negative"),
+        CheckConstraint(
+            "payment_credit_amount >= 0", name="payment_credit_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
@@ -142,8 +162,9 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     # Branch that owns the order: inherited from the pre-order on confirmation.
     # Reassigning a seller's branch doesn't move their past orders. Admin/seller
     # can reassign it (load rebalancing) while the order is 'confirmed'/'queued'
-    # via change_branch(); frozen once the shop floor starts.
-    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
+    # via change_branch(); frozen once the shop floor starts. Indexed via the
+    # composite (branch_id, status) in __table_args__.
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"))
     status: Mapped[str] = mapped_column(String(32), default=OrderStatus.confirmed.value)
 
     optimization_snapshot: Mapped[dict] = mapped_column(JSON)
@@ -174,7 +195,7 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
 
     # Self-assigned operator: filled in when transitioning to ``cutting``.
     assigned_to_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     assigned_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     assigned_to_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -183,7 +204,7 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     # ``dispatched``. The dispatch sheet shows this date and who handed it over.
     dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     dispatched_by: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     dispatched_by_label: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
@@ -207,7 +228,7 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         DateTime, nullable=True
     )
     banding_started_by: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     banding_started_by_label: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
@@ -216,7 +237,7 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         DateTime, nullable=True
     )
     banding_finished_by: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     banding_finished_by_label: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
@@ -261,9 +282,15 @@ class OrderLineModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "order_lines"
+    __table_args__ = (
+        Index("ix_order_lines_order_id", "order_id"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        CheckConstraint("unit_price_snapshot >= 0", name="unit_price_non_negative"),
+        CheckConstraint("line_total >= 0", name="line_total_non_negative"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
     product_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("products.id"), nullable=True
     )
@@ -295,9 +322,13 @@ class OrderPieceModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "order_pieces"
+    __table_args__ = (
+        Index("ix_order_pieces_order_id", "order_id"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
     product_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("products.id"), nullable=True
     )
@@ -326,7 +357,9 @@ class OrderBoardModel(TimestampMixin, AuditMixin, Base):
     __tablename__ = "order_boards"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
     sheet_number: Mapped[int] = mapped_column(Integer)
     material_key: Mapped[str] = mapped_column(String(64))
     product_id: Mapped[Optional[int]] = mapped_column(
@@ -369,8 +402,12 @@ class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
     __tablename__ = "order_placed_pieces"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
-    board_id: Mapped[int] = mapped_column(ForeignKey("order_boards.id"), index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
+    board_id: Mapped[int] = mapped_column(
+        ForeignKey("order_boards.id", ondelete="CASCADE"), index=True
+    )
     piece_id: Mapped[str] = mapped_column(String(160))
     label: Mapped[str] = mapped_column(String(128))
     x: Mapped[float] = mapped_column(Float)
@@ -385,7 +422,9 @@ class OrderPlacedPieceModel(TimestampMixin, AuditMixin, Base):
     cut_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Who marked the piece as cut: FK to the operator + frozen label.
     # NULL while pending (in sync with ``cut_at``).
-    cut_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cut_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     cut_by_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
 
     order: Mapped["OrderModel"] = relationship("OrderModel")
@@ -406,7 +445,9 @@ class OrderAttachmentModel(TimestampMixin, AuditMixin, Base):
     __tablename__ = "order_attachments"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True
+    )
     # Original client-supplied file name (display only; never used as a path).
     filename: Mapped[str] = mapped_column(String(255))
     # Relative on-disk key, unique per file: ``{order_id}/{uuid4}.{ext}``.
@@ -428,14 +469,15 @@ class OrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "order_status_history"
+    __table_args__ = (Index("ix_order_status_history_order_id", "order_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"))
     from_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     to_status: Mapped[str] = mapped_column(String(32))
     actor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     actor_user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)

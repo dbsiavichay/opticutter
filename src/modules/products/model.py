@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, Float, String
+from sqlalchemy import JSON, Boolean, CheckConstraint, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
@@ -29,6 +29,7 @@ class ProductModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "products"
+    __table_args__ = (CheckConstraint("price >= 0", name="price_non_negative"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     type: Mapped[str] = mapped_column(String(32), index=True)

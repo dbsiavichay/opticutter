@@ -54,6 +54,8 @@ def create_access_token(
     payload = {
         "sub": str(subject),
         "role": role,
+        "iss": config.JWT_ISSUER,
+        "aud": config.JWT_AUDIENCE,
         "iat": now,
         "exp": now + timedelta(minutes=minutes),
     }
@@ -61,9 +63,19 @@ def create_access_token(
 
 
 def decode_access_token(token: str) -> dict:
-    """Decodes and validates a JWT; raises ``AuthenticationError`` if invalid."""
+    """Decodes and validates a JWT; raises ``AuthenticationError`` if invalid.
+
+    Validates the signature, expiry, issuer and audience: a token minted for
+    another audience/issuer (even with the same secret) is rejected.
+    """
     try:
-        return jwt.decode(token, config.SECRET_KEY, algorithms=[config.JWT_ALGORITHM])
+        return jwt.decode(
+            token,
+            config.SECRET_KEY,
+            algorithms=[config.JWT_ALGORITHM],
+            audience=config.JWT_AUDIENCE,
+            issuer=config.JWT_ISSUER,
+        )
     except jwt.ExpiredSignatureError as exc:
         raise AuthenticationError("El token de sesión expiró") from exc
     except jwt.InvalidTokenError as exc:
