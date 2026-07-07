@@ -146,14 +146,20 @@ class AttachmentService(BranchScopedMixin):
                 f"Tipo de archivo no permitido: {content_type or 'desconocido'}. "
                 "Solo se aceptan PDF, PNG o JPEG."
             )
-        data = upload.file.read()
+        # Bounded read: pull at most max+1 bytes so an oversized upload is rejected
+        # without ever buffering the whole body in memory.
+        max_bytes = config.MAX_ATTACHMENT_MB * 1024 * 1024
+        data = upload.file.read(max_bytes + 1)
         if not data:
             raise ValidationError("El archivo está vacío")
-        max_bytes = config.MAX_ATTACHMENT_MB * 1024 * 1024
         if len(data) > max_bytes:
             raise ValidationError(
                 f"El archivo supera el máximo de {config.MAX_ATTACHMENT_MB} MB"
             )
+        # Verify the bytes actually match the declared type (a client can send any
+        # content_type header): PDFs by magic number, images by decoding them.
+        if content_type == "application/pdf" and not data.startswith(b"%PDF-"):
+            raise ValidationError("El archivo no es un PDF válido")
         if content_type in _IMAGE_TYPES:
             try:
                 Image.open(io.BytesIO(data)).verify()

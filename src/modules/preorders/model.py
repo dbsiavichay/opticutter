@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
@@ -59,12 +59,20 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "preorders"
+    __table_args__ = (
+        # Lazy-expiry sweep filters open quotes by branch + status; also serves
+        # branch-only listing via its leftmost column.
+        Index("ix_preorders_branch_status", "branch_id", "status"),
+        # Per-client open-quote anti-abuse cap counts by client + status.
+        Index("ix_preorders_client_status", "client_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     code: Mapped[Optional[str]] = mapped_column(String(32), unique=True, nullable=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"))
-    # Branch owning the quote (inherited by the order upon confirmation).
-    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), index=True)
+    # Branch owning the quote (inherited by the order upon confirmation). Indexed
+    # via the composite (branch_id, status) in __table_args__.
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"))
     status: Mapped[str] = mapped_column(String(32), default=PreOrderStatus.draft.value)
 
     # Optimizer inputs, as-is, for the recompute (no snapshot is stored).
@@ -90,8 +98,9 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     client_note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     # Immutable order created upon confirmation (null while the pre-order is open).
+    # SET NULL so removing an order doesn't block on the back-reference.
     order_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("orders.id"), nullable=True
+        ForeignKey("orders.id", ondelete="SET NULL"), nullable=True
     )
 
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -129,7 +138,9 @@ class PreOrderReviewLinkModel(TimestampMixin, AuditMixin, Base):
     __tablename__ = "preorder_review_links"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    preorder_id: Mapped[int] = mapped_column(ForeignKey("preorders.id"), index=True)
+    preorder_id: Mapped[int] = mapped_column(
+        ForeignKey("preorders.id", ondelete="CASCADE"), index=True
+    )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     status: Mapped[str] = mapped_column(
         String(16), default=ReviewLinkStatus.active.value
@@ -156,12 +167,14 @@ class PreOrderStatusHistoryModel(TimestampMixin, AuditMixin, Base):
     __tablename__ = "preorder_status_history"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    preorder_id: Mapped[int] = mapped_column(ForeignKey("preorders.id"), index=True)
+    preorder_id: Mapped[int] = mapped_column(
+        ForeignKey("preorders.id", ondelete="CASCADE"), index=True
+    )
     from_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     to_status: Mapped[str] = mapped_column(String(32))
     actor: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     actor_user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     actor_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     note: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)

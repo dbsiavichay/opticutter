@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Float, Integer, String
+from sqlalchemy import JSON, CheckConstraint, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
@@ -19,6 +19,8 @@ class SettingsModel(TimestampMixin, AuditMixin, Base):
     """
 
     __tablename__ = "settings"
+    # Singleton guard: only the fixed id=1 row may exist (see SETTINGS_ID).
+    __table_args__ = (CheckConstraint("id = 1", name="singleton"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
 

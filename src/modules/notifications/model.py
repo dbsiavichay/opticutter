@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
@@ -18,19 +18,25 @@ class NotificationModel(TimestampMixin, Base):
     """
 
     __tablename__ = "notifications"
+    __table_args__ = (
+        # Serves the recipient's list and the unread badge/count in one shot
+        # (``user_id = ? AND read_at IS NULL``): the composite replaces the two
+        # former single-column indexes on ``user_id`` and ``read_at``.
+        Index("ix_notifications_user_read", "user_id", "read_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # Recipient. CASCADE: deleting a user removes their (system-generated) feed.
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     type: Mapped[str] = mapped_column(String(32))
     title: Mapped[str] = mapped_column(String(128))
     body: Mapped[str] = mapped_column(String(255))
     # Deep-link target; nullable so the model can serve non-order events later.
+    # SET NULL so a removed order doesn't block/delete the notification.
     order_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("orders.id"), index=True, nullable=True
+        ForeignKey("orders.id", ondelete="SET NULL"), index=True, nullable=True
     )
     # Extra machine-readable payload (e.g. orderCode, status) for the frontend.
     data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    # NULL = unread. Indexed to serve the unread badge/count cheaply.
-    read_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, index=True, nullable=True
-    )
+    # NULL = unread. Covered by the composite index above for the unread count.
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

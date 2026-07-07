@@ -1,6 +1,11 @@
+import warnings
+
 from environs import Env
 
 env = Env()
+
+# Insecure placeholder used only when SECRET_KEY is unset outside production.
+_DEV_SECRET_PLACEHOLDER = "dev-secret-change-me"
 
 
 class Config:
@@ -35,6 +40,14 @@ class Config:
 
     DATABASE_URL = env("DATABASE_URL")
 
+    # Connection pool tuning (SQLAlchemy QueuePool). Defaults match SQLAlchemy's
+    # own (5 + 10) but are exposed so a busier deployment can raise them.
+    # DB_POOL_RECYCLE_SECONDS bounds a connection's lifetime (30 min) to avoid
+    # stale sockets behind managed Postgres/pgbouncer idle timeouts.
+    DB_POOL_SIZE = env.int("DB_POOL_SIZE", 5)
+    DB_MAX_OVERFLOW = env.int("DB_MAX_OVERFLOW", 10)
+    DB_POOL_RECYCLE_SECONDS = env.int("DB_POOL_RECYCLE_SECONDS", 1800)
+
     REDIS_URL = env(
         "REDIS_URL",
         {
@@ -47,16 +60,32 @@ class Config:
     SECRET_KEY = (
         env("SECRET_KEY")
         if ENVIRONMENT == "production"
-        else env("SECRET_KEY", "dev-secret-change-me")
+        else env("SECRET_KEY", _DEV_SECRET_PLACEHOLDER)
     )
+    # Any non-local, non-production deployment (e.g. staging) that still relies on
+    # the placeholder ships forgeable JWTs: warn loudly so it can't slip to an
+    # internet-exposed host unnoticed (production already hard-fails: no default).
+    if (
+        ENVIRONMENT not in ("production", "local")
+        and SECRET_KEY == _DEV_SECRET_PLACEHOLDER
+    ):
+        warnings.warn(
+            "SECRET_KEY is the insecure development placeholder; set a strong "
+            "SECRET_KEY before exposing this environment.",
+            stacklevel=2,
+        )
 
     # JWT (authentication). HS256 signs with SECRET_KEY; the access token expires
     # after ACCESS_TOKEN_EXPIRE_MINUTES. In production SECRET_KEY is mandatory
     # (above); other environments fall back to a development placeholder. The
     # access token is short-lived (renewable via /auth/refresh): the frontend
     # presents the refresh token and gets a new pair. REFRESH_TOKEN_EXPIRE_DAYS
-    # bounds the refresh token's lifetime (opaque, revocable).
+    # bounds the refresh token's lifetime (opaque, revocable). JWT_ISSUER/AUDIENCE
+    # are stamped and validated on every token (defense in depth against tokens
+    # minted for/by another service reusing the same secret).
     JWT_ALGORITHM = env("JWT_ALGORITHM", "HS256")
+    JWT_ISSUER = env("JWT_ISSUER", "cutter-api")
+    JWT_AUDIENCE = env("JWT_AUDIENCE", "cutter-app")
     ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
     REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
 
@@ -65,9 +94,10 @@ class Config:
     # hashes, ~16x faster) to avoid paying bcrypt's deliberate cost in every fixture.
     BCRYPT_ROUNDS = env.int("BCRYPT_ROUNDS", 12)
 
-    # First admin seed (idempotent migration). If both are set and no user exists
-    # with that email, the migration creates it with role "administrador". Empty =
-    # nothing is seeded.
+    # First admin seed, applied by the idempotent script ``scripts/seed_admin.py``
+    # (run via ``make seed-admin``), NOT by a migration. If both are set and no
+    # user exists with that email, the script creates it with role
+    # "administrador". Empty = nothing is seeded.
     ADMIN_EMAIL = env("ADMIN_EMAIL", "")
     ADMIN_PASSWORD = env("ADMIN_PASSWORD", "")
 
@@ -161,5 +191,6 @@ class Config:
             {"name": "Sucursal 2", "address": "Av. Central y Transversal"},
         ],
     )
+
 
 config = Config()
