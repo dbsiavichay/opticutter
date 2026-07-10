@@ -61,7 +61,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Open the interactive API docs at `http://localhost:3000/docs`.
+Open the interactive API docs at `http://localhost:8000/docs`.
 
 ### Run locally
 
@@ -99,7 +99,7 @@ migrations, etc.).
 ### Example: run an optimization
 
 ```bash
-curl -X POST "http://localhost:3000/api/v1/optimize" \
+curl -X POST "http://localhost:8000/api/v1/optimize" \
   -H "Authorization: Bearer <accessToken>" \
   -H "Content-Type: application/json" \
   -d '{

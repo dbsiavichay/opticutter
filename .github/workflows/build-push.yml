@@ -1,0 +1,81 @@
+name: build-push
+
+# Chains off `ci` rather than duplicating its triggers, so an image is never
+# published from a commit whose tests failed.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/maderable-ec/opticutter-api
+
+jobs:
+  build:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # For a workflow_run event, github.sha points at the default branch tip,
+      # not at the commit that was tested. Always use workflow_run.head_sha.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Compute short SHA
+        id: vars
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "short=${HEAD_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Explicit: the Dockerfile's last stage is `runtime`, but naming it
+          # keeps a future stage from silently becoming the production image.
+          target: runtime
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ steps.vars.outputs.short }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Provenance attestations add an extra manifest per build, which shows
+          # up in GHCR as an untagged version. Single-arch image, no need.
+          provenance: false
+
+      - name: Tell opticutter-infra to deploy
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # GITHUB_TOKEN cannot dispatch across repositories. Fine-grained PAT
+          # with `contents: write` on opticutter-infra.
+          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          repository: maderable-ec/opticutter-infra
+          event-type: api-image-published
+          client-payload: '{"tag": "sha-${{ steps.vars.outputs.short }}"}'
+
+      # Untagged versions accumulate on every rebuild of an existing tag and are
+      # unreachable. Tagged ones are kept so a rollback can pull them.
+      - name: Prune untagged GHCR versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: opticutter-api
+          package-type: container
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true

@@ -4,6 +4,9 @@ import sys
 
 sys.path.insert(0, ".")
 
+from src.modules.branches.model import (
+    BranchModel,  # noqa: F401 — registers branches table for users.branch_id FK
+)
 from src.modules.users.enums import UserRole
 from src.modules.users.model import UserModel
 from src.shared.config import config

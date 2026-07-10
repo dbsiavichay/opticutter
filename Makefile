@@ -19,7 +19,7 @@ start: ## Starts the containers in daemon mode
 	docker compose up -d
 
 dev: ## Starts development mode with hot-reload
-	docker compose up -d && docker rm -f api || true && docker compose run --rm -e ENVIRONMENT=local -p 3000:3000 api
+	docker compose up -d && docker rm -f api || true && docker compose run --rm -e ENVIRONMENT=local -p 8000:8000 api
 
 down: ## Stops the containers
 	docker compose down
