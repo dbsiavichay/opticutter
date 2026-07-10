@@ -24,7 +24,7 @@ class Config:
         ),
     )
     HOST = env("HOST", "0.0.0.0")
-    PORT = env.int("PORT", 3000)
+    PORT = env.int("PORT", 8000)
 
     DEFAULT_TIMEZONE = env("DEFAULT_TIMEZONE", "America/Guayaquil")
 
