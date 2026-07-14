@@ -80,14 +80,19 @@ class Config:
     # (above); other environments fall back to a development placeholder. The
     # access token is short-lived (renewable via /auth/refresh): the frontend
     # presents the refresh token and gets a new pair. REFRESH_TOKEN_EXPIRE_DAYS
-    # bounds the refresh token's lifetime (opaque, revocable). JWT_ISSUER/AUDIENCE
-    # are stamped and validated on every token (defense in depth against tokens
+    # bounds the refresh token's lifetime (opaque, revocable). Kept at 1 day as a
+    # defense-in-depth backstop: the frontend already forces a real /auth/login
+    # once per calendar day (attendance is only recorded on that endpoint, never
+    # on refresh), so in normal operation a refresh token never gets older than a
+    # day anyway — this just bounds abandoned sessions that skip that guard
+    # (stale cached bundle, tampered localStorage). JWT_ISSUER/AUDIENCE are
+    # stamped and validated on every token (defense in depth against tokens
     # minted for/by another service reusing the same secret).
     JWT_ALGORITHM = env("JWT_ALGORITHM", "HS256")
     JWT_ISSUER = env("JWT_ISSUER", "cutter-api")
     JWT_AUDIENCE = env("JWT_AUDIENCE", "cutter-app")
     ACCESS_TOKEN_EXPIRE_MINUTES = env.int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
-    REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 30)
+    REFRESH_TOKEN_EXPIRE_DAYS = env.int("REFRESH_TOKEN_EXPIRE_DAYS", 1)
 
     # bcrypt cost factor when hashing passwords (rounds = 2**factor iterations).
     # 12 is a safe default for prod/dev; the test suite lowers it to 4 (still valid
@@ -191,6 +196,34 @@ class Config:
             {"name": "Sucursal 2", "address": "Av. Central y Transversal"},
         ],
     )
+
+    # Print agent (silent label/consolidated printing). Payloads (TSPL labels,
+    # consolidated PDFs) are rendered server-side and spooled to local disk under
+    # PRINT_SPOOL_DIR, one subfolder per branch; only the PrintJob metadata lives
+    # in Postgres (same split as order attachments; a Docker volume in prod).
+    PRINT_SPOOL_DIR = env("PRINT_SPOOL_DIR", "print_spool")
+    # A job no agent claims within PRINT_JOB_TTL_MINUTES expires (the shop PC was
+    # off): it won't print stale later.
+    PRINT_JOB_TTL_MINUTES = env.int("PRINT_JOB_TTL_MINUTES", 10)
+    # A claimed ('sent') job with no ack within this window is re-queued (the
+    # agent died mid-print): at-least-once delivery.
+    PRINT_JOB_VISIBILITY_TIMEOUT_SECONDS = env.int(
+        "PRINT_JOB_VISIBILITY_TIMEOUT_SECONDS", 60
+    )
+    # How long GET /print/jobs/next holds the long-poll before returning 204. Kept
+    # under the agent's HTTP timeout (30s) so the connection never times out.
+    PRINT_POLL_WAIT_SECONDS = env.int("PRINT_POLL_WAIT_SECONDS", 25)
+
+    # Thermal label geometry (3nStar LTT334, direct thermal). The label is
+    # rendered as a monochrome raster and emitted as a TSPL BITMAP, so these only
+    # need to match the physical roll (confirmed against the printer at bring-up).
+    PRINT_LABEL_WIDTH_MM = env.float("PRINT_LABEL_WIDTH_MM", 100.0)
+    PRINT_LABEL_HEIGHT_MM = env.float("PRINT_LABEL_HEIGHT_MM", 50.0)
+    PRINT_LABEL_GAP_MM = env.float("PRINT_LABEL_GAP_MM", 2.0)
+    PRINT_LABEL_DPI = env.int("PRINT_LABEL_DPI", 203)
+    # TSPL BITMAP convention is bit 0 = black dot, and PIL packs black pixels as 0,
+    # so the raster maps directly. Flip this if a given unit prints inverted.
+    PRINT_LABEL_INVERT = env.bool("PRINT_LABEL_INVERT", False)
 
 
 config = Config()

@@ -16,6 +16,7 @@ from src.modules.optimization_drafts.model import (  # noqa: F401
 )
 from src.modules.orders import model as orders_model  # noqa: F401
 from src.modules.preorders import model as preorders_model  # noqa: F401
+from src.modules.print_jobs import model as print_jobs_model  # noqa: F401
 from src.modules.products.model import ProductModel  # noqa: F401
 from src.modules.settings.model import SettingsModel  # noqa: F401
 from src.modules.users.login_event_model import UserLoginEventModel  # noqa: F401

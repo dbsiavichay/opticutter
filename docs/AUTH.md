@@ -25,7 +25,10 @@ Login is by `email` (unique). Passwords are stored only as a bcrypt hash.
 1. **Login** → `POST /api/v1/auth/login` with `{ email, password }`.
    Response: `{ accessToken, refreshToken, tokenType: "bearer", expiresIn, user }`.
    - `accessToken`: short-lived JWT (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 30 min).
-   - `refreshToken`: long-lived opaque token (`REFRESH_TOKEN_EXPIRE_DAYS`, default 30 days).
+   - `refreshToken`: long-lived opaque token (`REFRESH_TOKEN_EXPIRE_DAYS`, default 1
+     day). Kept short as a backstop: the frontend already forces a real login once
+     per calendar day, since attendance (`user_login_events`) is only recorded on
+     `POST /auth/login`, never on `refresh` — see "Session flow" above.
    - `expiresIn`: access token lifetime in seconds.
 2. **Call the API** → send `Authorization: Bearer <accessToken>` on every request.
 3. **Refresh** → when the access token expires (or on a `401`), call
@@ -127,5 +130,5 @@ compatibility with the dashboard.
 |-----|---------|--------------|
 | `SECRET_KEY` | `dev-secret-change-me` (required in production) | Signs the JWT (HS256). |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime. |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh token lifetime. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `1` | Refresh token lifetime. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | empty | Seed the first admin account (idempotent on migration). |
