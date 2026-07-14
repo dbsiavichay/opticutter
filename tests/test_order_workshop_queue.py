@@ -1,14 +1,15 @@
 """Tests for the shared shop-floor board endpoint ``GET /orders/workshop-queue``.
 
-The board is a self-sufficient card list (client + board names + progress) for the
-operator AND the canteador (who lacks ``orders:read``). It lists orders from the
-queue up to ``cut``; ``confirmed``/``completed``/etc. are excluded. Reuses the
+The board is a self-sufficient card list (client + board/banding usage + progress)
+for the operator AND the canteador (who lacks ``orders:read``). It lists orders from
+the queue up to ``cut``; ``confirmed``/``completed``/etc. are excluded. Reuses the
 catalog/order/token helpers of the banding-track suite.
 """
 
 from sqlalchemy.orm import Session
 
 from src.modules.branches.model import BranchModel
+from src.modules.orders.model import OrderModel
 from tests.test_order_banding import (
     _cut_all_pieces,
     _order_with_banding,
@@ -20,6 +21,15 @@ from tests.test_order_banding import (
 )
 
 _URL = "/api/v1/orders/workshop-queue"
+
+
+def _billed_linear_m(db_session, order_id: int) -> float:
+    """Reads the first edge-banding summary entry's billed linear meters straight
+    from the order's frozen snapshot, so tests don't hardcode a waste-dependent
+    number."""
+    order = db_session.get(OrderModel, order_id)
+    summary = order.optimization_snapshot["edge_bandings_summary"]
+    return summary[0]["billed_linear_m"]
 
 
 def test_workshop_queue_lists_queued_through_cut(client, db_session):
@@ -43,9 +53,17 @@ def test_workshop_queue_lists_queued_through_cut(client, db_session):
     assert item["status"] == "cut"
     assert item["bandingStatus"] == "pending"
     assert item["client"]["firstName"] == "Ada"
-    assert item["boardNames"]  # non-empty (self-sufficient for the canteador)
+    # 1 board, one piece 500×1000mm fits on a single (half) MEL0023 sheet.
+    assert item["boardUsage"] == [
+        {"name": "Melamina MEL0023 (medio tablero)", "count": 1}
+    ]
     # suffix "0023" → product "Tapacanto TAP0023", bandType Suave.
-    assert item["bandingNames"] == ["Tapacanto TAP0023 (Suave)"]
+    assert item["bandingUsage"] == [
+        {
+            "name": "Tapacanto TAP0023 (Suave)",
+            "linearM": _billed_linear_m(db_session, cut["id"]),
+        }
+    ]
     # Every piece was cut → progress is complete.
     assert item["progress"]["totalPieces"] >= 1
     assert item["progress"]["cutPieces"] == item["progress"]["totalPieces"]
@@ -71,9 +89,10 @@ def test_workshop_queue_excludes_confirmed_and_completed(client, db_session):
     assert completed["id"] not in ids  # already closed
 
 
-def test_workshop_queue_lists_banding_names(client, db_session):
-    """The card lists the tapacanto names (+ Suave/Duro) so the canteador knows
-    which material to apply; an order without banding yields an empty list."""
+def test_workshop_queue_lists_banding_usage(client, db_session):
+    """The card lists billed linear meters per tapacanto type (+ Suave/Duro) so the
+    canteador knows how much material to prepare; an order without banding yields
+    an empty list."""
     banded = _order_with_banding(client, db_session, identifier="0990000030")
     assert _patch_status(client, banded["id"], "queued").status_code == 200
 
@@ -82,8 +101,13 @@ def test_workshop_queue_lists_banding_names(client, db_session):
 
     by_id = {i["orderId"]: i for i in client.get(_URL).json()["data"]}
     # suffix "0030" → product "Tapacanto TAP0030", bandType Suave.
-    assert by_id[banded["id"]]["bandingNames"] == ["Tapacanto TAP0030 (Suave)"]
-    assert by_id[plain["id"]]["bandingNames"] == []
+    assert by_id[banded["id"]]["bandingUsage"] == [
+        {
+            "name": "Tapacanto TAP0030 (Suave)",
+            "linearM": _billed_linear_m(db_session, banded["id"]),
+        }
+    ]
+    assert by_id[plain["id"]]["bandingUsage"] == []
 
 
 def test_workshop_queue_is_fifo_oldest_first(client, db_session):
