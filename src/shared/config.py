@@ -175,7 +175,7 @@ class Config:
     # Maderable frontend base: composes the review link URL the client opens (the
     # origin must also be in CORS_ORIGINS). The dashboard uses HashRouter, hence
     # the base ends in "/#" (route = {base}/review/{token}).
-    FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3001/#")
+    FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", "http://localhost:3000")
 
     # Company data (proforma letterhead). Dummy defaults that only seed the
     # `settings` singleton row on its first read; the runtime source of truth is

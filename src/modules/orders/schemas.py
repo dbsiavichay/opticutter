@@ -281,6 +281,20 @@ class CuttingProgress(CamelModel):
     total_pieces: int
 
 
+class BoardUsage(CamelModel):
+    """Board count for one material/board type, for the workshop card."""
+
+    name: str
+    count: int
+
+
+class BandingUsage(CamelModel):
+    """Billed linear meters for one edge-banding type, for the workshop card."""
+
+    name: str
+    linear_m: float
+
+
 class OrderBoardResponse(CamelModel):
     """Physical board of the cutting plan, with its pieces and progress."""
 
@@ -367,9 +381,9 @@ class AttachmentResponse(CamelModel):
 class WorkshopQueueItem(CamelModel):
     """Shop-floor board item: orders from the queue up to "cut", for a card list.
 
-    Self-sufficient (embeds client + board names) so the bander -- who lacks
-    ``orders:read`` -- can drive both banding and completion from it. Carries no
-    prices: it is a workshop surface, not a commercial one.
+    Self-sufficient (embeds client + board/banding usage) so the bander -- who
+    lacks ``orders:read`` -- can drive both banding and completion from it.
+    Carries no prices: it is a workshop surface, not a commercial one.
     """
 
     order_id: int
@@ -380,15 +394,13 @@ class WorkshopQueueItem(CamelModel):
     )
     created_at: datetime
     client: ClientResponse = Field(..., description="Client the order belongs to")
-    board_names: List[str] = Field(
+    board_usage: List[BoardUsage] = Field(
         default_factory=list,
-        description="Distinct board names (product_name, falling back to "
-        "product_code/material_key) used in the order",
+        description="Board count per material/board type used in the order",
     )
-    banding_names: List[str] = Field(
+    banding_usage: List[BandingUsage] = Field(
         default_factory=list,
-        description="Distinct edge-banding names to apply (product_name + "
-        "band type Suave/Duro), so the bander knows which material to use",
+        description="Billed linear meters per edge-banding type to apply",
     )
     progress: CuttingProgress = Field(
         ..., description="Cut pieces out of the total (0/0 if not yet materialized)"

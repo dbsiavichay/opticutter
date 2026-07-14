@@ -420,9 +420,9 @@ class OrderService(BranchScopedMixin):
         """Shared shop-floor board: orders from the queue up to "cut".
 
         Self-sufficient card list for the operator and the bander (the latter has
-        no ``orders:read``): embeds the client, board names and cutting progress so
-        both can drive their actions -- take/cut, band, complete -- from one place.
-        Branch-isolated, oldest first (FIFO).
+        no ``orders:read``): embeds the client, board/banding usage per material
+        type and cutting progress so both can drive their actions -- take/cut,
+        band, complete -- from one place. Branch-isolated, oldest first (FIFO).
         """
         query = self.db.query(OrderModel).filter(
             OrderModel.status.in_([s.value for s in WORKSHOP_QUEUE_STATUSES]),
@@ -430,22 +430,25 @@ class OrderService(BranchScopedMixin):
         query = self._apply_branch_scope(query, branch_scope, None)
         orders = query.order_by(OrderModel.id.asc()).all()
         progress_by_order = self._cutting_progress_by_order([o.id for o in orders])
-        return [
-            WorkshopQueueItem(
-                order_id=o.id,
-                order_code=o.code,
-                status=OrderStatus(o.status),
-                banding_status=BandingStatus(o.banding_status),
-                created_at=o.created_at,
-                client=ClientResponse.model_validate(o.client),
-                board_names=_board_names(o.boards),
-                banding_names=_banding_names(o.optimization_snapshot or {}),
-                progress=progress_by_order.get(
-                    o.id, CuttingProgress(cut_pieces=0, total_pieces=0)
-                ),
+        items = []
+        for o in orders:
+            snapshot = o.optimization_snapshot or {}
+            items.append(
+                WorkshopQueueItem(
+                    order_id=o.id,
+                    order_code=o.code,
+                    status=OrderStatus(o.status),
+                    banding_status=BandingStatus(o.banding_status),
+                    created_at=o.created_at,
+                    client=ClientResponse.model_validate(o.client),
+                    board_usage=_board_usage(snapshot),
+                    banding_usage=_banding_usage(snapshot),
+                    progress=progress_by_order.get(
+                        o.id, CuttingProgress(cut_pieces=0, total_pieces=0)
+                    ),
+                )
             )
-            for o in orders
-        ]
+        return items
 
     def _cutting_progress_by_order(
         self, order_ids: List[int]
@@ -760,33 +763,39 @@ def _attach_cutting_plan(order: OrderModel, payload: dict) -> None:
         order.boards.append(board)
 
 
-def _board_names(boards: List[OrderBoardModel]) -> List[str]:
-    """Distinct board names in first-seen order (name, else code, else material key)."""
-    names: List[str] = []
-    for board in boards:
-        name = board.product_name or board.product_code or board.material_key
-        if name not in names:
-            names.append(name)
-    return names
+def _board_usage(snapshot: dict) -> List[dict]:
+    """Board count per material/board type, from the already-loaded snapshot.
+
+    Reads ``materials_summary`` (no extra query) -- the same per-material
+    ``count`` already printed on the production sheet's boards table.
+    """
+    return [
+        {
+            "name": e.get("product_name")
+            or e.get("product_code")
+            or e.get("material_key"),
+            "count": e.get("count", 0),
+        }
+        for e in snapshot.get("materials_summary", [])
+    ]
 
 
-def _banding_names(snapshot: dict) -> List[str]:
-    """Distinct edge-banding names to apply ('Name (Suave|Duro)'), first-seen order.
+def _banding_usage(snapshot: dict) -> List[dict]:
+    """Billed linear meters per edge-banding type, from the already-loaded snapshot.
 
-    So the bander knows which tapacanto to use. Reads the already-loaded
+    So the bander knows how much tapacanto to prepare. Reads the already-loaded
     ``edge_bandings_summary`` (no extra query); skips geometry-only entries with
     no product, and omits the type suffix when the band type is unknown.
     """
-    names: List[str] = []
+    usage: List[dict] = []
     for e in snapshot.get("edge_bandings_summary", []):
         name = e.get("product_name")
         if not name:
             continue
         label = BAND_TYPE_LABEL.get(e.get("band_type"))
         display = f"{name} ({label})" if label else name
-        if display not in names:
-            names.append(display)
-    return names
+        usage.append({"name": display, "linear_m": e.get("billed_linear_m", 0)})
+    return usage
 
 
 def _progress(pieces: List[OrderPlacedPieceModel]) -> CuttingProgress:
