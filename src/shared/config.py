@@ -213,6 +213,18 @@ class Config:
     # How long GET /print/jobs/next holds the long-poll before returning 204. Kept
     # under the agent's HTTP timeout (30s) so the connection never times out.
     PRINT_POLL_WAIT_SECONDS = env.int("PRINT_POLL_WAIT_SECONDS", 25)
+    # Spool disk hygiene. The per-job removal (ack, or the TTL sweep) can't reach
+    # files whose row was deleted by an ondelete=CASCADE (Postgres drops the row
+    # without running Python) or that predate the cleanup; a periodic mtime sweep
+    # backstops them. A payload is only ever needed while its job is unexpired
+    # (created + TTL), so anything older is safe to reclaim -- keep this
+    # >= PRINT_JOB_TTL_MINUTES.
+    PRINT_SPOOL_RETENTION_MINUTES = env.int("PRINT_SPOOL_RETENTION_MINUTES", 60)
+    # The backstop runs on the agent long-poll; this throttles the directory walk to
+    # at most once per interval per worker (0 = run on every sweep, used in tests).
+    PRINT_SPOOL_SWEEP_INTERVAL_MINUTES = env.int(
+        "PRINT_SPOOL_SWEEP_INTERVAL_MINUTES", 5
+    )
 
     # Thermal label geometry (3nStar LTT334, direct thermal). The label is
     # rendered as a monochrome raster and emitted as a TSPL BITMAP, so these only

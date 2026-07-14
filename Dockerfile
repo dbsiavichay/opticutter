@@ -66,9 +66,9 @@ COPY --from=builder /opt/venv /opt/venv
 RUN useradd --create-home --uid 1000 appuser
 
 COPY . .
-# Attachments dir (anexos): created owned by appuser so a fresh named volume
-# mounted here inherits writable ownership (uid 1000).
-RUN mkdir -p /src/uploads && chown -R appuser:appuser /src
+# Data dirs (anexos + print spool): created owned by appuser so a fresh named
+# volume mounted at either path inherits writable ownership (uid 1000).
+RUN mkdir -p /src/uploads /src/print_spool && chown -R appuser:appuser /src
 
 USER appuser
 

@@ -42,6 +42,12 @@ from src.shared.security import generate_refresh_token, hash_token
 
 log = logging.getLogger(__name__)
 
+# Monotonic timestamp of the last on-disk spool backstop, throttling the directory
+# walk that runs on every long-poll (see ``_sweep_spool_disk``). Process-local: with
+# N uvicorn workers the backstop runs up to N times per interval, which is harmless
+# because ``spool.sweep_stale`` is idempotent.
+_last_disk_sweep = 0.0
+
 
 class PrintJobService:
     """Renders payloads, spools them to disk and manages the delivery queue."""
@@ -182,9 +188,20 @@ class PrintJobService:
             time.sleep(1.0)
 
     def _sweep(self) -> None:
-        """Expire TTL-lapsed jobs and re-queue claimed jobs past the visibility timeout."""
+        """Expire TTL-lapsed jobs and re-queue claimed jobs past the visibility
+        timeout, reclaiming the spooled files of the jobs that expire (and, on a
+        throttled schedule, any stale files the row-driven path missed)."""
         now = datetime.utcnow()
         # TTL first: a job both expired and stale-sent is expired (won't reprint).
+        # Grab the paths before the bulk UPDATE, then unlink after the rows commit
+        # (commit-then-delete, like orders.attachment_service.delete_attachment).
+        expiring_ttl = self.db.query(PrintJobModel.payload_path).filter(
+            PrintJobModel.status.in_(
+                [PrintJobStatus.pending.value, PrintJobStatus.sent.value]
+            ),
+            PrintJobModel.expires_at < now,
+        )
+        expired_paths = [path for (path,) in expiring_ttl]
         self.db.query(PrintJobModel).filter(
             PrintJobModel.status.in_(
                 [PrintJobStatus.pending.value, PrintJobStatus.sent.value]
@@ -208,6 +225,31 @@ class PrintJobService:
             synchronize_session=False,
         )
         self.db.commit()
+        for path in expired_paths:
+            try:
+                spool.remove(path)
+            except OSError:
+                log.warning("No se pudo borrar el spool del job expirado (%s)", path)
+        self._sweep_spool_disk()
+
+    def _sweep_spool_disk(self) -> None:
+        """Backstop: reclaim spool files with no live job, at most once per
+        ``PRINT_SPOOL_SWEEP_INTERVAL_MINUTES``.
+
+        Runs from the agent long-poll (~every 25s per branch), so a process-local
+        timestamp throttles the directory walk. Anything older than the TTL (plus a
+        margin) can't belong to a deliverable job, so it's safe to delete; this
+        catches CASCADE-orphaned files and any backlog the row-driven path misses.
+        """
+        global _last_disk_sweep
+        interval = config.PRINT_SPOOL_SWEEP_INTERVAL_MINUTES * 60
+        now_monotonic = time.monotonic()
+        if now_monotonic - _last_disk_sweep < interval:
+            return
+        _last_disk_sweep = now_monotonic
+        removed = spool.sweep_stale(config.PRINT_SPOOL_RETENTION_MINUTES * 60)
+        if removed:
+            log.info("Backstop del spool eliminó %d archivo(s) obsoleto(s)", removed)
 
     def _claim_one(self, agent: PrintAgentModel) -> Optional[PrintJobModel]:
         """Atomically claim the oldest pending job for the agent's branch.
