@@ -6,6 +6,8 @@ PostgreSQL, plus the full HTTP contract the agent consumes (register agent →
 enqueue → long-poll → download payload → ack) and its auth.
 """
 
+import os
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -31,6 +33,8 @@ def _print_env(tmp_path, monkeypatch):
     """Isolate the spool on disk and don't hold the long-poll open during tests."""
     monkeypatch.setattr(config, "PRINT_SPOOL_DIR", str(tmp_path / "spool"))
     monkeypatch.setattr(config, "PRINT_POLL_WAIT_SECONDS", 0)
+    # Reset the process-local backstop throttle so test order doesn't matter.
+    monkeypatch.setattr("src.modules.print_jobs.service._last_disk_sweep", 0.0)
 
 
 # --- seeding (same pattern as test_order_cutting_plan) ----------------------
@@ -200,6 +204,61 @@ def test_ttl_expiry_drops_unclaimed_job(client, db_session):
     assert svc.claim_next(agent) is None  # nothing claimable
     db_session.refresh(job)
     assert job.status == PrintJobStatus.expired.value
+
+
+# --- spool disk hygiene (cleanup) -------------------------------------------
+def test_ttl_expiry_reclaims_spool_file(client, db_session):
+    """A job lapsing its TTL has its spooled payload deleted, not just its row."""
+    order = _create_order(client, db_session)
+    piece = _a_piece(db_session, order.id)
+    svc = PrintJobService(db_session)
+    job = svc.enqueue_label(order.id, piece.id, created_by=None, branch_scope=None)
+    assert spool.read(job.payload_path)  # the payload is on disk
+
+    job.expires_at = datetime.utcnow() - timedelta(seconds=1)  # past its TTL
+    db_session.commit()
+
+    assert svc.claim_next(_make_agent(db_session)) is None  # nothing claimable
+    db_session.refresh(job)
+    assert job.status == PrintJobStatus.expired.value
+    with pytest.raises(OSError):
+        spool.read(job.payload_path)  # payload reclaimed on expiry
+
+
+def test_sweep_stale_removes_old_files_keeps_fresh():
+    """The mtime backstop deletes files past the age cutoff and prunes empty dirs."""
+    spool.save("1/old.pdf", b"stale")
+    spool.save("2/fresh.pdf", b"live")
+    old = time.time() - 7200  # 2h ago
+    os.utime(spool._base_dir() / "1/old.pdf", (old, old))
+
+    removed = spool.sweep_stale(3600)  # anything older than 1h is gone
+
+    assert removed == 1
+    with pytest.raises(OSError):
+        spool.read("1/old.pdf")
+    assert spool.read("2/fresh.pdf") == b"live"  # fresh payload untouched
+    assert not (spool._base_dir() / "1").exists()  # emptied branch dir pruned
+    assert (spool._base_dir() / "2").exists()
+
+
+def test_sweep_stale_missing_dir_is_noop():
+    """Sweeping a spool dir that was never created is a harmless no-op."""
+    assert spool.sweep_stale(0) == 0
+
+
+def test_disk_backstop_reclaims_orphan_on_poll(client, db_session, monkeypatch):
+    """A stale file with no live job (e.g. CASCADE-orphaned) is reclaimed on poll."""
+    monkeypatch.setattr(config, "PRINT_SPOOL_SWEEP_INTERVAL_MINUTES", 0)  # every sweep
+    spool.save("1/orphan.pdf", b"orphan")
+    old = time.time() - config.PRINT_SPOOL_RETENTION_MINUTES * 60 - 60
+    os.utime(spool._base_dir() / "1/orphan.pdf", (old, old))
+
+    svc = PrintJobService(db_session)
+    assert svc.claim_next(_make_agent(db_session)) is None  # sweep runs on the poll
+
+    with pytest.raises(OSError):
+        spool.read("1/orphan.pdf")  # orphan reclaimed by the backstop
 
 
 def test_ack_is_idempotent_and_validated(client, db_session):

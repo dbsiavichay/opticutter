@@ -8,6 +8,7 @@ Postgres. The on-disk name is a random ``uuid4`` (never client input), which
 avoids collisions and path traversal entirely.
 """
 
+import time
 import uuid
 from pathlib import Path
 from typing import BinaryIO
@@ -48,3 +49,40 @@ def open_stream(stored_key: str) -> BinaryIO:
 def remove(stored_key: str) -> None:
     """Deletes the spooled payload; a missing file is not an error (idempotent)."""
     (_base_dir() / stored_key).unlink(missing_ok=True)
+
+
+def sweep_stale(max_age_seconds: float) -> int:
+    """Deletes spool files older than ``max_age_seconds`` (by mtime), prunes emptied
+    branch subdirs, and returns the count removed.
+
+    A payload is written once at enqueue and never rewritten, and a job is
+    deliverable only while ``now < expires_at`` (``= created + TTL``); so any file
+    older than the TTL can no longer belong to a live job and is safe to reclaim.
+    This backstops the per-job removals for files the row-driven path can't reach --
+    a row deleted by an ``ondelete=CASCADE`` never runs Python, and files predating
+    the wired-in cleanup have no future transition to trigger it.
+
+    Best-effort: a missing base dir is a no-op and per-file ``OSError`` (e.g. a
+    concurrent removal) is swallowed, since the spool is disposable.
+    """
+    base = _base_dir()
+    if not base.exists():
+        return 0
+    cutoff = time.time() - max_age_seconds
+    removed = 0
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    for child in base.iterdir():
+        if child.is_dir():
+            try:
+                child.rmdir()  # succeeds only if the branch subdir is now empty
+            except OSError:
+                pass
+    return removed
