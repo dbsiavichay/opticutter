@@ -23,6 +23,7 @@ route is protected with ``require_role(*RESOURCE_ROLES[key])`` (see ``dependenci
 | orders:band (edge banding)    | yes           | no       | no       | yes       |
 | analytics                     | yes           | no       | no       | no        |
 | notifications:read            | yes           | yes      | yes      | yes       |
+| print:agents (register/token) | yes           | no       | no       | no        |
 
 * Per-transition validation lives in TRANSITION_ROLES (orders/model.py). The operator
   and bander enter ``orders:transition`` to complete orders (``cut -> completed``) from
@@ -66,4 +67,8 @@ RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     # Any authenticated role reads/acks its own notifications; the service scopes
     # every query to the current user's id.
     "notifications:read": (_ADMIN, _SELLER, _OPERATOR, _BANDER),
+    # Print-agent registration + token issuance (one agent per branch shop PC).
+    # The label/consolidated *enqueue* endpoints reuse orders:cut / orders:workshop;
+    # the agent's own long-poll endpoints authenticate with a device token, not a role.
+    "print:agents": (_ADMIN,),
 }

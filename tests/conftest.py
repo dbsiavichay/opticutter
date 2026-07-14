@@ -14,6 +14,7 @@ import src.modules.notifications.model  # noqa: F401,E402
 import src.modules.optimization_drafts.model  # noqa: F401,E402
 import src.modules.orders.model  # noqa: F401,E402
 import src.modules.preorders.model  # noqa: F401,E402
+import src.modules.print_jobs.model  # noqa: F401,E402
 import src.modules.products.model  # noqa: F401,E402
 import src.modules.settings.model  # noqa: F401,E402
 import src.modules.users.login_event_model  # noqa: F401,E402

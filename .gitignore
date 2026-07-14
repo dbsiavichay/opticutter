@@ -25,6 +25,9 @@ venv/
 # Order attachments (anexos) stored on local disk
 uploads/
 
+# Print job spool (rendered labels/PDFs pending pickup by a shop-floor agent)
+print_spool/
+
 # Editors and IDEs
 *~
 *.swp
