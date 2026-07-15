@@ -15,7 +15,6 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from src.modules.branches.model import BranchModel
-from src.modules.branches.service import branch_letterhead
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import (
     ProformaService,
@@ -113,9 +112,7 @@ class PrintJobService:
         merged into one PDF.
         """
         carrier = ProformaCarrier.from_order(
-            order,
-            company=SettingsService(self.db).get_company(),
-            branch=branch_letterhead(self.db, order.branch_id),
+            order, company=SettingsService(self.db).get_company()
         )
         parts = [
             ProformaService.generate_proforma_pdf(

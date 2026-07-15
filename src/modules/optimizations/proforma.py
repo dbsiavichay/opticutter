@@ -188,12 +188,11 @@ def _draw_page_decoration_plain(canvas, doc) -> None:
 
 def _new_doc(
     buffer: io.BytesIO,
-    top: float = 0.5 * inch,
-    bottom: float = 0.6 * inch,
+    top: float = 0.4 * inch,
+    bottom: float = 0.45 * inch,
 ) -> SimpleDocTemplate:
-    """A4 document for Cutter. ``top``/``bottom`` are adjusted for the production
-    sheet (more compact); the horizontal margin stays fixed so table widths don't
-    need recalculating."""
+    """A4 document for Cutter, with compact margins to save paper. The horizontal
+    margin stays fixed so table widths don't need recalculating."""
     return SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -230,25 +229,25 @@ class ProformaService:
 
         story = []
         story.extend(ProformaService._build_header(carrier, styles, title))
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("INFORMACIÓN DEL CLIENTE", heading_style))
         story.append(ProformaService._build_client_table(carrier))
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("DETALLE DE REQUERIMIENTOS", heading_style))
         story.append(ProformaService._build_requirements_table(carrier, cell_style))
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("RESUMEN DE MATERIALES", heading_style))
         story.append(ProformaService._build_materials_table(carrier, cell_style))
-        story.append(Spacer(1, 0.2 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.append(ProformaService._build_totals_table(carrier))
 
         payment_block = ProformaService._payment_section(carrier, heading_style)
         if payment_block:
-            story.append(Spacer(1, 0.2 * inch))
+            story.append(Spacer(1, 0.15 * inch))
             story.extend(payment_block)
 
         if include_diagram:
@@ -257,7 +256,7 @@ class ProformaService:
             story.append(Spacer(1, 0.08 * inch))
             story.extend(ProformaService._build_layout_pages(carrier))
 
-        story.append(Spacer(1, 0.3 * inch))
+        story.append(Spacer(1, 0.18 * inch))
         # Validity only applies to quotes (pre-order / live optimization); an
         # already-confirmed order doesn't carry it (``carrier.validity_days`` is ``None``).
         validity_note = (
@@ -292,7 +291,7 @@ class ProformaService:
         list and layout WITHOUT prices. Makes the most of the paper (compact
         margins and spacing) and differentiates the edge-banding type (soft/hard)."""
         buffer = io.BytesIO()
-        doc = _new_doc(buffer, top=0.4 * inch, bottom=0.45 * inch)
+        doc = _new_doc(buffer)
         pal = MONO_PALETTE
         pad = 4
 
@@ -358,7 +357,7 @@ class ProformaService:
         visual layout (``DISPOSICIÓN DE CORTES``) under a compact identifying header.
         """
         buffer = io.BytesIO()
-        doc = _new_doc(buffer, top=0.4 * inch, bottom=0.45 * inch)
+        doc = _new_doc(buffer)
         pal = MONO_PALETTE
 
         styles = getSampleStyleSheet()
@@ -399,7 +398,7 @@ class ProformaService:
 
         story = []
         story.extend(ProformaService._build_header(carrier, styles, "HOJA DE DESPACHO"))
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("INFORMACIÓN DEL CLIENTE", heading_style))
         story.append(ProformaService._build_client_table(carrier))
@@ -421,18 +420,18 @@ class ProformaService:
                 ),
             )
         )
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("DETALLE DE PIEZAS", heading_style))
         story.append(ProformaService._build_requirements_table(carrier, cell_style))
         story.append(Spacer(1, 0.12 * inch))
         story.append(ProformaService._build_boards_total_table(carrier))
-        story.append(Spacer(1, 0.25 * inch))
+        story.append(Spacer(1, 0.15 * inch))
 
         payment_block = ProformaService._payment_section(carrier, heading_style)
         if payment_block:
             story.extend(payment_block)
-            story.append(Spacer(1, 0.25 * inch))
+            story.append(Spacer(1, 0.15 * inch))
 
         story.extend(_section("DESCARGO DE RESPONSABILIDAD", heading_style))
         story.append(
@@ -451,7 +450,7 @@ class ProformaService:
 
         story.append(
             KeepTogether(
-                [Spacer(1, 0.5 * inch), ProformaService._build_signature_block(styles)]
+                [Spacer(1, 0.25 * inch), ProformaService._build_signature_block(styles)]
             )
         )
 
@@ -548,8 +547,8 @@ class ProformaService:
             width="100%",
             thickness=1.5,
             color=BRAND_BLACK,
-            spaceBefore=10,
-            spaceAfter=10,
+            spaceBefore=6,
+            spaceAfter=6,
         )
 
         title_style = ParagraphStyle(
@@ -731,7 +730,6 @@ class ProformaService:
         ]
         if getattr(client, "email", None):
             client_data.append(["Email:", client.email])
-        client_data.append(["ID Cliente:", str(client.id)])
         client_table = Table(
             client_data, colWidths=[1.5 * inch, CONTENT_WIDTH - 1.5 * inch]
         )
@@ -743,8 +741,8 @@ class ProformaService:
                     ("FONTSIZE", (0, 0), (-1, -1), 10),
                     ("TEXTCOLOR", (0, 0), (-1, -1), TEXT_GREY),
                     ("BACKGROUND", (0, 0), (0, -1), ZEBRA_GREY),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                     ("LEFTPADDING", (0, 0), (-1, -1), 8),
                 ]
             )
@@ -756,7 +754,7 @@ class ProformaService:
         carrier: ProformaCarrier,
         cell_style,
         palette: Palette = BRAND_PALETTE,
-        pad: int = 7,
+        pad: int = 5,
     ) -> Table:
         requirements = carrier.requirements
         req_data = [["#", "Alto", "Ancho", "Cant.", "Tablero", "Cantos", "Etiqueta"]]
@@ -1207,7 +1205,7 @@ def _section(
     title: str,
     heading_style,
     palette: Palette = BRAND_PALETTE,
-    space_after: int = 8,
+    space_after: int = 5,
 ) -> List:
     """Section title with a colored rule underneath."""
     return [
@@ -1236,8 +1234,8 @@ def _totals_table(rows: List[List[str]], palette: Palette = BRAND_PALETTE) -> Ta
                 ("TEXTCOLOR", (0, 0), (-1, -1), palette.text),
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ("LEFTPADDING", (0, 0), (-1, -1), 12),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 12),
             ]
@@ -1250,7 +1248,7 @@ def _data_table_style(
     header_size: int,
     body_size: int,
     palette: Palette = BRAND_PALETTE,
-    pad: int = 7,
+    pad: int = 5,
 ) -> TableStyle:
     """Common style for data tables: accent header + zebra rows."""
     return TableStyle(

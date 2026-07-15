@@ -60,19 +60,15 @@ class ProformaCarrier:
         reference: str,
         company: dict | None = None,
         validity_days: Optional[int] = None,
-        branch: dict | None = None,
     ) -> "ProformaCarrier":
         """Builds the carrier from an optimization payload + the client.
 
-        ``company`` is the current letterhead (company data) rendered live; it's
-        not part of the priced snapshot. ``validity_days`` is the quote's validity
-        period shown on the proforma (``None`` omits it). ``branch``, if given, is
-        the branch that owns the document: it replaces the letterhead's branch
-        listing to show only that one (``{"name", "address"}``).
+        ``company`` is the current letterhead (company data) rendered live,
+        including the full configured branch list; it's not part of the priced
+        snapshot. ``validity_days`` is the quote's validity period shown on the
+        proforma (``None`` omits it).
         """
         company = company or {}
-        if branch is not None:
-            company = {**company, "branches": [branch]}
         # Discount block (attached by build_pricing before assembling the carrier;
         # a payload without it = no discount, e.g. snapshots predating the feature).
         pricing = payload.get("pricing") or {}
@@ -97,21 +93,19 @@ class ProformaCarrier:
         )
 
     @classmethod
-    def from_order(
-        cls, order, company: dict | None = None, branch: dict | None = None
-    ) -> "ProformaCarrier":
+    def from_order(cls, order, company: dict | None = None) -> "ProformaCarrier":
         """Builds the carrier from an order (snapshot + frozen prices).
 
         The breakdown (boards vs edge banding) is taken from the immutable
         snapshot; the frozen grand total lives in ``order.total`` (= boards +
         edge banding). The letterhead (``company``) is rendered live, not frozen
-        into the snapshot. ``branch`` (the order's branch) scopes the letterhead
-        to that branch.
+        into the snapshot, and always lists every configured branch (not scoped
+        to the order's own branch).
         """
         snapshot = order.optimization_snapshot or {}
         reference = order.code or f"ORD-{order.id:06d}"
         carrier = cls.from_payload(
-            snapshot, order.client, reference=reference, company=company, branch=branch
+            snapshot, order.client, reference=reference, company=company
         )
         # The order freezes the board count when confirmed.
         carrier.total_boards_used = order.total_boards_used

@@ -10,19 +10,6 @@ from src.shared.database import get_db
 from src.shared.exceptions import EntityNotFoundError, ValidationError
 
 
-def branch_letterhead(db: Session, branch_id: Optional[int]) -> Optional[dict]:
-    """Branch letterhead for the proforma: ``{"name", "address"}`` or ``None``.
-
-    Scopes the letterhead to the branch that owns the document.
-    """
-    if branch_id is None:
-        return None
-    branch = db.get(BranchModel, branch_id)
-    if branch is None:
-        return None
-    return {"name": branch.name, "address": branch.address or ""}
-
-
 def resolve_branch_for_create(
     db: Session,
     branch_scope: Optional[int],

@@ -4,7 +4,6 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from src.modules.branches.service import branch_letterhead
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.proforma import (
     ProformaService,
@@ -291,11 +290,7 @@ def get_order_document(
     confirmed order, hence the header reads "ORDEN DE PEDIDO".
     """
     order = svc.get_scoped_or_404(order_id, branch_scope)
-    carrier = ProformaCarrier.from_order(
-        order,
-        company=settings_svc.get_company(),
-        branch=branch_letterhead(svc.db, order.branch_id),
-    )
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     pdf_buffer = ProformaService.generate_proforma_pdf(carrier, title="ORDEN DE PEDIDO")
     return pdf_response(
         pdf_buffer, f"orden_pedido_{order.code or order.id}.pdf", format
@@ -312,11 +307,7 @@ def get_order_production_sheet(
 ):
     """Production sheet (cut list and layout, NO prices) for the workshop."""
     order = svc.get_scoped_or_404(order_id, branch_scope)
-    carrier = ProformaCarrier.from_order(
-        order,
-        company=settings_svc.get_company(),
-        branch=branch_letterhead(svc.db, order.branch_id),
-    )
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     pdf_buffer = ProformaService.generate_production_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"produccion_{order.code or order.id}.pdf", format)
 
@@ -332,11 +323,7 @@ def get_order_dispatch_sheet(
     """Dispatch sheet (handover to the client): pieces with NO prices, a liability
     disclaimer and signatures. Shows the snapshot's dispatch date/responsible party."""
     order = svc.get_scoped_or_404(order_id, branch_scope)
-    carrier = ProformaCarrier.from_order(
-        order,
-        company=settings_svc.get_company(),
-        branch=branch_letterhead(svc.db, order.branch_id),
-    )
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     pdf_buffer = ProformaService.generate_dispatch_sheet_pdf(carrier)
     return pdf_response(pdf_buffer, f"despacho_{order.code or order.id}.pdf", format)
 
@@ -358,11 +345,7 @@ def get_order_consolidated(
     and every attachment (PDFs as-is, screenshots wrapped one per page).
     """
     order = svc.get_scoped_or_404(order_id, branch_scope)
-    carrier = ProformaCarrier.from_order(
-        order,
-        company=settings_svc.get_company(),
-        branch=branch_letterhead(svc.db, order.branch_id),
-    )
+    carrier = ProformaCarrier.from_order(order, company=settings_svc.get_company())
     parts = [
         ProformaService.generate_proforma_pdf(
             carrier, title="ORDEN DE PEDIDO", include_diagram=False
