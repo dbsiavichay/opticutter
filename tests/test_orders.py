@@ -361,6 +361,35 @@ def test_order_document_pdf_and_base64(client, db_session):
     assert order["code"] in body["filename"]
 
 
+def test_order_document_shows_all_configured_branches(client, db_session):
+    """The letterhead lists every configured branch, not just the order's own
+    branch (previously collapsed to a single one)."""
+    import io
+
+    from pypdf import PdfReader
+
+    client.patch(
+        "/api/v1/settings/company",
+        json={
+            "branches": [
+                {"name": "Sucursal Sucúa", "address": "Av. Principal 123"},
+                {"name": "Sucursal Macas", "address": "Calle Secundaria 456"},
+            ]
+        },
+    )
+    c = _create_client(client)
+    b = _create_board(client)
+    order = _create_order(client, db_session, _order_payload(c["id"], b["id"]))
+
+    pdf = client.get(f"/api/v1/orders/{order['id']}/document")
+    assert pdf.status_code == 200
+    text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf.content)).pages
+    )
+    assert "Sucursal Sucúa" in text
+    assert "Sucursal Macas" in text
+
+
 def test_order_production_sheet_pdf(client, db_session):
     c = _create_client(client)
     b = _create_board(client)

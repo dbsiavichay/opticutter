@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from src.modules.branches.service import branch_letterhead, resolve_branch_for_create
+from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
 from src.modules.optimizations.carrier import ProformaCarrier
 from src.modules.optimizations.pricing import build_pricing
@@ -233,7 +233,6 @@ class PreOrderService(BranchScopedMixin):
             validity_days=self.settings_service.get_preorder_config()[
                 "preorder_validity_days"
             ],
-            branch=branch_letterhead(self.db, preorder.branch_id),
         )
 
     def _record_transition(
