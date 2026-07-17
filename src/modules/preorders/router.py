@@ -71,6 +71,7 @@ def _detail(svc: PreOrderService, preorder: PreOrderModel) -> PreOrderResponse:
         expires_at=preorder.expires_at,
         materials=preorder.materials,
         requirements=preorder.requirements,
+        additional_services=preorder.additional_services,
         optimization=svc.build_optimize_response(preorder),
         history=preorder.history,
     )
