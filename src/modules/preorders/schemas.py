@@ -205,6 +205,8 @@ class ReviewPieceResponse(CamelModel):
     """Cut-list piece projected for the public review."""
 
     label: Optional[str] = None
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     height: int
     width: int
     quantity: int

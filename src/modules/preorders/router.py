@@ -229,10 +229,15 @@ def get_preorder_proforma(
     svc: PreOrderService = Depends(preorder_service),
     branch_scope: Optional[int] = Depends(get_branch_scope),
 ):
-    """Recomputed commercial proforma (live prices) of the pre-order."""
+    """Recomputed commercial proforma (live prices) of the pre-order.
+
+    The cut-layout diagram is omitted: the proforma is a commercial quote, so it
+    lists priced requirements and materials only (the diagram lives in the
+    production sheet / order document).
+    """
     preorder = svc.get_scoped_or_404(preorder_id, branch_scope)
     carrier = svc.build_carrier(preorder)
-    pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
+    pdf_buffer = ProformaService.generate_proforma_pdf(carrier, include_diagram=False)
     return pdf_response(
         pdf_buffer, f"proforma_{preorder.code or preorder.id}.pdf", format
     )
