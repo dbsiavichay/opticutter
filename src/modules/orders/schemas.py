@@ -6,6 +6,7 @@ from pydantic import Field
 from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
+    AdditionalServiceLine,
     CutSegment,
     MaterialInput,
     OptimizationStrategy,
@@ -26,6 +27,10 @@ class OrderCreate(CamelModel):
     )
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="Cut list to optimize and freeze into the order"
+    )
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list,
+        description="Billed additional services to freeze (inherited from the pre-order)",
     )
     client_id: int = Field(..., description="Client ID placing the order")
     branch_id: Optional[int] = Field(
@@ -192,7 +197,13 @@ class OrderResponse(CamelModel):
     price_tier_code: str = Field(default="consumidor")
     discount_rate: float = Field(default=0.0, description="Frozen discount (0.02 = 2%)")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal minus the discount")
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list, description="Frozen additional-service lines"
+    )
+    additional_services_total: float = Field(
+        default=0.0, description="Frozen sum of additional services (after the discount)"
+    )
+    total: float = Field(..., description="Subtotal minus discount plus services")
     total_boards_used: int
     optimization_hash: str
     external_invoice_id: Optional[str] = None

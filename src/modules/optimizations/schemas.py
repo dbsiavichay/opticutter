@@ -152,7 +152,34 @@ class PricingSummary(CamelModel):
     )
     subtotal: float = Field(default=0.0, description="Sum at list price")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(default=0.0, description="Subtotal minus discount")
+    services_total: float = Field(
+        default=0.0,
+        description="Sum of additional services (added after the discount)",
+    )
+    total: float = Field(
+        default=0.0, description="Subtotal minus discount plus additional services"
+    )
+
+
+class AdditionalServiceLine(CamelModel):
+    """A billed additional service on a quote/order (qty × editable unit price).
+
+    Not cut geometry: it lives beside the optimizer inputs and is folded into the
+    total **after** the cache-keyed computation (like the tier discount). It never
+    feeds the optimizer. ``service_id`` references the catalog (optional; the price
+    is editable regardless of the catalog default).
+    """
+
+    service_id: Optional[int] = Field(
+        default=None, description="Additional service catalog ID (optional)"
+    )
+    name: str = Field(
+        ..., min_length=1, max_length=128, description="Service name (snapshot)"
+    )
+    unit_price: confloat(ge=0) = Field(
+        ..., description="Unit price (seeded from the catalog default, editable)"
+    )
+    quantity: PositiveInt = Field(default=1, le=10000, description="Quantity")
 
 
 class CatalogMaterialInput(CamelModel):

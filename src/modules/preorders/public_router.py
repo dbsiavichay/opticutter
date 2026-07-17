@@ -21,6 +21,7 @@ from src.modules.preorders.schemas import (
     ReviewLineResponse,
     ReviewPieceResponse,
     ReviewPreOrderResponse,
+    ReviewServiceResponse,
 )
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
@@ -78,6 +79,15 @@ def _to_review_response(
         )
         for e in payload.get("edge_bandings_summary", [])
     ]
+    services = [
+        ReviewServiceResponse(
+            name=s.get("name", ""),
+            quantity=s.get("quantity", 0),
+            unit_price=s.get("unit_price", 0.0),
+            line_total=round(s.get("unit_price", 0.0) * s.get("quantity", 0), 2),
+        )
+        for s in preorder.additional_services or []
+    ]
     pieces = [
         ReviewPieceResponse(
             label=r.get("label"),
@@ -99,6 +109,7 @@ def _to_review_response(
         price_tier_name=pricing.get("price_tier_name"),
         discount_rate=pricing.get("discount_rate", 0.0),
         discount_amount=pricing.get("discount_amount", 0.0),
+        services_total=pricing.get("services_total", 0.0),
         total=pricing["total"],
         total_boards_used=payload.get("total_boards_used", 0),
         created_at=preorder.created_at,
@@ -106,6 +117,7 @@ def _to_review_response(
         confirmed_at=preorder.confirmed_at,
         expires_at=preorder.expires_at,
         lines=lines,
+        additional_services=services,
         pieces=pieces,
     )
 

@@ -148,6 +148,10 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         CheckConstraint("total >= 0", name="total_non_negative"),
         CheckConstraint("discount_amount >= 0", name="discount_amount_non_negative"),
         CheckConstraint(
+            "additional_services_total >= 0",
+            name="additional_services_total_non_negative",
+        ),
+        CheckConstraint(
             "discount_rate >= 0 AND discount_rate <= 1", name="discount_rate_ratio"
         ),
         CheckConstraint("payment_cash_amount >= 0", name="payment_cash_non_negative"),
@@ -181,6 +185,11 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
     )
     discount_rate: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     discount_amount: Mapped[float] = mapped_column(
+        Float, default=0.0, server_default="0"
+    )
+    # Frozen sum of additional services (billed on top, after the discount). The
+    # per-line breakdown lives in ``optimization_snapshot["additional_services"]``.
+    additional_services_total: Mapped[float] = mapped_column(
         Float, default=0.0, server_default="0"
     )
     total_boards_used: Mapped[int] = mapped_column(Integer)
@@ -269,6 +278,15 @@ class OrderModel(TimestampMixin, AuditMixin, Base):
         cascade="all, delete-orphan",
         order_by="OrderAttachmentModel.id",
     )
+
+    @property
+    def additional_services(self) -> list:
+        """Frozen additional-service lines, read from the immutable snapshot.
+
+        The per-line breakdown lives in the snapshot (not a table); the rolled-up
+        ``additional_services_total`` is a column. Empty for pre-feature orders.
+        """
+        return (self.optimization_snapshot or {}).get("additional_services") or []
 
 
 class OrderLineModel(TimestampMixin, AuditMixin, Base):

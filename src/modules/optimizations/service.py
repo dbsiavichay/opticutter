@@ -65,12 +65,16 @@ class OptimizationService:
         self.material_resolver = MaterialResolver(db)
         self.settings_service = SettingsService(db)
 
-    def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
+    def optimize_response(
+        self, request: OptimizeRequest, additional_services: list | None = None
+    ) -> OptimizeResponse:
         """Computes (cache-first) and builds the ``POST /optimize`` response.
 
         The computation is client-agnostic: the client is only resolved (and
         validated) when the request carries a ``client_id``. Without it, the
-        response is anonymous.
+        response is anonymous. ``additional_services`` (billed services, not cut
+        geometry) are folded into the ``pricing`` block after the discount; the
+        raw ``/optimize`` endpoint passes none.
         """
         payload, optimization_hash = self.compute(request)
         client = None
@@ -81,7 +85,7 @@ class OptimizationService:
         # The discount is applied outside the geometry cache: every tier reuses
         # the same payload (cache-first) and only differs in the `pricing` block.
         tier = self.settings_service.resolve_price_tier(request.price_tier_code)
-        pricing = build_pricing(payload, tier)
+        pricing = build_pricing(payload, tier, additional_services)
         return OptimizeResponse(
             id=None,
             client=client,

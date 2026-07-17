@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.shared.database import Base
@@ -78,6 +78,13 @@ class PreOrderModel(TimestampMixin, AuditMixin, Base):
     # Optimizer inputs, as-is, for the recompute (no snapshot is stored).
     materials: Mapped[list] = mapped_column(JSON)
     requirements: Mapped[list] = mapped_column(JSON)
+
+    # Billed additional services (not cut geometry): stored as-is and folded into
+    # the total after the discount (see build_pricing). Empty for quotes without
+    # services; server_default keeps pre-feature rows valid.
+    additional_services: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default=text("'[]'")
+    )
 
     # Selected price tier (live discount; frozen once the order is confirmed).
     price_tier_code: Mapped[str] = mapped_column(

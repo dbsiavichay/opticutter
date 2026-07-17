@@ -137,21 +137,37 @@ class OrderService(BranchScopedMixin):
         # frozen as-is from the snapshot. Their lines/pieces end up with a null
         # ``product_id`` and are identified by ``product_code``/``product_name``.
 
+        # Additional services (billed on top of the total, after the discount).
+        # Not cut geometry: they aren't in the hash, so like the tier they factor
+        # into dedupe (two identical cuts differing only in services aren't the
+        # same order).
+        additional_services = [
+            s.model_dump(mode="json") for s in data.additional_services
+        ]
         # Price tier: validated and its rate frozen (historical audit). The
         # discount factors into dedupe because two orders that are geometrically
         # identical but at a different tier are NOT the same order (the tier
         # isn't part of the hash).
         tier = self.settings_service.resolve_price_tier(data.price_tier_code)
+        pricing = build_pricing(payload, tier, additional_services)
         existing = self._find_active_duplicate(
-            branch_id, data.client_id, optimization_hash, tier["code"]
+            branch_id,
+            data.client_id,
+            optimization_hash,
+            tier["code"],
+            pricing["services_total"],
         )
         if existing is not None:
             return existing
 
-        # Document-level discount (catalog boards only). Lines are frozen at list
-        # price; the snapshot embeds `pricing` so it's self-contained.
-        pricing = build_pricing(payload, tier)
-        snapshot = {**payload, "pricing": pricing}
+        # Document-level discount (catalog boards only) + services. Lines are frozen
+        # at list price; the snapshot embeds `pricing` and the service breakdown so
+        # it's self-contained.
+        snapshot = {
+            **payload,
+            "pricing": pricing,
+            "additional_services": additional_services,
+        }
 
         # The order is born 'confirmed' (the client's prior review, formerly
         # 'quoted', now lives in the pre-order, which mints this order on confirmation).
@@ -175,6 +191,7 @@ class OrderService(BranchScopedMixin):
             price_tier_code=tier["code"],
             discount_rate=tier["rate"],
             discount_amount=pricing["discount_amount"],
+            additional_services_total=pricing["services_total"],
             total_boards_used=payload["total_boards_used"],
             source=data.source,
             notes=data.notes,
@@ -696,13 +713,15 @@ class OrderService(BranchScopedMixin):
         client_id: int,
         optimization_hash: str,
         price_tier_code: str,
+        additional_services_total: float = 0.0,
     ) -> Optional[OrderModel]:
         """Non-terminal order from the same branch+client with the same hash (idempotency).
 
         Includes the branch in the key: the same client can order the same
         thing at two branches and those are different orders. Includes the
-        price tier: the discount isn't part of the hash, so the same cut at a
-        different tier counts as two orders.
+        price tier and the additional-services total: neither is part of the
+        hash, so the same cut at a different tier or with different services
+        counts as two orders.
         """
         terminal = [s.value for s in TERMINAL_STATUSES]
         return (
@@ -712,6 +731,7 @@ class OrderService(BranchScopedMixin):
                 OrderModel.client_id == client_id,
                 OrderModel.optimization_hash == optimization_hash,
                 OrderModel.price_tier_code == price_tier_code,
+                OrderModel.additional_services_total == additional_services_total,
                 OrderModel.status.not_in(terminal),
             )
             .first()
