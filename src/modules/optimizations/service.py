@@ -527,6 +527,7 @@ class OptimizationService:
         data = {
             **req.model_dump(mode="json"),
             "product_code": material_label or req.material_key,
+            "product_name": (rm.name if rm else None),
         }
         if req.edge_banding is not None and data.get("edge_banding"):
             product = eb_products.get(req.edge_banding.product_id)

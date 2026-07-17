@@ -2,15 +2,14 @@
 
 Consumed by the Maderable frontend from the link's URL. They don't expose
 internal identifiers or the client's contact details (see
-``ReviewPreOrderResponse``); the breakdown and prices are recomputed live and
-the cutting diagrams are delivered via the proforma PDF, also gated by the token.
+``ReviewPreOrderResponse``); the breakdown and prices are recomputed live. The
+client reviews the quote on-screen (no PDF download from the public link).
 """
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 
-from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.preorders.model import PreOrderModel, PreOrderStatus
 from src.modules.preorders.review_service import (
     PreOrderReviewService,
@@ -27,12 +26,6 @@ from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
 router = APIRouter(
     prefix="/public/review", tags=["public-review"], responses=ERROR_RESPONSES
-)
-
-_FORMAT_QUERY = Query(
-    default="pdf",
-    description="Output format: 'pdf' (file) or 'base64' (JSON)",
-    pattern="^(pdf|base64)$",
 )
 
 
@@ -91,6 +84,8 @@ def _to_review_response(
     pieces = [
         ReviewPieceResponse(
             label=r.get("label"),
+            material_code=r.get("product_code"),
+            material_name=r.get("product_name"),
             height=r["height"],
             width=r["width"],
             quantity=r["quantity"],
@@ -177,19 +172,3 @@ def request_changes_review(
     payload, _ = svc.preorders.compute_payload(preorder)
     pricing = svc.preorders.build_pricing_for(preorder, payload)
     return ok(_to_review_response(preorder, payload, pricing))
-
-
-# Exempt from the JSON envelope: PDF file transport (same as in preorders).
-@router.get("/{token}/proforma")
-def get_review_proforma(
-    token: str,
-    format: str = _FORMAT_QUERY,
-    svc: PreOrderReviewService = Depends(preorder_review_service),
-):
-    """Proforma PDF of the quote, gated by the review token."""
-    preorder = svc.get_review(token)
-    carrier = svc.preorders.build_carrier(preorder)
-    pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
-    return pdf_response(
-        pdf_buffer, f"proforma_{preorder.code or preorder.id}.pdf", format
-    )

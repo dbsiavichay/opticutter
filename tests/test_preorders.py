@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from src.modules.preorders.model import PreOrderModel
 
-from .test_orders import _create_board, _create_client, _order_payload
+from .test_orders import _BRANCH, _create_board, _create_client, _order_payload
 
 
 def _setup(client):
@@ -130,6 +130,46 @@ def test_preorder_proforma_pdf(client):
     pre = _create_preorder(client, c, b).json()["data"]
     pdf = client.get(f"/api/v1/preorders/{pre['id']}/proforma")
     assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert len(pdf.content) > 1000
+
+
+def test_preorder_proforma_pdf_inline_material_without_label(client):
+    """Regression: an inline (manual/offcut) material leaves product_code/product_name None; the
+    proforma must render "N/A" instead of crashing on Paragraph(None) (was a 500)."""
+    c = _create_client(client)
+    payload = {
+        "clientId": c["id"],
+        "branchId": _BRANCH,
+        "materials": [
+            {
+                "key": "m1",
+                "source": "manual",
+                "height": 2000,
+                "width": 1000,
+                "thickness": 18,
+                "costPerUnit": 30.0,
+                # label omitted → product_name/product_code resolve to None
+            }
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 400,
+                "width": 600,
+                "quantity": 2,
+                "materialKey": "m1",
+                "label": "Puerta",
+                "canRotate": True,
+            }
+        ],
+    }
+    pre = client.post("/api/v1/preorders/", json=payload)
+    assert pre.status_code == 201, pre.text
+    pdf = client.get(
+        f"/api/v1/preorders/{pre.json()['data']['id']}/proforma?format=pdf"
+    )
+    assert pdf.status_code == 200, pdf.text
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
 

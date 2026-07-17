@@ -771,7 +771,7 @@ class ProformaService:
                         f"{req.get('height', 0)} mm",
                         f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
-                        req.get("product_code", "N/A"),
+                        req.get("product_code") or "N/A",
                         Paragraph(_edge_banding_notation(req), cell_style),
                         Paragraph(req.get("label") or "-", cell_style),
                     ]
@@ -821,8 +821,11 @@ class ProformaService:
         eb_data = [header]
         for entry in summary:
             row = [
-                entry.get("product_code", "N/A"),
-                Paragraph(entry.get("product_name", "N/A"), cell_style),
+                entry.get("product_code") or "N/A",
+                Paragraph(
+                    entry.get("product_name") or entry.get("product_code") or "N/A",
+                    cell_style,
+                ),
                 BAND_TYPE_LABEL.get(entry.get("band_type"), "-"),
                 f"{(entry.get('thickness') or 0):.2f} mm",
                 f"{entry.get('billed_linear_m', 0)} m",
@@ -873,8 +876,11 @@ class ProformaService:
             has_rows = True
             mat_data.append(
                 [
-                    entry.get("product_code", "N/A"),
-                    Paragraph(entry.get("product_name", "N/A"), cell_style),
+                    entry.get("product_code") or "N/A",
+                    Paragraph(
+                        entry.get("product_name") or entry.get("product_code") or "N/A",
+                        cell_style,
+                    ),
                     f"{entry.get('count', 0)} u",
                     f"${entry.get('cost_per_unit', 0):.2f}",
                     f"${entry.get('total_cost', 0):.2f}",
@@ -884,8 +890,11 @@ class ProformaService:
             has_rows = True
             mat_data.append(
                 [
-                    entry.get("product_code", "N/A"),
-                    Paragraph(entry.get("product_name", "N/A"), cell_style),
+                    entry.get("product_code") or "N/A",
+                    Paragraph(
+                        entry.get("product_name") or entry.get("product_code") or "N/A",
+                        cell_style,
+                    ),
                     f"{entry.get('billed_linear_m', 0)} m",
                     f"${entry.get('price_per_m', 0):.2f}",
                     f"${entry.get('total_cost', 0):.2f}",
@@ -924,8 +933,13 @@ class ProformaService:
             for entry in materials_summary:
                 mat_data.append(
                     [
-                        entry.get("product_code", "N/A"),
-                        Paragraph(entry.get("product_name", "N/A"), cell_style),
+                        entry.get("product_code") or "N/A",
+                        Paragraph(
+                            entry.get("product_name")
+                            or entry.get("product_code")
+                            or "N/A",
+                            cell_style,
+                        ),
                         f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         f"{entry.get('thickness', 0):.0f} mm",
                         str(entry.get("count", 0)),
@@ -961,7 +975,7 @@ class ProformaService:
             unit = entry.get("unit_price", 0)
             data.append(
                 [
-                    Paragraph(entry.get("name", "N/A"), cell_style),
+                    Paragraph(entry.get("name") or "N/A", cell_style),
                     f"{qty} u",
                     f"${unit:.2f}",
                     f"${unit * qty:.2f}",
