@@ -142,7 +142,7 @@ def test_delete_product(client):
 # --- Board -> coordinated edge-banding matching --------------------------------
 
 
-def _seed_board(client, code, name, thickness):
+def _seed_board(client, code, name, thickness, family="CASHMERE"):
     return client.post(
         "/api/v1/products/",
         json={
@@ -150,12 +150,17 @@ def _seed_board(client, code, name, thickness):
             "code": code,
             "name": name,
             "price": 50.0,
-            "attributes": {"height": 2800, "width": 2070, "thickness": thickness},
+            "attributes": {
+                "height": 2800,
+                "width": 2070,
+                "thickness": thickness,
+                "family": family,
+            },
         },
     ).json()["data"]
 
 
-def _seed_edge(client, code, name, band_type, thickness, width, color):
+def _seed_edge(client, code, name, band_type, thickness, width, color, family="CASHMERE"):
     return client.post(
         "/api/v1/products/",
         json={
@@ -168,6 +173,7 @@ def _seed_edge(client, code, name, band_type, thickness, width, color):
                 "thickness": thickness,
                 "width": width,
                 "color": color,
+                "family": family,
             },
         },
     ).json()["data"]
@@ -246,10 +252,13 @@ def test_edge_bandings_for_36mm_board_only_hard(client):
 
 
 def test_edge_bandings_excludes_other_designs(client):
-    """Must not return edge bandings from a different design even if they share name tokens."""
+    """Must not return edge bandings from a different family even if names/codes share tokens."""
     _seed_cashmere_catalog(client)
-    # Different design with a name sharing a token but a different code (abbreviation)
-    _seed_board(client, "MDP-RO-BRD-15", "MDP 15mm Barroco Dorado", 15)
+    # Different family: the board's family has no coordinated edge banding seeded, and a
+    # banding of yet another family must not leak in.
+    _seed_board(
+        client, "MDP-RO-BRD-15", "MDP 15mm Barroco Dorado", 15, family="BARROCO_DORADO"
+    )
     _seed_edge(
         client,
         "TAP-RO-BRR-045",
@@ -258,11 +267,12 @@ def test_edge_bandings_excludes_other_designs(client):
         0.45,
         19,
         "Roble Barroco Ristretto",
+        family="BARROCO_RISTRETTO",
     )
     board = client.get("/api/v1/products/code/MDP-RO-BRD-15").json()["data"]
 
     bands = client.get(f"/api/v1/products/{board['id']}/edge-bandings").json()["data"]
-    # BRD has no coordinated edge banding seeded; BRR must not leak in
+    # BARROCO_DORADO has no coordinated edge banding seeded; BARROCO_RISTRETTO must not leak in
     assert bands == []
 
 

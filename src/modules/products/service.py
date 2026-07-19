@@ -74,37 +74,28 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
         return self._paginate(query, limit, offset)
 
     @staticmethod
-    def _design_key(code: str) -> Optional[str]:
-        """Design key shared by a board and its coordinated edge banding.
-
-        Codes follow ``{prefix}-{category}-{abbreviation}-…`` (e.g.
-        ``MDP-SL-CSH-15`` and ``TAP-SL-CSH-045``), so ``{category}-{abbreviation}``
-        (``SL-CSH``) uniquely identifies the design — unlike ``name``, which
-        shares tokens across designs (e.g. several "Barroco"s). Returns ``None``
-        if the code doesn't have enough segments.
-        """
-        parts = code.split("-")
-        if len(parts) < 3:
-            return None
-        return f"{parts[1]}-{parts[2]}"
+    def _norm_family(value: Optional[str]) -> str:
+        """Normalizes a family value for matching (trim + case-insensitive)."""
+        return (value or "").strip().casefold()
 
     def find_edge_bandings_for_board(
         self, board_id: int, band_type: Optional[BandType] = None
     ) -> List[ProductModel]:
-        """Edge bandings coordinated with a board (same design and correct width).
+        """Edge bandings coordinated with a board (same family and correct width).
 
-        Matches on the design key derived from the code (not the name, which
-        produces false positives) and applies the thickness→width rule
-        (``BOARD_THICKNESS_TO_EDGE_WIDTH``). Optionally filters by band type
-        (``BandType``). Returns ``[]`` if there's no match for that combination
-        (a real catalog gap, e.g. soft banding for a 36 mm board).
+        Matches on the explicit ``family`` attribute shared by the board and its
+        edge bandings (user-configurable, unlike the editable ``code``) and
+        applies the thickness→width rule (``BOARD_THICKNESS_TO_EDGE_WIDTH``).
+        Optionally filters by band type (``BandType``). Returns ``[]`` when the
+        board has no family, no width rule applies, or there's no match for that
+        combination (a real catalog gap, e.g. soft banding for a 36 mm board).
         """
         board = self.get_or_404(board_id)
         if board.type != ProductType.BOARD.value:
             raise BusinessRuleError(f"El producto {board.code} no es un tablero")
 
-        key = self._design_key(board.code)
-        if key is None:
+        board_family = self._norm_family(board.attributes.get("family"))
+        if not board_family:
             return []
 
         target_width = BOARD_THICKNESS_TO_EDGE_WIDTH.get(
@@ -115,17 +106,14 @@ class ProductService(CRUDService[ProductModel, ProductBase, ProductUpdate]):
 
         candidates = (
             self.db.query(ProductModel)
-            .filter(
-                ProductModel.type == ProductType.EDGE_BANDING.value,
-                ProductModel.code.ilike(f"%-{key}-%"),
-            )
+            .filter(ProductModel.type == ProductType.EDGE_BANDING.value)
             .all()
         )
 
         matches = [
             p
             for p in candidates
-            if self._design_key(p.code) == key
+            if self._norm_family(p.attributes.get("family")) == board_family
             and p.attributes.get("width") == target_width
             and (band_type is None or p.attributes.get("bandType") == band_type.value)
         ]
