@@ -57,3 +57,8 @@ class EdgeBandingAttributes(CamelModel):
     length: Optional[PositiveInt] = Field(
         None, description="Roll length in mm (if applicable)"
     )
+    family: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Familia/diseño para coordinar con el tablero (debe coincidir con el tablero)",
+    )

@@ -102,18 +102,19 @@ CLIENTS = [
 ]
 
 # Demo boards (only created if the catalog is empty): (code, name, height, width,
-# thickness, price). Large dimensions so the demo cutlists fit comfortably.
+# thickness, price, family). Large dimensions so the demo cutlists fit comfortably.
+# ``family`` is the shared design key that coordinates a board with its tapacanto.
 DEMO_BOARDS = [
-    ("DEMO-MDP-BLN-15", "Tablero Demo Blanco 15mm", 2440, 1830, 15, 48.00),
-    ("DEMO-MDP-NGR-15", "Tablero Demo Negro 15mm", 2440, 1830, 15, 52.00),
-    ("DEMO-MDP-ROB-18", "Tablero Demo Roble 18mm", 2440, 1830, 18, 64.00),
+    ("D-BLN-15", "Tablero Demo Blanco 15mm", 2440, 1830, 15, 48.00, "Blanco"),
+    ("D-NGR-15", "Tablero Demo Negro 15mm", 2440, 1830, 15, 52.00, "Negro"),
+    ("D-ROB-18", "Tablero Demo Roble 18mm", 2440, 1830, 18, 64.00, "Roble"),
 ]
 
-# Demo edge bandings coordinated with the first two boards (TAP-* code + design):
-# (code, name, thickness_mm, width_mm, band_type, price_per_m).
+# Demo edge bandings coordinated with the first two boards by shared ``family``
+# (15mm board → 19mm tapacanto): (code, name, thickness_mm, width_mm, band_type, price_per_m, family).
 DEMO_EDGE_BANDINGS = [
-    ("TAP-MDP-BLN-19", "Tapacanto Demo Blanco 19mm", 0.45, 19, "Soft", 0.35),
-    ("TAP-MDP-NGR-19", "Tapacanto Demo Negro 19mm", 0.45, 19, "Soft", 0.35),
+    ("D-BLN-C045", "Tapacanto Demo Blanco 19mm", 0.45, 19, "Soft", 0.35, "Blanco"),
+    ("D-NGR-C045", "Tapacanto Demo Negro 19mm", 0.45, 19, "Soft", 0.35, "Negro"),
 ]
 
 # Statuses to seed per branch.
@@ -515,11 +516,20 @@ def ensure_boards(db) -> list[ProductModel]:
         .all()
     )
     if existing:
+        # Backfill the coordination family on reused DEMO boards (matched by name) that
+        # predate the feature, so the optimizer can infer tapacantos in the demo. Real
+        # catalog boards (names not in DEMO_BOARDS) already carry their own family.
+        fam_by_name = {name: family for _c, name, *_rest, family in DEMO_BOARDS}
+        for board in existing:
+            fam = fam_by_name.get(board.name)
+            if fam and not (board.attributes or {}).get("family"):
+                board.attributes = {**(board.attributes or {}), "family": fam}
+        db.flush()
         print(f"  = Using {len(existing)} existing board(s) from the catalog")
         return existing
 
     boards = []
-    for code, name, height, width, thickness, price in DEMO_BOARDS:
+    for code, name, height, width, thickness, price, family in DEMO_BOARDS:
         board = ProductModel(
             type=ProductType.BOARD.value,
             code=code,
@@ -532,6 +542,7 @@ def ensure_boards(db) -> list[ProductModel]:
                 "width": width,
                 "thickness": thickness,
                 "grainDirection": None,
+                "family": family,
             },
         )
         db.add(board)
@@ -542,23 +553,24 @@ def ensure_boards(db) -> list[ProductModel]:
 
 
 def ensure_edge_bandings(db) -> list[ProductModel]:
-    """Reuses existing demo edge bandings; if none, creates the demo catalog ones."""
-    existing = (
-        db.query(ProductModel)
-        .filter(
-            ProductModel.type == ProductType.EDGE_BANDING.value,
-            ProductModel.code.in_([c for c, *_ in DEMO_EDGE_BANDINGS]),
-        )
-        .order_by(ProductModel.id)
-        .all()
-    )
-    if len(existing) == len(DEMO_EDGE_BANDINGS):
-        print(f"  = Using {len(existing)} existing demo edge banding(s)")
-        return existing
+    """Upserts the demo edge bandings, matched by name (unique + stable).
 
+    Keying on the name (not the code) keeps this idempotent even after the demo
+    codes change: a pre-existing row is updated in place (new code + attributes,
+    including the coordination ``family``) instead of inserting a duplicate that
+    would violate ``uq_products_name``.
+    """
     edge_bands = []
-    for code, name, thickness, width, band_type, price in DEMO_EDGE_BANDINGS:
-        band = db.query(ProductModel).filter(ProductModel.code == code).first()
+    for code, name, thickness, width, band_type, price, family in DEMO_EDGE_BANDINGS:
+        attributes = {
+            "thickness": thickness,
+            "width": width,
+            "bandType": band_type,
+            "color": None,
+            "length": None,
+            "family": family,
+        }
+        band = db.query(ProductModel).filter(ProductModel.name == name).first()
         if band is None:
             band = ProductModel(
                 type=ProductType.EDGE_BANDING.value,
@@ -567,18 +579,15 @@ def ensure_edge_bandings(db) -> list[ProductModel]:
                 description=name,
                 price=price,
                 is_active=True,
-                attributes={
-                    "thickness": thickness,
-                    "width": width,
-                    "bandType": band_type,
-                    "color": None,
-                    "length": None,
-                },
+                attributes=attributes,
             )
             db.add(band)
             print(f"  + Edge banding {code} ({name})")
         else:
-            print(f"  = Edge banding {code} already existed")
+            band.code = code
+            band.price = price
+            band.attributes = attributes
+            print(f"  = Edge banding {name} synced ({code})")
         edge_bands.append(band)
     db.flush()
     return edge_bands

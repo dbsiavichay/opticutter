@@ -1,15 +1,30 @@
-"""Seed script: deletes existing boards and edge bandings and inserts the Trend 2026 collection."""
+"""Seed script: syncs the Trend 2026 boards + edge bandings catalog.
 
+By default it **upserts by name** (idempotent): existing products are updated in
+place — the row keeps its ``id``, so orders referencing it stay valid — and
+missing ones are created. Pass ``--reset`` for a hard rebuild: it unlinks orders
+from the catalog products (the ``product_id`` FKs are nullable; orders keep their
+``product_code``/``product_name``) and deletes every board/edge banding before
+recreating them fresh.
+"""
+
+import argparse
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from sqlalchemy import text
 
 from src.modules.products.model import ProductModel, ProductType
 from src.modules.users.model import (
     UserModel,  # noqa: F401 — registers users table for FK resolution
 )
 from src.shared.database import SessionLocal
+
+CATALOG_TYPES = [ProductType.BOARD.value, ProductType.EDGE_BANDING.value]
+# Order tables whose (nullable) product_id references the catalog; unlinked on --reset.
+_REFERENCING_TABLES = ("order_boards", "order_pieces", "order_lines")
 
 TEXTURE_DESC = {
     "BS": "acabado Bureau Structure, superficie estructurada suave",
@@ -83,7 +98,9 @@ def make_board(
     description = f"MDP {CATEGORY_LABEL[cat]} {name}, {thickness}mm, {TEXTURE_DESC[texture]}{rh_text}"
     return {
         "type": ProductType.BOARD.value,
-        "code": f"MDP-{cat}-{abbr}-{thickness}{'-RH' if rh else ''}",
+        # Short code: {abbr}-{thickness}{R?} (e.g. CSH-15, CSH-36R). The board↔tapacanto
+        # pairing no longer relies on the code — it uses the shared ``family`` below.
+        "code": f"{abbr}-{thickness}{'R' if rh else ''}",
         "name": f"MDP {thickness}mm {name}{name_suffix}{rh_label}",
         "description": description[:256],
         "price": PRICES[(cat, thickness, rh)],
@@ -94,6 +111,9 @@ def make_board(
             "width": width,
             "thickness": thickness,
             "grainDirection": grain,
+            # Shared design family: a board and its coordinated tapacanto carry the SAME value
+            # (the design name), which is how the optimizer infers the tapacanto.
+            "family": name,
         },
     }
 
@@ -111,7 +131,9 @@ def build_boards():
         for rh in (False, True):
             boards.append(
                 make_board(
-                    "BNV-SP",
+                    # Distinct short code prefix (BNS-*), but same ``name`` ("Blanco Nieve")
+                    # so it shares the family with the base boards and the Blanco tapacanto.
+                    "BNS",
                     "Blanco Nieve",
                     "SL",
                     None,
@@ -172,7 +194,8 @@ def make_edge_banding(abbr, name, cat, band_type, thickness, width):
     )
     return {
         "type": ProductType.EDGE_BANDING.value,
-        "code": f"TAP-{cat}-{abbr}-{int(round(thickness * 100)):03d}",
+        # Short code: {abbr}-C{thickness_centi} (e.g. CSH-C045, CSH-C150).
+        "code": f"{abbr}-C{int(round(thickness * 100)):03d}",
         "name": f"Tapacanto PVC {label} {band_type} {thick_txt}x{width}mm",
         "description": description[:256],
         "price": EDGE_PRICES[(thickness, width)],
@@ -183,6 +206,8 @@ def make_edge_banding(abbr, name, cat, band_type, thickness, width):
             "thickness": thickness,
             "width": width,
             "color": label,
+            # Shared design family (the design name), matching the coordinated board's family.
+            "family": name,
         },
     }
 
@@ -199,24 +224,76 @@ def build_edge_bandings():
     return bands
 
 
+def upsert_products(db, items, label):
+    """Idempotent upsert by name (unique + stable): updates existing rows in place
+    (keeping their ``id`` so order FKs stay valid) and creates the missing ones."""
+    created = updated = 0
+    for data in items:
+        existing = (
+            db.query(ProductModel).filter(ProductModel.name == data["name"]).first()
+        )
+        if existing is None:
+            db.add(ProductModel(**data))
+            created += 1
+        else:
+            existing.code = data["code"]
+            existing.description = data["description"]
+            existing.price = data["price"]
+            existing.is_active = data["is_active"]
+            existing.attributes = data["attributes"]
+            updated += 1
+    db.flush()
+    print(f"  {label}: {created} created, {updated} updated.")
+
+
+def reset_catalog(db):
+    """Hard reset: unlinks orders from the catalog products (nullable ``product_id``
+    FKs; orders keep ``product_code``/``product_name``) and deletes every board and
+    edge banding so they're recreated with fresh ids.
+
+    Uses raw SQL for the unlink to avoid importing the order ORM models (which would
+    pull the whole mapper graph into this standalone script)."""
+    # CATALOG_TYPES holds trusted enum values, so this interpolation is injection-safe.
+    types_in = ", ".join(f"'{t}'" for t in CATALOG_TYPES)
+    subquery = f"SELECT id FROM products WHERE type IN ({types_in})"
+    for table in _REFERENCING_TABLES:
+        db.execute(
+            text(
+                f"UPDATE {table} SET product_id = NULL WHERE product_id IN ({subquery})"
+            )
+        )
+    deleted = (
+        db.query(ProductModel)
+        .filter(ProductModel.type.in_(CATALOG_TYPES))
+        .delete(synchronize_session=False)
+    )
+    db.flush()
+    print(
+        f"Reset: unlinked orders and deleted {deleted} existing boards/edge bandings."
+    )
+
+
 def main():
+    parser = argparse.ArgumentParser(
+        description="Seed the boards + edge bandings catalog."
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Hard rebuild: unlink orders and delete the catalog before recreating it.",
+    )
+    args = parser.parse_args()
+
     db = SessionLocal()
     try:
-        for product_type, builder, label in (
-            (ProductType.BOARD, build_boards, "tableros"),
-            (ProductType.EDGE_BANDING, build_edge_bandings, "tapacantos"),
-        ):
-            deleted = (
-                db.query(ProductModel)
-                .filter(ProductModel.type == product_type.value)
-                .delete()
-            )
-            print(f"Deleted {deleted} existing {label}.")
-
-            items = [ProductModel(**data) for data in builder()]
-            db.add_all(items)
-            print(f"Inserted {len(items)} new {label}.")
+        if args.reset:
+            reset_catalog(db)
+        print("Boards:")
+        upsert_products(db, build_boards(), "tableros")
+        print("Edge bandings:")
+        upsert_products(db, build_edge_bandings(), "tapacantos")
         db.commit()
+        print("\n✅ Catalog seeded.")
     except Exception as e:
         db.rollback()
         print(f"Error: {e}")
