@@ -1,6 +1,5 @@
 import hashlib
 import json
-import math
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -408,7 +407,8 @@ class OptimizationService:
         The net length is the sum of the banded sides (``width`` for
         ``top/bottom``, ``height`` for ``left/right``) times the quantity; it's
         independent of rotation. The configured waste factor is applied and the
-        result is rounded up to the whole meter that gets billed.
+        result is billed exactly (net + waste), with no rounding up to a whole
+        meter.
         """
         waste = waste_factor
         net_mm: Dict[Optional[int], float] = defaultdict(float)
@@ -431,8 +431,7 @@ class OptimizationService:
             attrs = (product.attributes if product else None) or {}
             price = product.price if product else 0.0
             net_m = mm / 1000.0
-            with_waste = net_m * (1 + waste)
-            billed = math.ceil(with_waste)
+            billed = round(net_m * (1 + waste), 2)
             cost = round(billed * price, 2)
             total_cost += cost
             summary.append(
@@ -444,7 +443,7 @@ class OptimizationService:
                     "color": attrs.get("color"),
                     "band_type": attrs.get("bandType"),
                     "net_linear_m": round(net_m, 2),
-                    "linear_m": round(with_waste, 2),
+                    "linear_m": billed,
                     "billed_linear_m": billed,
                     "price_per_m": price,
                     "total_cost": cost,

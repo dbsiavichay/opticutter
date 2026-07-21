@@ -128,7 +128,9 @@ class EdgeBandingSummary(CamelModel):
         ..., description="Net linear meters (sum of banded sides)"
     )
     linear_m: float = Field(..., description="Linear meters including waste factor")
-    billed_linear_m: int = Field(..., description="Whole meters charged (rounded up)")
+    billed_linear_m: float = Field(
+        ..., description="Linear meters charged: net + waste factor, not rounded"
+    )
     price_per_m: float = Field(..., description="Frozen price per linear meter")
     total_cost: float
 

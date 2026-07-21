@@ -186,7 +186,7 @@ class ReviewLineResponse(CamelModel):
 
     product_code: Optional[str] = None
     product_name: Optional[str] = None
-    quantity: int
+    quantity: float
     unit_price: float
     line_total: float
     linear_m: Optional[float] = None

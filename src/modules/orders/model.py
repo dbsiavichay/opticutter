@@ -314,13 +314,14 @@ class OrderLineModel(TimestampMixin, AuditMixin, Base):
     )
     product_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     product_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    quantity: Mapped[int] = mapped_column(Integer)
+    # Boards: whole units. Edge banding: net linear meters + waste factor, billed
+    # exactly (no rounding up to a whole meter) — same value as ``linear_m``.
+    quantity: Mapped[float] = mapped_column(Float)
     unit_price_snapshot: Mapped[float] = mapped_column(Float)
     line_total: Mapped[float] = mapped_column(Float)
     avg_efficiency: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     total_area_m2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # Edge banding: exact linear meters (incl. waste) for display; ``quantity``
-    # stores the whole meters billed. Null for boards.
+    # Edge banding: linear meters incl. waste (mirrors ``quantity``). Null for boards.
     linear_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # Half board: the line was charged at half (width/2, cost/2). False for
     # full boards and edge banding.
