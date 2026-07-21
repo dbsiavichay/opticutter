@@ -1,7 +1,5 @@
 """Tests for edge banding: linear meters, validation, rotation rule and order charges."""
 
-import math
-
 import pytest
 
 from src.modules.optimizations.labels import edge_banding_notation
@@ -74,9 +72,9 @@ def _requirement(eb_id, sides, height=500, width=1000, quantity=1, material_key=
 
 
 def _expected_meters(net_m: float):
-    """Mirrors the service's formula: waste factor + rounding to the whole meter."""
-    with_waste = net_m * (1 + config.EDGE_BANDING_WASTE_FACTOR)
-    return round(with_waste, 2), math.ceil(with_waste)
+    """Mirrors the service's formula: net + waste factor, billed exactly (no rounding)."""
+    billed = round(net_m * (1 + config.EDGE_BANDING_WASTE_FACTOR), 2)
+    return billed, billed
 
 
 # --------------------------------------------------------------------------- #

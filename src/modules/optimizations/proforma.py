@@ -828,7 +828,7 @@ class ProformaService:
                 ),
                 BAND_TYPE_LABEL.get(entry.get("band_type"), "-"),
                 f"{(entry.get('thickness') or 0):.2f} mm",
-                f"{entry.get('billed_linear_m', 0)} m",
+                f"{entry.get('billed_linear_m', 0):.2f} m",
             ]
             if with_prices:
                 row.append(f"${entry.get('price_per_m', 0):.2f}")
@@ -895,7 +895,7 @@ class ProformaService:
                         entry.get("product_name") or entry.get("product_code") or "N/A",
                         cell_style,
                     ),
-                    f"{entry.get('billed_linear_m', 0)} m",
+                    f"{entry.get('billed_linear_m', 0):.2f} m",
                     f"${entry.get('price_per_m', 0):.2f}",
                     f"${entry.get('total_cost', 0):.2f}",
                 ]

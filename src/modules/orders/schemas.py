@@ -112,7 +112,9 @@ class OrderExportLine(CamelModel):
 
     description: str = Field(..., description="Human-readable line description")
     product_code: Optional[str] = None
-    quantity: int = Field(..., description="Number of units charged")
+    quantity: float = Field(
+        ..., description="Units charged (linear meters for edge banding)"
+    )
     unit_price: float
     line_total: float
 
@@ -139,9 +141,12 @@ class OrderLineResponse(CamelModel):
     product_id: Optional[int] = None  # null if the material isn't from the catalog
     product_code: Optional[str] = None
     product_name: Optional[str] = None
-    quantity: int = Field(
+    quantity: float = Field(
         ...,
-        description="Units charged: boards for tableros, whole linear meters for edge banding",
+        description=(
+            "Units charged: boards for tableros, exact linear meters "
+            "(net + waste factor, not rounded) for edge banding"
+        ),
     )
     unit_price_snapshot: float
     line_total: float
@@ -201,7 +206,8 @@ class OrderResponse(CamelModel):
         default_factory=list, description="Frozen additional-service lines"
     )
     additional_services_total: float = Field(
-        default=0.0, description="Frozen sum of additional services (after the discount)"
+        default=0.0,
+        description="Frozen sum of additional services (after the discount)",
     )
     total: float = Field(..., description="Subtotal minus discount plus services")
     total_boards_used: int
