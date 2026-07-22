@@ -17,6 +17,7 @@ from src.modules.optimizations.schemas import (
     InlineMaterialInput,
     MaterialInput,
     MaterialSource,
+    PoolFillOrder,
 )
 from src.modules.products.model import ProductType
 from src.modules.products.service import ProductService
@@ -41,6 +42,11 @@ class ResolvedMaterial:
     product_id: Optional[int] = None
     code: Optional[str] = None
     name: Optional[str] = None
+    # Pool metadata: ``quantity``/``pool_key`` for a finite pooled offcut,
+    # ``fill_order`` for a catalog board that anchors a pool.
+    quantity: Optional[int] = None
+    pool_key: Optional[str] = None
+    fill_order: PoolFillOrder = PoolFillOrder.auto
 
     @property
     def is_catalog(self) -> bool:
@@ -92,6 +98,7 @@ class MaterialResolver:
             product_id=product.id,
             code=product.code,
             name=product.name,
+            fill_order=material.fill_order,
         )
 
     def _resolve_inline(self, material: InlineMaterialInput) -> ResolvedMaterial:
@@ -106,4 +113,6 @@ class MaterialResolver:
             product_id=None,
             code=None,
             name=material.label,
+            quantity=material.quantity,
+            pool_key=material.pool_key,
         )

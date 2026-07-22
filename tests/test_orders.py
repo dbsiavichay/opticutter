@@ -648,3 +648,71 @@ def test_order_freezes_half_board_line_and_plan(client, db_session):
     doc = client.get(f"/api/v1/orders/{data['id']}/document")
     assert doc.status_code == 200
     assert doc.headers["content-type"] == "application/pdf"
+
+
+def test_create_order_with_pooled_offcut_freezes_zero_cost_line(client, db_session):
+    """An order over a catalog board + a client offcut freezes both, the offcut at $0."""
+    c = _create_client(client)
+    b = _create_board(client)
+
+    payload = {
+        "clientId": c["id"],
+        "branchId": _BRANCH,
+        "materials": [
+            {
+                "key": "b1",
+                "source": "catalog",
+                "productId": b["id"],
+                "fillOrder": "offcutsFirst",
+            },
+            {
+                "key": "off1",
+                "source": "clientOffcut",
+                "height": 400,
+                "width": 600,
+                "thickness": 18,
+                "costPerUnit": 0,
+                "quantity": 1,
+                "poolKey": "b1",
+                "label": "Retazo cliente",
+            },
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 200,
+                "width": 300,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Chico",
+                "canRotate": True,
+            },
+            {
+                "priority": 0,
+                "height": 2000,
+                "width": 1000,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Grande",
+                "canRotate": True,
+            },
+        ],
+    }
+
+    data = _create_order(client, db_session, payload)
+
+    assert data["status"] == "confirmed"
+    # Only the catalog board counts as a board bought.
+    assert data["totalBoardsUsed"] == 1
+
+    lines_by_code = {line["productCode"]: line for line in data["lines"]}
+    # The client's offcut is frozen as its own $0 line, without a catalog product.
+    offcut_line = lines_by_code["off1"]
+    assert offcut_line["productId"] is None
+    assert offcut_line["lineTotal"] == 0
+    # The catalog board is billed as usual.
+    assert lines_by_code["MEL18"]["productId"] == b["id"]
+
+    # Cut list keeps both pieces, mapped to the catalog product (same material).
+    assert {p["label"] for p in data["pieces"]} == {"Chico", "Grande"}
+    assert all(p["productId"] == b["id"] for p in data["pieces"])

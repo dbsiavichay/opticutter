@@ -19,6 +19,7 @@ from src.modules.optimizations.half_boards import apply_half_boards
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import group_layouts
+from src.modules.optimizations.pool import optimize_pool
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import (
     STRATEGY_TO_PACKING,
@@ -137,6 +138,19 @@ class OptimizationService:
             for key in requirements_by_key
         }
 
+        # Pooled offcuts: extra finite stock attached to a referenced catalog
+        # board via ``pool_key``. Resolved and added to ``resolved`` so they feed
+        # the hash, the materials summary and the order mapping; grouped by the
+        # catalog key they supplement so the pool solver can consume them.
+        pools: Dict[str, List[ResolvedMaterial]] = defaultdict(list)
+        for material in request.materials:
+            pool_key = getattr(material, "pool_key", None)
+            if pool_key is None or pool_key not in resolved:
+                continue
+            rm = self.material_resolver.resolve(material)
+            resolved[material.key] = rm
+            pools[pool_key].append(rm)
+
         eb_products = self._resolve_edge_banding_products(request.requirements)
 
         optimization_hash = self._compute_hash(
@@ -156,12 +170,23 @@ class OptimizationService:
         results = []
         for key, reqs in requirements_by_key.items():
             pieces, edge_map, net_map = self._build_pieces(reqs)
-            layouts = self._optimize(
-                pieces=pieces,
-                material=resolved[key],
-                cutting_params=cutting_params,
-                strategy=strategy,
-            )[0]
+            offcuts = pools.get(key)
+            if offcuts:
+                # Pool: pack across the catalog board + its finite offcuts.
+                layouts = optimize_pool(
+                    pieces=pieces,
+                    primary=resolved[key],
+                    offcuts=offcuts,
+                    cutting_params=cutting_params,
+                    strategy=strategy,
+                )
+            else:
+                layouts = self._optimize(
+                    pieces=pieces,
+                    material=resolved[key],
+                    cutting_params=cutting_params,
+                    strategy=strategy,
+                )[0]
             results.append((edge_map, net_map, layouts))
 
         # Half-board billing: catalog sheets whose content fits on a half board are
@@ -228,6 +253,9 @@ class OptimizationService:
                 "thickness": rm.thickness,
                 "cost_per_unit": rm.cost_per_unit,
                 "product_id": rm.product_id,
+                "quantity": rm.quantity,
+                "pool_key": rm.pool_key,
+                "fill_order": rm.fill_order.value,
             }
             for key, rm in resolved.items()
         }
@@ -553,8 +581,23 @@ class OptimizationService:
         banded sides and length without id collisions.
         """
         all_layouts = [layout for _, _, layouts in results for layout in layouts]
-        total_boards_used = len(all_layouts)
-        total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
+
+        # "Boards used"/cost is what the client buys. A pooled offcut is the
+        # client's own material attached to a catalog board, so it's excluded from
+        # the headline count/cost (it still shows per sheet in ``layouts``, as its
+        # own ``materials_summary`` line and in the diagram). Standalone materials
+        # (catalog/manual/non-pooled offcut) keep counting as before.
+        def _is_pooled_offcut(layout: CuttingLayout) -> bool:
+            rm = resolved.get(layout.material.id)
+            return rm is not None and rm.pool_key is not None
+
+        billed_layouts = [
+            layout for layout in all_layouts if not _is_pooled_offcut(layout)
+        ]
+        total_boards_used = len(billed_layouts)
+        total_boards_cost = sum(
+            layout.material.cost_per_unit for layout in billed_layouts
+        )
 
         # Per-sheet metrics (cut = saw travel; edge banding = net length of the
         # placed pieces) accumulated into overall totals. Injected into the layout
