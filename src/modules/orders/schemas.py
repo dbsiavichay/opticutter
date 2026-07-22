@@ -6,6 +6,7 @@ from pydantic import Field
 from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
+    AdditionalServiceLine,
     CutSegment,
     MaterialInput,
     OptimizationStrategy,
@@ -26,6 +27,10 @@ class OrderCreate(CamelModel):
     )
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="Cut list to optimize and freeze into the order"
+    )
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list,
+        description="Billed additional services to freeze (inherited from the pre-order)",
     )
     client_id: int = Field(..., description="Client ID placing the order")
     branch_id: Optional[int] = Field(
@@ -107,7 +112,9 @@ class OrderExportLine(CamelModel):
 
     description: str = Field(..., description="Human-readable line description")
     product_code: Optional[str] = None
-    quantity: int = Field(..., description="Number of units charged")
+    quantity: float = Field(
+        ..., description="Units charged (linear meters for edge banding)"
+    )
     unit_price: float
     line_total: float
 
@@ -134,9 +141,12 @@ class OrderLineResponse(CamelModel):
     product_id: Optional[int] = None  # null if the material isn't from the catalog
     product_code: Optional[str] = None
     product_name: Optional[str] = None
-    quantity: int = Field(
+    quantity: float = Field(
         ...,
-        description="Units charged: boards for tableros, whole linear meters for edge banding",
+        description=(
+            "Units charged: boards for tableros, exact linear meters "
+            "(net + waste factor, not rounded) for edge banding"
+        ),
     )
     unit_price_snapshot: float
     line_total: float
@@ -192,7 +202,14 @@ class OrderResponse(CamelModel):
     price_tier_code: str = Field(default="consumidor")
     discount_rate: float = Field(default=0.0, description="Frozen discount (0.02 = 2%)")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal minus the discount")
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list, description="Frozen additional-service lines"
+    )
+    additional_services_total: float = Field(
+        default=0.0,
+        description="Frozen sum of additional services (after the discount)",
+    )
+    total: float = Field(..., description="Subtotal minus discount plus services")
     total_boards_used: int
     optimization_hash: str
     external_invoice_id: Optional[str] = None

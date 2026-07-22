@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
+from src.modules.additional_services.router import (
+    router as additional_services_router,
+)
 from src.modules.analytics.router import router as analytics_router
 from src.modules.branches.router import router as branches_router
 from src.modules.clients.router import router as clients_router
@@ -80,6 +83,7 @@ app.include_router(users_router, prefix="/api/v1")
 app.include_router(branches_router, prefix="/api/v1")
 app.include_router(products_router, prefix="/api/v1")
 app.include_router(clients_router, prefix="/api/v1")
+app.include_router(additional_services_router, prefix="/api/v1")
 app.include_router(optimizations_router, prefix="/api/v1")
 app.include_router(optimization_drafts_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")

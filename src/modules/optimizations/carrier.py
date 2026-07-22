@@ -33,6 +33,9 @@ class ProformaCarrier:
     price_tier_name: Optional[str] = None
     discount_rate: float = 0.0
     discount_amount: float = 0.0
+    # Billed additional services (qty × unit price); added on top of the total
+    # after the discount. Empty for documents without services.
+    additional_services: List[dict] = field(default_factory=list)
     # Dispatch data (only the dispatch sheet uses it; ``None`` omits it). Set by
     # ``from_order`` from the order; the ephemeral-optimization path doesn't.
     dispatch_date: Optional[datetime] = None
@@ -48,9 +51,20 @@ class ProformaCarrier:
         return round(self.total_boards_cost + self.total_edge_banding_cost, 2)
 
     @property
+    def services_total(self) -> float:
+        """Sum of the billed additional services (qty × unit price)."""
+        return round(
+            sum(
+                s.get("unit_price", 0.0) * s.get("quantity", 0)
+                for s in self.additional_services
+            ),
+            2,
+        )
+
+    @property
     def total_cost(self) -> float:
-        """Total cost: list-price subtotal minus the tier discount."""
-        return round(self.subtotal - self.discount_amount, 2)
+        """Total cost: list-price subtotal − tier discount + additional services."""
+        return round(self.subtotal - self.discount_amount + self.services_total, 2)
 
     @classmethod
     def from_payload(
@@ -90,6 +104,7 @@ class ProformaCarrier:
             price_tier_name=pricing.get("price_tier_name"),
             discount_rate=pricing.get("discount_rate", 0.0),
             discount_amount=pricing.get("discount_amount", 0.0),
+            additional_services=payload.get("additional_services") or [],
         )
 
     @classmethod

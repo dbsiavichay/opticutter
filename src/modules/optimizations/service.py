@@ -1,6 +1,5 @@
 import hashlib
 import json
-import math
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -20,6 +19,7 @@ from src.modules.optimizations.half_boards import apply_half_boards
 from src.modules.optimizations.labels import edge_banding_notation
 from src.modules.optimizations.materials import MaterialResolver, ResolvedMaterial
 from src.modules.optimizations.patterns import group_layouts
+from src.modules.optimizations.pool import optimize_pool
 from src.modules.optimizations.pricing import build_pricing
 from src.modules.optimizations.schemas import (
     STRATEGY_TO_PACKING,
@@ -65,12 +65,16 @@ class OptimizationService:
         self.material_resolver = MaterialResolver(db)
         self.settings_service = SettingsService(db)
 
-    def optimize_response(self, request: OptimizeRequest) -> OptimizeResponse:
+    def optimize_response(
+        self, request: OptimizeRequest, additional_services: list | None = None
+    ) -> OptimizeResponse:
         """Computes (cache-first) and builds the ``POST /optimize`` response.
 
         The computation is client-agnostic: the client is only resolved (and
         validated) when the request carries a ``client_id``. Without it, the
-        response is anonymous.
+        response is anonymous. ``additional_services`` (billed services, not cut
+        geometry) are folded into the ``pricing`` block after the discount; the
+        raw ``/optimize`` endpoint passes none.
         """
         payload, optimization_hash = self.compute(request)
         client = None
@@ -81,7 +85,7 @@ class OptimizationService:
         # The discount is applied outside the geometry cache: every tier reuses
         # the same payload (cache-first) and only differs in the `pricing` block.
         tier = self.settings_service.resolve_price_tier(request.price_tier_code)
-        pricing = build_pricing(payload, tier)
+        pricing = build_pricing(payload, tier, additional_services)
         return OptimizeResponse(
             id=None,
             client=client,
@@ -134,6 +138,19 @@ class OptimizationService:
             for key in requirements_by_key
         }
 
+        # Pooled offcuts: extra finite stock attached to a referenced catalog
+        # board via ``pool_key``. Resolved and added to ``resolved`` so they feed
+        # the hash, the materials summary and the order mapping; grouped by the
+        # catalog key they supplement so the pool solver can consume them.
+        pools: Dict[str, List[ResolvedMaterial]] = defaultdict(list)
+        for material in request.materials:
+            pool_key = getattr(material, "pool_key", None)
+            if pool_key is None or pool_key not in resolved:
+                continue
+            rm = self.material_resolver.resolve(material)
+            resolved[material.key] = rm
+            pools[pool_key].append(rm)
+
         eb_products = self._resolve_edge_banding_products(request.requirements)
 
         optimization_hash = self._compute_hash(
@@ -153,12 +170,23 @@ class OptimizationService:
         results = []
         for key, reqs in requirements_by_key.items():
             pieces, edge_map, net_map = self._build_pieces(reqs)
-            layouts = self._optimize(
-                pieces=pieces,
-                material=resolved[key],
-                cutting_params=cutting_params,
-                strategy=strategy,
-            )[0]
+            offcuts = pools.get(key)
+            if offcuts:
+                # Pool: pack across the catalog board + its finite offcuts.
+                layouts = optimize_pool(
+                    pieces=pieces,
+                    primary=resolved[key],
+                    offcuts=offcuts,
+                    cutting_params=cutting_params,
+                    strategy=strategy,
+                )
+            else:
+                layouts = self._optimize(
+                    pieces=pieces,
+                    material=resolved[key],
+                    cutting_params=cutting_params,
+                    strategy=strategy,
+                )[0]
             results.append((edge_map, net_map, layouts))
 
         # Half-board billing: catalog sheets whose content fits on a half board are
@@ -225,6 +253,9 @@ class OptimizationService:
                 "thickness": rm.thickness,
                 "cost_per_unit": rm.cost_per_unit,
                 "product_id": rm.product_id,
+                "quantity": rm.quantity,
+                "pool_key": rm.pool_key,
+                "fill_order": rm.fill_order.value,
             }
             for key, rm in resolved.items()
         }
@@ -404,7 +435,8 @@ class OptimizationService:
         The net length is the sum of the banded sides (``width`` for
         ``top/bottom``, ``height`` for ``left/right``) times the quantity; it's
         independent of rotation. The configured waste factor is applied and the
-        result is rounded up to the whole meter that gets billed.
+        result is billed exactly (net + waste), with no rounding up to a whole
+        meter.
         """
         waste = waste_factor
         net_mm: Dict[Optional[int], float] = defaultdict(float)
@@ -427,8 +459,7 @@ class OptimizationService:
             attrs = (product.attributes if product else None) or {}
             price = product.price if product else 0.0
             net_m = mm / 1000.0
-            with_waste = net_m * (1 + waste)
-            billed = math.ceil(with_waste)
+            billed = round(net_m * (1 + waste), 2)
             cost = round(billed * price, 2)
             total_cost += cost
             summary.append(
@@ -440,7 +471,7 @@ class OptimizationService:
                     "color": attrs.get("color"),
                     "band_type": attrs.get("bandType"),
                     "net_linear_m": round(net_m, 2),
-                    "linear_m": round(with_waste, 2),
+                    "linear_m": billed,
                     "billed_linear_m": billed,
                     "price_per_m": price,
                     "total_cost": cost,
@@ -523,6 +554,7 @@ class OptimizationService:
         data = {
             **req.model_dump(mode="json"),
             "product_code": material_label or req.material_key,
+            "product_name": (rm.name if rm else None),
         }
         if req.edge_banding is not None and data.get("edge_banding"):
             product = eb_products.get(req.edge_banding.product_id)
@@ -549,8 +581,23 @@ class OptimizationService:
         banded sides and length without id collisions.
         """
         all_layouts = [layout for _, _, layouts in results for layout in layouts]
-        total_boards_used = len(all_layouts)
-        total_boards_cost = sum(layout.material.cost_per_unit for layout in all_layouts)
+
+        # "Boards used"/cost is what the client buys. A pooled offcut is the
+        # client's own material attached to a catalog board, so it's excluded from
+        # the headline count/cost (it still shows per sheet in ``layouts``, as its
+        # own ``materials_summary`` line and in the diagram). Standalone materials
+        # (catalog/manual/non-pooled offcut) keep counting as before.
+        def _is_pooled_offcut(layout: CuttingLayout) -> bool:
+            rm = resolved.get(layout.material.id)
+            return rm is not None and rm.pool_key is not None
+
+        billed_layouts = [
+            layout for layout in all_layouts if not _is_pooled_offcut(layout)
+        ]
+        total_boards_used = len(billed_layouts)
+        total_boards_cost = sum(
+            layout.material.cost_per_unit for layout in billed_layouts
+        )
 
         # Per-sheet metrics (cut = saw travel; edge banding = net length of the
         # placed pieces) accumulated into overall totals. Injected into the layout

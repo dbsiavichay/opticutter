@@ -161,6 +161,7 @@ class PreOrderReviewService:
             OrderCreate(
                 materials=preorder.materials,
                 requirements=preorder.requirements,
+                additional_services=preorder.additional_services,
                 client_id=preorder.client_id,
                 branch_id=preorder.branch_id,
                 price_tier_code=preorder.price_tier_code,

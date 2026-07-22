@@ -317,16 +317,15 @@ def test_confirm_expired_quote_fails(client, db_session):
     assert detail.json()["data"]["status"] == "expired"
 
 
-def test_public_proforma_by_token(client):
+def test_public_proforma_endpoint_removed(client):
+    """The public review link no longer serves a proforma PDF (removed with the
+    frontend download button); even a valid token 404s on that path."""
     pre = _setup_preorder(client)
     link = _generate_link(client, pre["id"])
 
-    pdf = client.get(f"/api/v1/public/review/{link['token']}/proforma")
-    assert pdf.status_code == 200
-    assert pdf.headers["content-type"] == "application/pdf"
-    assert len(pdf.content) > 1000
-
-    assert client.get("/api/v1/public/review/token-falso/proforma").status_code == 404
+    assert (
+        client.get(f"/api/v1/public/review/{link['token']}/proforma").status_code == 404
+    )
 
 
 def test_confirmed_order_continues_state_machine(client):

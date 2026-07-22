@@ -12,6 +12,8 @@ route is protected with ``require_role(*RESOURCE_ROLES[key])`` (see ``dependenci
 | clients:manage                | yes           | yes      | no       | no        |
 | products:write                | yes           | no       | no       | no        |
 | products:read                 | yes           | yes      | no       | no        |
+| additional_services:write     | yes           | no       | no       | no        |
+| additional_services:read      | yes           | yes      | no       | no        |
 | optimizer (optimizations/drafts) | yes        | yes      | no       | no        |
 | preorders                     | yes           | yes      | no       | no        |
 | orders:write (create/quote)   | yes           | yes      | no       | no        |
@@ -52,6 +54,10 @@ RESOURCE_ROLES: dict[str, tuple[UserRole, ...]] = {
     "clients:manage": (_ADMIN, _SELLER),
     "products:write": (_ADMIN,),
     "products:read": (_ADMIN, _SELLER),
+    # Additional-services catalog: admin manages it; the seller reads it to add
+    # services to a quote.
+    "additional_services:write": (_ADMIN,),
+    "additional_services:read": (_ADMIN, _SELLER),
     "optimizer": (_ADMIN, _SELLER),
     "preorders": (_ADMIN, _SELLER),
     "orders:write": (_ADMIN, _SELLER),

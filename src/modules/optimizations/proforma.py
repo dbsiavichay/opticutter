@@ -243,6 +243,11 @@ class ProformaService:
         story.append(ProformaService._build_materials_table(carrier, cell_style))
         story.append(Spacer(1, 0.15 * inch))
 
+        if carrier.additional_services:
+            story.extend(_section("SERVICIOS ADICIONALES", heading_style))
+            story.append(ProformaService._build_services_table(carrier, cell_style))
+            story.append(Spacer(1, 0.15 * inch))
+
         story.append(ProformaService._build_totals_table(carrier))
 
         payment_block = ProformaService._payment_section(carrier, heading_style)
@@ -766,7 +771,7 @@ class ProformaService:
                         f"{req.get('height', 0)} mm",
                         f"{req.get('width', 0)} mm",
                         str(req.get("quantity", 1)),
-                        req.get("product_code", "N/A"),
+                        req.get("product_code") or "N/A",
                         Paragraph(_edge_banding_notation(req), cell_style),
                         Paragraph(req.get("label") or "-", cell_style),
                     ]
@@ -816,11 +821,14 @@ class ProformaService:
         eb_data = [header]
         for entry in summary:
             row = [
-                entry.get("product_code", "N/A"),
-                Paragraph(entry.get("product_name", "N/A"), cell_style),
+                entry.get("product_code") or "N/A",
+                Paragraph(
+                    entry.get("product_name") or entry.get("product_code") or "N/A",
+                    cell_style,
+                ),
                 BAND_TYPE_LABEL.get(entry.get("band_type"), "-"),
                 f"{(entry.get('thickness') or 0):.2f} mm",
-                f"{entry.get('billed_linear_m', 0)} m",
+                f"{entry.get('billed_linear_m', 0):.2f} m",
             ]
             if with_prices:
                 row.append(f"${entry.get('price_per_m', 0):.2f}")
@@ -868,8 +876,11 @@ class ProformaService:
             has_rows = True
             mat_data.append(
                 [
-                    entry.get("product_code", "N/A"),
-                    Paragraph(entry.get("product_name", "N/A"), cell_style),
+                    entry.get("product_code") or "N/A",
+                    Paragraph(
+                        entry.get("product_name") or entry.get("product_code") or "N/A",
+                        cell_style,
+                    ),
                     f"{entry.get('count', 0)} u",
                     f"${entry.get('cost_per_unit', 0):.2f}",
                     f"${entry.get('total_cost', 0):.2f}",
@@ -879,9 +890,12 @@ class ProformaService:
             has_rows = True
             mat_data.append(
                 [
-                    entry.get("product_code", "N/A"),
-                    Paragraph(entry.get("product_name", "N/A"), cell_style),
-                    f"{entry.get('billed_linear_m', 0)} m",
+                    entry.get("product_code") or "N/A",
+                    Paragraph(
+                        entry.get("product_name") or entry.get("product_code") or "N/A",
+                        cell_style,
+                    ),
+                    f"{entry.get('billed_linear_m', 0):.2f} m",
                     f"${entry.get('price_per_m', 0):.2f}",
                     f"${entry.get('total_cost', 0):.2f}",
                 ]
@@ -919,8 +933,13 @@ class ProformaService:
             for entry in materials_summary:
                 mat_data.append(
                     [
-                        entry.get("product_code", "N/A"),
-                        Paragraph(entry.get("product_name", "N/A"), cell_style),
+                        entry.get("product_code") or "N/A",
+                        Paragraph(
+                            entry.get("product_name")
+                            or entry.get("product_code")
+                            or "N/A",
+                            cell_style,
+                        ),
                         f"{entry.get('height', 0):.0f}×{entry.get('width', 0):.0f} mm",
                         f"{entry.get('thickness', 0):.0f} mm",
                         str(entry.get("count", 0)),
@@ -946,8 +965,39 @@ class ProformaService:
         return mat_table
 
     @staticmethod
+    def _build_services_table(carrier: ProformaCarrier, cell_style) -> Table:
+        """Additional services: name, quantity, unit price and subtotal.
+
+        Spans the full content width, mirroring the materials table."""
+        data = [["Servicio", "Cantidad", "P. Unit.", "Subtotal"]]
+        for entry in carrier.additional_services or []:
+            qty = entry.get("quantity", 0)
+            unit = entry.get("unit_price", 0)
+            data.append(
+                [
+                    Paragraph(entry.get("name") or "N/A", cell_style),
+                    f"{qty} u",
+                    f"${unit:.2f}",
+                    f"${unit * qty:.2f}",
+                ]
+            )
+        table = Table(
+            data,
+            colWidths=[
+                CONTENT_WIDTH - 2.6 * inch,
+                0.8 * inch,
+                0.8 * inch,
+                1.0 * inch,
+            ],
+            repeatRows=1,
+        )
+        table.setStyle(_data_table_style(header_size=10, body_size=9))
+        return table
+
+    @staticmethod
     def _build_totals_table(carrier: ProformaCarrier) -> Table:
         has_discount = bool(carrier.discount_amount and carrier.discount_amount > 0)
+        has_services = bool(carrier.additional_services)
         summary_data = []
         if carrier.edge_bandings_summary:
             summary_data.append(
@@ -960,13 +1010,21 @@ class ProformaService:
             summary_data.append(
                 ["Total de tableros utilizados:", str(carrier.total_boards_used)]
             )
+        # Subtotal is shown whenever there's an adjustment after it (discount or
+        # services), so the arithmetic to the total reads clearly.
+        if has_discount or has_services:
+            summary_data.append(["Subtotal:", f"${carrier.subtotal:.2f}"])
         # A single discount row (price tier), only over catalog boards.
         if has_discount:
             pct = carrier.discount_rate * 100
             name = carrier.price_tier_name or "descuento"
-            summary_data.append(["Subtotal:", f"${carrier.subtotal:.2f}"])
             summary_data.append(
                 [f"Descuento {name} (-{pct:g}%):", f"-${carrier.discount_amount:.2f}"]
+            )
+        # Additional services (not discounted), added on top.
+        if has_services:
+            summary_data.append(
+                ["Servicios adicionales:", f"${carrier.services_total:.2f}"]
             )
         summary_data.append(["Costo total estimado:", f"${carrier.total_cost:.2f}"])
         return _totals_table(summary_data)

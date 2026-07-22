@@ -2,15 +2,14 @@
 
 Consumed by the Maderable frontend from the link's URL. They don't expose
 internal identifiers or the client's contact details (see
-``ReviewPreOrderResponse``); the breakdown and prices are recomputed live and
-the cutting diagrams are delivered via the proforma PDF, also gated by the token.
+``ReviewPreOrderResponse``); the breakdown and prices are recomputed live. The
+client reviews the quote on-screen (no PDF download from the public link).
 """
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 
-from src.modules.optimizations.proforma import ProformaService, pdf_response
 from src.modules.preorders.model import PreOrderModel, PreOrderStatus
 from src.modules.preorders.review_service import (
     PreOrderReviewService,
@@ -21,17 +20,12 @@ from src.modules.preorders.schemas import (
     ReviewLineResponse,
     ReviewPieceResponse,
     ReviewPreOrderResponse,
+    ReviewServiceResponse,
 )
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
 router = APIRouter(
     prefix="/public/review", tags=["public-review"], responses=ERROR_RESPONSES
-)
-
-_FORMAT_QUERY = Query(
-    default="pdf",
-    description="Output format: 'pdf' (file) or 'base64' (JSON)",
-    pattern="^(pdf|base64)$",
 )
 
 
@@ -78,9 +72,20 @@ def _to_review_response(
         )
         for e in payload.get("edge_bandings_summary", [])
     ]
+    services = [
+        ReviewServiceResponse(
+            name=s.get("name", ""),
+            quantity=s.get("quantity", 0),
+            unit_price=s.get("unit_price", 0.0),
+            line_total=round(s.get("unit_price", 0.0) * s.get("quantity", 0), 2),
+        )
+        for s in preorder.additional_services or []
+    ]
     pieces = [
         ReviewPieceResponse(
             label=r.get("label"),
+            material_code=r.get("product_code"),
+            material_name=r.get("product_name"),
             height=r["height"],
             width=r["width"],
             quantity=r["quantity"],
@@ -99,6 +104,7 @@ def _to_review_response(
         price_tier_name=pricing.get("price_tier_name"),
         discount_rate=pricing.get("discount_rate", 0.0),
         discount_amount=pricing.get("discount_amount", 0.0),
+        services_total=pricing.get("services_total", 0.0),
         total=pricing["total"],
         total_boards_used=payload.get("total_boards_used", 0),
         created_at=preorder.created_at,
@@ -106,6 +112,7 @@ def _to_review_response(
         confirmed_at=preorder.confirmed_at,
         expires_at=preorder.expires_at,
         lines=lines,
+        additional_services=services,
         pieces=pieces,
     )
 
@@ -165,19 +172,3 @@ def request_changes_review(
     payload, _ = svc.preorders.compute_payload(preorder)
     pricing = svc.preorders.build_pricing_for(preorder, payload)
     return ok(_to_review_response(preorder, payload, pricing))
-
-
-# Exempt from the JSON envelope: PDF file transport (same as in preorders).
-@router.get("/{token}/proforma")
-def get_review_proforma(
-    token: str,
-    format: str = _FORMAT_QUERY,
-    svc: PreOrderReviewService = Depends(preorder_review_service),
-):
-    """Proforma PDF of the quote, gated by the review token."""
-    preorder = svc.get_review(token)
-    carrier = svc.preorders.build_carrier(preorder)
-    pdf_buffer = ProformaService.generate_proforma_pdf(carrier)
-    return pdf_response(
-        pdf_buffer, f"proforma_{preorder.code or preorder.id}.pdf", format
-    )

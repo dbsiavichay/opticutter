@@ -50,6 +50,22 @@ STRATEGY_TO_PACKING = {
 }
 
 
+class PoolFillOrder(str, Enum):
+    """Fill order for a material pool (a catalog board + its attached offcuts).
+
+    Only relevant when a catalog board carries pooled offcuts (inline materials
+    whose ``pool_key`` points at it). ``auto`` computes both candidate packings
+    and keeps the one with the least waste on the *purchased* (catalog) sheets;
+    ``offcuts_first`` fills the client's offcuts before opening catalog boards;
+    ``catalog_first`` fills catalog boards and pushes the residual onto the
+    offcuts (so a big leftover lands on the client's offcut, not a bought board).
+    """
+
+    auto = "auto"
+    offcuts_first = "offcutsFirst"
+    catalog_first = "catalogFirst"
+
+
 class MaterialSummary(CamelModel):
     material_key: str
     source: MaterialSource
@@ -128,7 +144,9 @@ class EdgeBandingSummary(CamelModel):
         ..., description="Net linear meters (sum of banded sides)"
     )
     linear_m: float = Field(..., description="Linear meters including waste factor")
-    billed_linear_m: int = Field(..., description="Whole meters charged (rounded up)")
+    billed_linear_m: float = Field(
+        ..., description="Linear meters charged: net + waste factor, not rounded"
+    )
     price_per_m: float = Field(..., description="Frozen price per linear meter")
     total_cost: float
 
@@ -152,7 +170,34 @@ class PricingSummary(CamelModel):
     )
     subtotal: float = Field(default=0.0, description="Sum at list price")
     discount_amount: float = Field(default=0.0)
-    total: float = Field(default=0.0, description="Subtotal minus discount")
+    services_total: float = Field(
+        default=0.0,
+        description="Sum of additional services (added after the discount)",
+    )
+    total: float = Field(
+        default=0.0, description="Subtotal minus discount plus additional services"
+    )
+
+
+class AdditionalServiceLine(CamelModel):
+    """A billed additional service on a quote/order (qty × editable unit price).
+
+    Not cut geometry: it lives beside the optimizer inputs and is folded into the
+    total **after** the cache-keyed computation (like the tier discount). It never
+    feeds the optimizer. ``service_id`` references the catalog (optional; the price
+    is editable regardless of the catalog default).
+    """
+
+    service_id: Optional[int] = Field(
+        default=None, description="Additional service catalog ID (optional)"
+    )
+    name: str = Field(
+        ..., min_length=1, max_length=128, description="Service name (snapshot)"
+    )
+    unit_price: confloat(ge=0) = Field(
+        ..., description="Unit price (seeded from the catalog default, editable)"
+    )
+    quantity: PositiveInt = Field(default=1, le=10000, description="Quantity")
 
 
 class CatalogMaterialInput(CamelModel):
@@ -166,13 +211,23 @@ class CatalogMaterialInput(CamelModel):
     )
     source: Literal[MaterialSource.catalog]
     product_id: int = Field(..., description="Board product ID (type=board)")
+    fill_order: PoolFillOrder = Field(
+        default=PoolFillOrder.auto,
+        description=(
+            "Fill order when this board has attached offcuts (materials whose "
+            "`poolKey` points at this board's `key`). `auto` picks the least-waste "
+            "layout; `offcutsFirst`/`catalogFirst` force the direction. Ignored "
+            "when the board has no pooled offcuts. Affects geometry and the hash."
+        ),
+    )
 
 
 class InlineMaterialInput(CamelModel):
     """Material with inline dimensions: company/client offcut or manual measurement.
 
-    They share the same shape; only ``source`` differs. ``quantity`` is accepted
-    but not yet enforced (infinite supply in Phase 1).
+    They share the same shape; only ``source`` differs. ``quantity`` is enforced
+    as finite supply **only** when the material is a pooled offcut (``pool_key``
+    set); as a standalone material referenced by requirements it stays infinite.
     """
 
     key: str = Field(
@@ -196,7 +251,23 @@ class InlineMaterialInput(CamelModel):
         default=None, max_length=128, description="Human-friendly material label"
     )
     quantity: Optional[PositiveInt] = Field(
-        default=None, description="Available units (not enforced in phase 1)"
+        default=None,
+        description=(
+            "Available units (finite supply). Enforced when this is a pooled "
+            "offcut (`poolKey` set); defaults to 1 in that case. Ignored for a "
+            "standalone material referenced directly by requirements."
+        ),
+    )
+    pool_key: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=(
+            "If set, this offcut is extra stock of the catalog board with this "
+            "`key`: its pieces come from that board's requirements, and the "
+            "optimizer packs them across the board + these offcuts. A pooled "
+            "offcut is NOT referenced by any requirement."
+        ),
     )
 
 
@@ -279,15 +350,41 @@ class OptimizeRequest(CamelModel):
 
     @model_validator(mode="after")
     def _validate_material_refs(self) -> "OptimizeRequest":
-        """Material keys are unique and every requirement references one."""
+        """Keys are unique; requirements and pool links resolve consistently."""
         keys = [m.key for m in self.materials]
         if len(set(keys)) != len(keys):
             raise ValueError("material keys must be unique")
-        keyset = set(keys)
+        by_key = {m.key: m for m in self.materials}
+
+        # Pooled offcuts (``pool_key`` set) are extra stock of a catalog board,
+        # not a direct cut target: their pieces come from that board's pool.
+        pooled_keys = set()
+        for m in self.materials:
+            pool_key = getattr(m, "pool_key", None)
+            if pool_key is None:
+                continue
+            pooled_keys.add(m.key)
+            target = by_key.get(pool_key)
+            if target is None:
+                raise ValueError(
+                    f"material '{m.key}' poolKey references unknown material "
+                    f"'{pool_key}'"
+                )
+            if target.source != MaterialSource.catalog:
+                raise ValueError(
+                    f"material '{m.key}' poolKey must reference a catalog board, "
+                    f"not '{pool_key}'"
+                )
+
         for req in self.requirements:
-            if req.material_key not in keyset:
+            if req.material_key not in by_key:
                 raise ValueError(
                     f"requirement references unknown materialKey '{req.material_key}'"
+                )
+            if req.material_key in pooled_keys:
+                raise ValueError(
+                    f"requirement cannot reference pooled offcut "
+                    f"'{req.material_key}'; reference its catalog board instead"
                 )
         return self
 

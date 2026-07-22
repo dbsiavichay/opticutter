@@ -33,6 +33,7 @@ from src.modules.print_jobs.model import (
     PrintJobType,
     PrintPayloadFormat,
 )
+from src.modules.print_jobs.schemas import PrintJobListItem
 from src.modules.settings.service import SettingsService
 from src.shared.config import config
 from src.shared.database import get_db
@@ -101,6 +102,30 @@ class PrintJobService:
             payload_format=PrintPayloadFormat.pdf,
             payload=payload,
             created_by=created_by,
+        )
+
+    def retry_job(
+        self, job_id: int, created_by: Optional[int], branch_scope: Optional[int]
+    ) -> PrintJobModel:
+        """Re-dispatches a job: renders a fresh payload and enqueues a brand-new
+        job of the same type. Safe regardless of the original's status (the failed
+        job's spool is already gone, so a retry always re-renders), which also
+        covers a job the agent acked ``done`` but that printed badly.
+        """
+        job = self.get_job_scoped(job_id, branch_scope)
+        if job.job_type == PrintJobType.sheet.value:
+            return self.enqueue_consolidated(
+                job.order_id, created_by=created_by, branch_scope=branch_scope
+            )
+        if job.placed_piece_id is None:
+            raise ValidationError(
+                "La etiqueta ya no tiene una pieza asociada; no se puede reimprimir."
+            )
+        return self.enqueue_label(
+            job.order_id,
+            job.placed_piece_id,
+            created_by=created_by,
+            branch_scope=branch_scope,
         )
 
     def _render_consolidated(
@@ -325,6 +350,52 @@ class PrintJobService:
         if job is None or (branch_scope is not None and job.branch_id != branch_scope):
             raise EntityNotFoundError("PrintJob", job_id)
         return job
+
+    def list_jobs_scoped(
+        self,
+        branch_scope: Optional[int],
+        statuses: Optional[List[str]] = None,
+        limit: int = 20,
+    ) -> List[PrintJobListItem]:
+        """Recent print jobs of the branch for the shop-floor panel, newest first.
+
+        Joins the order so each row carries its ``order_code``/``client_name`` for
+        display. Optionally filtered by status (e.g. only the ones needing
+        attention). Branch-scoped like ``get_job_scoped``: ``None`` scope (an admin
+        not pinned to a branch) sees every branch's jobs.
+        """
+        query = self.db.query(PrintJobModel, OrderModel).join(
+            OrderModel, PrintJobModel.order_id == OrderModel.id
+        )
+        if branch_scope is not None:
+            query = query.filter(PrintJobModel.branch_id == branch_scope)
+        if statuses:
+            query = query.filter(PrintJobModel.status.in_(statuses))
+        rows = query.order_by(PrintJobModel.id.desc()).limit(limit).all()
+        items: List[PrintJobListItem] = []
+        for job, order in rows:
+            client = order.client
+            client_name = (
+                " ".join(p for p in (client.first_name, client.last_name) if p) or None
+                if client is not None
+                else None
+            )
+            items.append(
+                PrintJobListItem(
+                    id=job.id,
+                    order_id=job.order_id,
+                    order_code=order.code,
+                    client_name=client_name,
+                    job_type=job.job_type,
+                    placed_piece_id=job.placed_piece_id,
+                    status=job.status,
+                    attempts=job.attempts,
+                    error_message=job.error_message,
+                    created_at=job.created_at,
+                    done_at=job.done_at,
+                )
+            )
+        return items
 
     # --- agent management (admin) ------------------------------------------
     def create_agent(

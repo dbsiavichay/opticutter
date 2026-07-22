@@ -14,7 +14,7 @@ Two audiences share the ``/print`` prefix:
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 
 from src.modules.print_jobs import spool
@@ -28,6 +28,7 @@ from src.modules.print_jobs.schemas import (
     PrintAgentToken,
     PrintConsolidatedRequest,
     PrintJobCreated,
+    PrintJobListItem,
     PrintJobOut,
     PrintLabelRequest,
 )
@@ -87,6 +88,26 @@ def enqueue_consolidated(
     return ok(PrintJobCreated(job_id=job.id, status=job.status))
 
 
+@router.post(
+    "/jobs/{job_id}/retry",
+    response_model=DataResponse[PrintJobCreated],
+    status_code=202,
+)
+def retry_job(
+    job_id: int,
+    svc: PrintJobService = Depends(print_job_service),
+    current_user: UserModel = Depends(require_permission("orders:workshop")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Re-dispatches a failed (or any) job as a fresh one (perm ``orders:workshop``).
+
+    The shop floor uses this to retry a print that never came out. Returns the
+    NEW job's id/status; the original row is left as-is (its history).
+    """
+    job = svc.retry_job(job_id, created_by=current_user.id, branch_scope=branch_scope)
+    return ok(PrintJobCreated(job_id=job.id, status=job.status))
+
+
 # --------------------------------------------------------------------------- #
 # Agent side (device token). Declared before ``/jobs/{job_id}`` so the static
 # ``/jobs/next`` route is matched first. Exempt from the JSON envelope.
@@ -137,6 +158,21 @@ def ack_job(
 # --------------------------------------------------------------------------- #
 # User status feedback (optional). Broad shop-floor read, scoped by branch.
 # --------------------------------------------------------------------------- #
+@router.get("/jobs", response_model=DataResponse[List[PrintJobListItem]])
+def list_jobs(
+    status: Optional[str] = Query(
+        None, description="CSV de estados a filtrar (ej. 'error,expired,pending,sent')"
+    ),
+    limit: int = Query(20, ge=1, le=100),
+    svc: PrintJobService = Depends(print_job_service),
+    _user: UserModel = Depends(require_permission("orders:workshop")),
+    branch_scope: Optional[int] = Depends(get_branch_scope),
+):
+    """Recent print jobs of the branch for the shop-floor panel (perm ``orders:workshop``)."""
+    statuses = [s.strip() for s in status.split(",") if s.strip()] if status else None
+    return ok(svc.list_jobs_scoped(branch_scope, statuses, limit))
+
+
 @router.get("/jobs/{job_id}", response_model=DataResponse[PrintJobOut])
 def get_job(
     job_id: int,

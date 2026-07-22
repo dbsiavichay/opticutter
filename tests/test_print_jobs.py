@@ -24,7 +24,7 @@ from src.modules.print_jobs.model import (
 )
 from src.modules.print_jobs.service import PrintJobService
 from src.shared.config import config
-from src.shared.exceptions import ValidationError
+from src.shared.exceptions import EntityNotFoundError, ValidationError
 from src.shared.security import hash_token
 
 
@@ -288,6 +288,112 @@ def test_ack_error_records_message(client, db_session):
     acked = svc.ack(agent, job.id, "error", "printer offline")
     assert acked.status == PrintJobStatus.error.value
     assert acked.error_message == "printer offline"
+
+
+# --- list + retry (shop-floor panel) ----------------------------------------
+def test_list_jobs_scoped_filters_and_isolates_by_branch(client, db_session):
+    order = _create_order(client, db_session)
+    b2 = BranchModel(code="SUR", name="Sucursal Sur", is_active=True)
+    db_session.add(b2)
+    db_session.commit()
+    svc = PrintJobService(db_session)
+
+    pending_b1 = _raw_job(db_session, order.id, status=PrintJobStatus.pending.value)
+    error_b1 = _raw_job(db_session, order.id, status=PrintJobStatus.error.value)
+    job_b2 = _raw_job(db_session, order.id, branch_id=b2.id)
+
+    # Branch-scoped: only branch 1's jobs, newest first, with order context.
+    scoped = svc.list_jobs_scoped(branch_scope=1, statuses=None, limit=20)
+    ids = [j.id for j in scoped]
+    assert ids == [error_b1.id, pending_b1.id]  # id desc
+    assert job_b2.id not in ids
+    assert scoped[0].order_code == order.code
+    assert scoped[0].client_name == "Ada Lovelace"
+
+    # Status filter narrows to just the failed one.
+    failed = svc.list_jobs_scoped(branch_scope=1, statuses=["error"], limit=20)
+    assert [j.id for j in failed] == [error_b1.id]
+
+    # No scope (admin): sees every branch's jobs.
+    everything = svc.list_jobs_scoped(branch_scope=None, statuses=None, limit=20)
+    assert {job_b2.id, pending_b1.id, error_b1.id} <= {j.id for j in everything}
+
+
+def test_retry_job_reenqueues_a_fresh_job(client, db_session):
+    order = _create_order(client, db_session)
+    svc = PrintJobService(db_session)
+    original = svc.enqueue_consolidated(order.id, created_by=None, branch_scope=None)
+
+    # Simulate the agent reporting a failure (printer offline).
+    agent = _make_agent(db_session)
+    svc.claim_next(agent)
+    svc.ack(agent, original.id, "error", "printer offline")
+
+    retried = svc.retry_job(original.id, created_by=None, branch_scope=None)
+    assert retried.id != original.id
+    assert retried.job_type == "sheet"
+    assert retried.status == PrintJobStatus.pending.value
+    assert spool.read(retried.payload_path).startswith(b"%PDF")  # fresh render
+
+    # The original row is left as history (still the failed one).
+    db_session.refresh(original)
+    assert original.status == PrintJobStatus.error.value
+
+
+def test_retry_job_is_branch_scoped(client, db_session):
+    order = _create_order(client, db_session)
+    svc = PrintJobService(db_session)
+    job = _raw_job(db_session, order.id, branch_id=1)
+    # A user scoped to another branch can't retry branch 1's job.
+    with pytest.raises(EntityNotFoundError):
+        svc.retry_job(job.id, created_by=None, branch_scope=999)
+
+
+def test_retry_label_without_piece_raises(client, db_session):
+    order = _create_order(client, db_session)
+    svc = PrintJobService(db_session)
+    orphan = PrintJobModel(
+        branch_id=1,
+        order_id=order.id,
+        placed_piece_id=None,  # piece removed (SET NULL)
+        job_type="label",
+        payload_format="tspl",
+        payload_path="1/x.tspl",
+        status=PrintJobStatus.error.value,
+        attempts=1,
+        expires_at=datetime.utcnow() + timedelta(minutes=10),
+    )
+    db_session.add(orphan)
+    db_session.commit()
+    with pytest.raises(ValidationError):
+        svc.retry_job(orphan.id, created_by=None, branch_scope=None)
+
+
+def test_http_list_and_retry(client, db_session):
+    order = _create_order(client, db_session)
+    resp = client.post("/api/v1/print/consolidated", json={"orderId": order.id})
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["data"]["jobId"]
+
+    # The panel lists the job with its order context.
+    listed = client.get("/api/v1/print/jobs").json()["data"]
+    row = next(j for j in listed if j["id"] == job_id)
+    assert row["orderId"] == order.id and row["jobType"] == "sheet"
+    assert row["orderCode"] == order.code and row["status"] == "pending"
+
+    # Retrying creates a brand-new job.
+    retry = client.post(f"/api/v1/print/jobs/{job_id}/retry")
+    assert retry.status_code == 202, retry.text
+    new_id = retry.json()["data"]["jobId"]
+    assert new_id != job_id
+
+    # Both are now visible when filtering by pending.
+    pending = client.get("/api/v1/print/jobs?status=pending").json()["data"]
+    assert {job_id, new_id} <= {j["id"] for j in pending}
+
+
+def test_retry_unknown_job_404(client, db_session):
+    assert client.post("/api/v1/print/jobs/99999/retry").status_code == 404
 
 
 # --- HTTP contract (what the agent + admin consume) -------------------------

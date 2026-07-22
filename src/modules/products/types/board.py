@@ -16,3 +16,8 @@ class BoardAttributes(CamelModel):
     grain_direction: Optional[str] = Field(
         None, max_length=4, description="Grain direction"
     )
+    family: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Familia/diseño para coordinar tapacantos (debe coincidir con el tapacanto)",
+    )

@@ -116,6 +116,9 @@ class PreOrderService(BranchScopedMixin):
             status=PreOrderStatus.draft.value,
             materials=[m.model_dump(mode="json") for m in data.materials],
             requirements=[r.model_dump(mode="json") for r in data.requirements],
+            additional_services=[
+                s.model_dump(mode="json") for s in data.additional_services
+            ],
             price_tier_code=tier["code"],
             strategy=data.strategy.value,
             source=data.source,
@@ -155,6 +158,10 @@ class PreOrderService(BranchScopedMixin):
         if data.requirements is not None:
             preorder.requirements = [
                 r.model_dump(mode="json") for r in data.requirements
+            ]
+        if data.additional_services is not None:
+            preorder.additional_services = [
+                s.model_dump(mode="json") for s in data.additional_services
             ]
         if data.price_tier_code is not None:
             tier = self.settings_service.resolve_price_tier(data.price_tier_code)
@@ -213,18 +220,29 @@ class PreOrderService(BranchScopedMixin):
         return self.optimization_service.compute(self.build_request(preorder))
 
     def build_pricing_for(self, preorder: PreOrderModel, payload: dict) -> dict:
-        """Live discount block for the pre-order's price tier."""
+        """Live discount block for the pre-order's price tier (incl. services)."""
         tier = self.settings_service.resolve_price_tier(preorder.price_tier_code)
-        return build_pricing(payload, tier)
+        return build_pricing(payload, tier, preorder.additional_services)
 
     def build_optimize_response(self, preorder: PreOrderModel) -> OptimizeResponse:
-        """Optimization response (with client) for the internal detail view."""
-        return self.optimization_service.optimize_response(self.build_request(preorder))
+        """Optimization response (with client) for the internal detail view.
+
+        Threads the stored services so ``optimization.pricing`` already reflects
+        the services-inclusive total.
+        """
+        return self.optimization_service.optimize_response(
+            self.build_request(preorder),
+            additional_services=preorder.additional_services,
+        )
 
     def build_carrier(self, preorder: PreOrderModel) -> ProformaCarrier:
         """Recomputed proforma carrier (PDF) for the pre-order (quote)."""
         payload, _ = self.compute_payload(preorder)
-        payload = {**payload, "pricing": self.build_pricing_for(preorder, payload)}
+        payload = {
+            **payload,
+            "pricing": self.build_pricing_for(preorder, payload),
+            "additional_services": preorder.additional_services,
+        }
         return ProformaCarrier.from_payload(
             payload,
             preorder.client,

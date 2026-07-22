@@ -6,6 +6,7 @@ from pydantic import Field
 from src.modules.branches.schemas import BranchRefResponse
 from src.modules.clients.schemas import ClientResponse
 from src.modules.optimizations.schemas import (
+    AdditionalServiceLine,
     MaterialInput,
     OptimizationStrategy,
     OptimizeResponse,
@@ -29,6 +30,10 @@ class PreOrderCreate(CamelModel):
     )
     requirements: List[Requirement] = Field(
         ..., min_length=1, description="Cut list to optimize"
+    )
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list,
+        description="Billed additional services (qty × editable unit price)",
     )
     client_id: int = Field(..., description="Client the quote is for")
     price_tier_code: Optional[str] = Field(
@@ -60,6 +65,7 @@ class PreOrderUpdate(CamelModel):
 
     materials: Optional[List[MaterialInput]] = Field(default=None, min_length=1)
     requirements: Optional[List[Requirement]] = Field(default=None, min_length=1)
+    additional_services: Optional[List[AdditionalServiceLine]] = Field(default=None)
     client_id: Optional[int] = None
     price_tier_code: Optional[str] = Field(default=None, max_length=32)
     strategy: Optional[OptimizationStrategy] = Field(default=None)
@@ -121,8 +127,11 @@ class PreOrderResponse(CamelModel):
     requirements: List[Requirement] = Field(
         ..., description="Stored cut list inputs (editable)"
     )
+    additional_services: List[AdditionalServiceLine] = Field(
+        default_factory=list, description="Stored additional services (editable)"
+    )
     optimization: OptimizeResponse = Field(
-        ..., description="Recomputed cutting result with live prices"
+        ..., description="Recomputed cutting result with live prices (incl. services)"
     )
     history: List[PreOrderStatusHistoryResponse] = Field(default_factory=list)
 
@@ -177,16 +186,27 @@ class ReviewLineResponse(CamelModel):
 
     product_code: Optional[str] = None
     product_name: Optional[str] = None
-    quantity: int
+    quantity: float
     unit_price: float
     line_total: float
     linear_m: Optional[float] = None
+
+
+class ReviewServiceResponse(CamelModel):
+    """Additional-service line projected for the client's public review."""
+
+    name: str
+    quantity: int
+    unit_price: float
+    line_total: float
 
 
 class ReviewPieceResponse(CamelModel):
     """Cut-list piece projected for the public review."""
 
     label: Optional[str] = None
+    material_code: Optional[str] = None
+    material_name: Optional[str] = None
     height: int
     width: int
     quantity: int
@@ -221,11 +241,15 @@ class ReviewPreOrderResponse(CamelModel):
         default=0.0, description="Applied discount (0.02 = 2%)"
     )
     discount_amount: float = Field(default=0.0)
-    total: float = Field(..., description="Subtotal minus the discount")
+    services_total: float = Field(
+        default=0.0, description="Sum of additional services (added after discount)"
+    )
+    total: float = Field(..., description="Subtotal minus discount plus services")
     total_boards_used: int
     created_at: datetime
     sent_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     lines: List[ReviewLineResponse] = Field(default_factory=list)
+    additional_services: List[ReviewServiceResponse] = Field(default_factory=list)
     pieces: List[ReviewPieceResponse] = Field(default_factory=list)

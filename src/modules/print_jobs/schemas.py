@@ -36,6 +36,24 @@ class PrintJobOut(CamelModel):
     error_message: Optional[str] = None
 
 
+class PrintJobListItem(CamelModel):
+    """A print job for the shop-floor panel: its real status plus enough order
+    context to render the row (``order_code``/``client_name``) and re-dispatch it
+    (``order_id``, and ``placed_piece_id`` for labels)."""
+
+    id: int
+    order_id: int
+    order_code: Optional[str] = None
+    client_name: Optional[str] = None
+    job_type: str
+    placed_piece_id: Optional[int] = None
+    status: str
+    attempts: int
+    error_message: Optional[str] = None
+    created_at: datetime
+    done_at: Optional[datetime] = None
+
+
 class JobAck(CamelModel):
     """Agent's report of a job's outcome. ``status`` is ``done`` or ``error``."""
 
