@@ -750,3 +750,129 @@ def test_optimize_keeps_full_board_for_wide_job(client):
     assert summary[0]["halfBoard"] is False
     assert summary[0]["costPerUnit"] == 45.5
     assert data["totalBoardsCost"] == 45.5
+
+
+# --- Material pool: catalog board + client offcut ---------------------------
+
+
+def _pool_payload(client_id, product_id, fill_order="offcutsFirst"):
+    """A catalog board with an attached client offcut (same material).
+
+    The small piece fits the 600x400 offcut; the wide one needs the catalog board.
+    """
+    return {
+        "clientId": client_id,
+        "materials": [
+            {
+                "key": "b1",
+                "source": "catalog",
+                "productId": product_id,
+                "fillOrder": fill_order,
+            },
+            {
+                "key": "off1",
+                "source": "clientOffcut",
+                "height": 400,
+                "width": 600,
+                "thickness": 18,
+                "costPerUnit": 0,
+                "quantity": 1,
+                "poolKey": "b1",
+                "label": "Retazo cliente",
+            },
+        ],
+        "requirements": [
+            {
+                "priority": 0,
+                "height": 200,
+                "width": 300,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Chico",
+                "canRotate": True,
+            },
+            {
+                "priority": 0,
+                "height": 2000,
+                "width": 1000,
+                "quantity": 1,
+                "materialKey": "b1",
+                "label": "Grande",
+                "canRotate": True,
+            },
+        ],
+    }
+
+
+def test_optimize_pool_places_pieces_on_offcut_and_catalog(client):
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    resp = client.post(
+        "/api/v1/optimize/",
+        json=_pool_payload(created_client["id"], created_board["id"]),
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+
+    layouts_by_key = {lay["material"]["materialKey"]: lay for lay in data["layouts"]}
+    # The offcut is its own sheet, carrying the small piece.
+    assert "off1" in layouts_by_key
+    off_pieces = [p["pieceId"] for p in layouts_by_key["off1"]["placedPieces"]]
+    assert off_pieces == ["Chico"]
+    # The wide piece is on a catalog board.
+    assert "Grande" in [p["pieceId"] for p in layouts_by_key["b1"]["placedPieces"]]
+
+
+def test_optimize_pool_offcut_excluded_from_boards_used(client):
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    data = client.post(
+        "/api/v1/optimize/",
+        json=_pool_payload(created_client["id"], created_board["id"]),
+    ).json()["data"]
+
+    # "Boards used" counts only the catalog board the client buys.
+    assert data["totalBoardsUsed"] == 1
+    assert data["totalBoardsCost"] == 45.5
+
+    summary_by_key = {m["materialKey"]: m for m in data["materialsSummary"]}
+    # The offcut shows up as its own $0 line, source clientOffcut, no product.
+    assert summary_by_key["off1"]["source"] == "clientOffcut"
+    assert summary_by_key["off1"]["totalCost"] == 0
+    assert summary_by_key["off1"]["productId"] is None
+    assert summary_by_key["b1"]["productId"] == created_board["id"]
+
+
+def test_optimize_pool_rejects_requirement_on_pooled_offcut(client):
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    payload = _pool_payload(created_client["id"], created_board["id"])
+    # A requirement cannot target a pooled offcut directly.
+    payload["requirements"][0]["materialKey"] = "off1"
+
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 422
+
+
+def test_optimize_pool_rejects_pool_key_to_non_catalog(client):
+    created_client = _create_client(client)
+    created_board = _create_board(client)
+
+    payload = _pool_payload(created_client["id"], created_board["id"])
+    # poolKey must reference a catalog board, not another offcut.
+    payload["materials"].append(
+        {
+            "key": "off2",
+            "source": "clientOffcut",
+            "height": 300,
+            "width": 300,
+            "thickness": 18,
+            "costPerUnit": 0,
+            "poolKey": "off1",
+        }
+    )
+    resp = client.post("/api/v1/optimize/", json=payload)
+    assert resp.status_code == 422

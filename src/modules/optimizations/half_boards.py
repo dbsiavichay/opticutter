@@ -46,14 +46,13 @@ def apply_half_boards(
     ``half_board`` flag.
     """
     for _edge_map, _net_map, layouts in results:
-        if not layouts:
-            continue
-        key = layouts[0].material.id
-        rm = resolved.get(key)
-        # Catalog boards only; offcuts/manual are charged at cost (no halves).
-        if rm is None or not rm.is_catalog:
-            continue
+        # Per-layout: a pooled group mixes catalog and offcut sheets in one
+        # ``layouts`` list, so the catalog check can't key off ``layouts[0]``.
         for idx, layout in enumerate(layouts):
+            rm = resolved.get(layout.material.id)
+            # Catalog boards only; offcuts/manual are charged at cost (no halves).
+            if rm is None or not rm.is_catalog:
+                continue
             half = _fit_on_half_board(
                 layout,
                 rm,
