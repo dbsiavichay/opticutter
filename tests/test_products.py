@@ -160,7 +160,9 @@ def _seed_board(client, code, name, thickness, family="CASHMERE"):
     ).json()["data"]
 
 
-def _seed_edge(client, code, name, band_type, thickness, width, color, family="CASHMERE"):
+def _seed_edge(
+    client, code, name, band_type, thickness, width, color, family="CASHMERE"
+):
     return client.post(
         "/api/v1/products/",
         json={
