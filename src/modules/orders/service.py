@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 
 from fastapi import Depends
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from src.modules.branches.service import resolve_branch_for_create
 from src.modules.clients.model import ClientModel
@@ -386,8 +386,10 @@ class OrderService(BranchScopedMixin):
             order_id=order.id,
             order_code=order.code,
             status=OrderStatus(order.status),
+            notes=order.notes,
             progress=_progress(all_pieces),
             boards=boards,
+            print_labels_enabled=order.branch.print_labels_enabled,
         )
 
     def mark_piece_cut(
@@ -444,6 +446,9 @@ class OrderService(BranchScopedMixin):
         query = self.db.query(OrderModel).filter(
             OrderModel.status.in_([s.value for s in WORKSHOP_QUEUE_STATUSES]),
         )
+        # The branch supplies each card's printing switch; eager-load it so the
+        # admin's board (which spans every branch) doesn't fire one query per row.
+        query = query.options(joinedload(OrderModel.branch))
         query = self._apply_branch_scope(query, branch_scope, None)
         orders = query.order_by(OrderModel.id.asc()).all()
         progress_by_order = self._cutting_progress_by_order([o.id for o in orders])
@@ -456,6 +461,7 @@ class OrderService(BranchScopedMixin):
                     order_code=o.code,
                     status=OrderStatus(o.status),
                     banding_status=BandingStatus(o.banding_status),
+                    notes=o.notes,
                     created_at=o.created_at,
                     client=ClientResponse.model_validate(o.client),
                     board_usage=_board_usage(snapshot),
@@ -463,6 +469,7 @@ class OrderService(BranchScopedMixin):
                     progress=progress_by_order.get(
                         o.id, CuttingProgress(cut_pieces=0, total_pieces=0)
                     ),
+                    print_consolidated_enabled=o.branch.print_consolidated_enabled,
                 )
             )
         return items

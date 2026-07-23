@@ -19,8 +19,9 @@ from fastapi.responses import StreamingResponse
 
 from src.modules.print_jobs import spool
 from src.modules.print_jobs.dependencies import get_current_agent
-from src.modules.print_jobs.model import PrintAgentModel
+from src.modules.print_jobs.model import PrintAgentModel, PrintJobModel
 from src.modules.print_jobs.schemas import (
+    PRINT_STATUS_SKIPPED,
     JobAck,
     PrintAgentActiveUpdate,
     PrintAgentCreate,
@@ -38,6 +39,14 @@ from src.modules.users.model import UserModel
 from src.shared.responses import ERROR_RESPONSES, DataResponse, ok
 
 router = APIRouter(prefix="/print", tags=["print"], responses=ERROR_RESPONSES)
+
+
+def _created(job: Optional[PrintJobModel]) -> PrintJobCreated:
+    """202 body for an enqueue: the new job, or ``skipped`` when the branch has
+    that print type disabled (the service returns ``None`` without rendering)."""
+    if job is None:
+        return PrintJobCreated(job_id=None, status=PRINT_STATUS_SKIPPED)
+    return PrintJobCreated(job_id=job.id, status=job.status)
 
 
 def _agent_token(agent: PrintAgentModel, token: str) -> PrintAgentToken:
@@ -69,7 +78,7 @@ def enqueue_label(
         created_by=current_user.id,
         branch_scope=branch_scope,
     )
-    return ok(PrintJobCreated(job_id=job.id, status=job.status))
+    return ok(_created(job))
 
 
 @router.post(
@@ -85,7 +94,7 @@ def enqueue_consolidated(
     job = svc.enqueue_consolidated(
         body.order_id, created_by=current_user.id, branch_scope=branch_scope
     )
-    return ok(PrintJobCreated(job_id=job.id, status=job.status))
+    return ok(_created(job))
 
 
 @router.post(
@@ -105,7 +114,7 @@ def retry_job(
     NEW job's id/status; the original row is left as-is (its history).
     """
     job = svc.retry_job(job_id, created_by=current_user.id, branch_scope=branch_scope)
-    return ok(PrintJobCreated(job_id=job.id, status=job.status))
+    return ok(_created(job))
 
 
 # --------------------------------------------------------------------------- #

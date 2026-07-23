@@ -65,10 +65,9 @@ def _to_review_response(
         ReviewLineResponse(
             product_code=e.get("product_code"),
             product_name=e.get("product_name"),
-            quantity=e["billed_linear_m"],
-            unit_price=e["price_per_m"],
+            quantity=1,
+            unit_price=e["total_cost"],
             line_total=e["total_cost"],
-            linear_m=e.get("linear_m"),
         )
         for e in payload.get("edge_bandings_summary", [])
     ]
@@ -98,6 +97,7 @@ def _to_review_response(
         status=PreOrderStatus(preorder.status),
         order_code=preorder.order.code if preorder.order is not None else None,
         client_note=preorder.client_note,
+        notes=preorder.notes,
         client_name=client_name,
         currency="USD",
         subtotal=pricing["subtotal"],

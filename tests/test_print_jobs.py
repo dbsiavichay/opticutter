@@ -63,9 +63,11 @@ def _create_board(client, code="MEL18"):
     ).json()["data"]
 
 
-def _create_order(client, db_session, branch_id=1):
-    c = _create_client(client)
-    b = _create_board(client)
+def _create_order(
+    client, db_session, branch_id=1, identifier="0991112233", board_code="MEL18"
+):
+    c = _create_client(client, identifier)
+    b = _create_board(client, board_code)
     payload = {
         "clientId": c["id"],
         "branchId": branch_id,
@@ -544,3 +546,127 @@ def test_enqueue_label_unknown_order_and_piece_404(client, db_session):
         ).status_code
         == 404
     )
+
+
+# --- branch printing switches ------------------------------------------------
+def _set_branch_printing(db_session, branch_id=1, *, labels=True, consolidated=True):
+    """Configures which printers the branch's shop has."""
+    branch = db_session.get(BranchModel, branch_id)
+    branch.print_labels_enabled = labels
+    branch.print_consolidated_enabled = consolidated
+    db_session.commit()
+    return branch
+
+
+def test_enqueue_label_skipped_when_branch_has_no_label_printer(client, db_session):
+    """No job row and no spooled payload: the branch simply doesn't print labels."""
+    order = _create_order(client, db_session)
+    piece = _a_piece(db_session, order.id)
+    _set_branch_printing(db_session, labels=False)
+    svc = PrintJobService(db_session)
+
+    assert (
+        svc.enqueue_label(order.id, piece.id, created_by=None, branch_scope=None)
+        is None
+    )
+    assert db_session.query(PrintJobModel).count() == 0
+    assert not list(spool._base_dir().rglob("*"))  # nothing rendered to disk either
+
+
+def test_enqueue_consolidated_skips_before_rendering(client, db_session, monkeypatch):
+    """The switch is checked BEFORE the render: the packet merge is the expensive
+    part (order document + diagram + dispatch sheet + every attachment)."""
+    order = _create_order(client, db_session)
+    _set_branch_printing(db_session, consolidated=False)
+    monkeypatch.setattr(
+        PrintJobService,
+        "_render_consolidated",
+        lambda *a, **kw: pytest.fail("rendered the packet for a disabled branch"),
+    )
+    svc = PrintJobService(db_session)
+
+    assert (
+        svc.enqueue_consolidated(order.id, created_by=None, branch_scope=None) is None
+    )
+    assert db_session.query(PrintJobModel).count() == 0
+
+
+def test_switches_are_independent_per_type(client, db_session):
+    """Turning labels off leaves the consolidated packet printing, and vice versa."""
+    order = _create_order(client, db_session)
+    piece = _a_piece(db_session, order.id)
+    _set_branch_printing(db_session, labels=False, consolidated=True)
+    svc = PrintJobService(db_session)
+
+    assert (
+        svc.enqueue_label(order.id, piece.id, created_by=None, branch_scope=None)
+        is None
+    )
+    assert (
+        svc.enqueue_consolidated(order.id, created_by=None, branch_scope=None)
+        is not None
+    )
+
+
+def test_switches_are_per_branch(client, db_session):
+    """A disabled branch doesn't mute the others (the admin's board spans them all)."""
+    order_b1 = _create_order(client, db_session)
+    b2 = BranchModel(code="SUR", name="Sucursal Sur", is_active=True)
+    db_session.add(b2)
+    db_session.commit()
+    order_b2 = _create_order(
+        client, db_session, branch_id=b2.id, identifier="0992223344", board_code="MEL15"
+    )
+    _set_branch_printing(db_session, branch_id=1, consolidated=False)
+    svc = PrintJobService(db_session)
+
+    assert (
+        svc.enqueue_consolidated(order_b1.id, created_by=None, branch_scope=None)
+        is None
+    )
+    assert (
+        svc.enqueue_consolidated(order_b2.id, created_by=None, branch_scope=None)
+        is not None
+    )
+
+
+def test_unknown_piece_still_404s_on_a_disabled_branch(client, db_session):
+    """The switch is a no-op, not a bypass: a bad piece id is still a 404."""
+    order = _create_order(client, db_session)
+    _set_branch_printing(db_session, labels=False)
+    with pytest.raises(EntityNotFoundError):
+        PrintJobService(db_session).enqueue_label(
+            order.id, 99999, created_by=None, branch_scope=None
+        )
+
+
+def test_retry_inherits_the_branch_switch(client, db_session):
+    """A job queued before the switch was turned off can't be re-dispatched."""
+    order = _create_order(client, db_session)
+    svc = PrintJobService(db_session)
+    original = svc.enqueue_consolidated(order.id, created_by=None, branch_scope=None)
+
+    _set_branch_printing(db_session, consolidated=False)
+
+    assert svc.retry_job(original.id, created_by=None, branch_scope=None) is None
+
+
+def test_http_enqueue_returns_skipped_when_disabled(client, db_session):
+    """202 with a null jobId, never a 4xx: the triggers are automatic side-effects
+    (one per cut piece), so an error would toast on every single cut."""
+    order = _create_order(client, db_session)
+    piece = _a_piece(db_session, order.id)
+    _set_branch_printing(db_session, labels=False, consolidated=False)
+
+    label = client.post(
+        "/api/v1/print/label", json={"orderId": order.id, "pieceId": piece.id}
+    )
+    assert label.status_code == 202, label.text
+    assert label.json()["data"] == {"jobId": None, "status": "skipped"}
+
+    sheet = client.post("/api/v1/print/consolidated", json={"orderId": order.id})
+    assert sheet.status_code == 202, sheet.text
+    assert sheet.json()["data"] == {"jobId": None, "status": "skipped"}
+
+    # Nothing reached the panel either.
+    assert client.get("/api/v1/print/jobs").json()["data"] == []

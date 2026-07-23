@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union
+from xml.sax.saxutils import escape
 
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader, PdfWriter
@@ -577,11 +578,14 @@ class ProformaService:
             [
                 [
                     Paragraph(title, title_style),
-                    Paragraph(
-                        f"N° {carrier.reference}<br/>"
-                        f"Fecha: {datetime.now().strftime('%d/%m/%Y')}",
-                        meta_style,
-                    ),
+                    [
+                        Paragraph(
+                            f"N° {carrier.reference}<br/>"
+                            f"Fecha: {datetime.now().strftime('%d/%m/%Y')}",
+                            meta_style,
+                        ),
+                        *_reference_lines(carrier, meta_style),
+                    ],
                 ]
             ],
             colWidths=[CONTENT_WIDTH * 0.5, CONTENT_WIDTH * 0.5],
@@ -693,12 +697,15 @@ class ProformaService:
             [
                 [
                     Paragraph(title, title_style),
-                    Paragraph(
-                        f"N° {carrier.reference}<br/>"
-                        f"Fecha: {datetime.now().strftime('%d/%m/%Y')}<br/>"
-                        f"Cliente: {client_name}",
-                        meta_style,
-                    ),
+                    [
+                        Paragraph(
+                            f"N° {carrier.reference}<br/>"
+                            f"Fecha: {datetime.now().strftime('%d/%m/%Y')}<br/>"
+                            f"Cliente: {client_name}",
+                            meta_style,
+                        ),
+                        *_reference_lines(carrier, meta_style),
+                    ],
                 ]
             ],
             colWidths=[CONTENT_WIDTH * 0.5, CONTENT_WIDTH * 0.5],
@@ -1234,6 +1241,28 @@ def _edge_banding_notation(req: dict) -> str:
         return "-"
     text = edge_banding_notation(spec.get("sides") or [], spec.get("band_type"))
     return text or "-"
+
+
+def _reference_lines(carrier: ProformaCarrier, meta_style: ParagraphStyle) -> List:
+    """ "Ref: ..." line for the document's meta block, or ``[]`` if there's none.
+
+    Rides along with the N°/date block on every document, so the commercial
+    reference (project/site name) identifies the job at a glance when the same
+    client has several running. The text is user-typed and ``Paragraph`` parses
+    mini-HTML, so it's escaped before being inserted.
+    """
+    notes = (carrier.notes or "").strip()
+    if not notes:
+        return []
+    style = ParagraphStyle(
+        "DocRef",
+        parent=meta_style,
+        fontSize=max(meta_style.fontSize - 1.5, 7),
+        leading=max(meta_style.leading - 2, 9),
+        textColor=TEXT_GREY,
+        spaceBefore=2,
+    )
+    return [Paragraph(f"Ref: {escape(notes)}", style)]
 
 
 def _heading_style(styles) -> ParagraphStyle:

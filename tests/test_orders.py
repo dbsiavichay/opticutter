@@ -401,6 +401,40 @@ def test_order_production_sheet_pdf(client, db_session):
     assert len(sheet.content) > 1000
 
 
+def test_reference_is_printed_on_every_document(client, db_session):
+    """``notes`` is the commercial reference (project/site): it must show up on
+    the four printable documents, escaped (``Paragraph`` parses mini-HTML)."""
+    import io
+
+    from pypdf import PdfReader
+
+    c = _create_client(client)
+    b = _create_board(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Proyecto Casa Pérez & Cía <cocina>"
+    order = _create_order(client, db_session, payload)
+    assert order["notes"] == "Proyecto Casa Pérez & Cía <cocina>"
+
+    for path in ("document", "production-sheet", "dispatch-sheet", "consolidated"):
+        resp = client.get(f"/api/v1/orders/{order['id']}/{path}")
+        assert resp.status_code == 200, path
+        text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(io.BytesIO(resp.content)).pages
+        )
+        assert "Ref: Proyecto Casa Pérez & Cía <cocina>" in text, path
+
+
+def test_order_listing_exposes_notes(client, db_session):
+    c = _create_client(client)
+    b = _create_board(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Obra Los Álamos"
+    _create_order(client, db_session, payload)
+
+    assert client.get("/api/v1/orders/").json()["data"][0]["notes"] == "Obra Los Álamos"
+
+
 def test_order_documents_404(client):
     assert client.get("/api/v1/orders/999999/document").status_code == 404
     assert client.get("/api/v1/orders/999999/production-sheet").status_code == 404

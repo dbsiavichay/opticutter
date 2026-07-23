@@ -343,8 +343,17 @@ class CuttingPlanResponse(CamelModel):
     order_id: int
     order_code: Optional[str] = None
     status: OrderStatus
+    notes: Optional[str] = Field(
+        default=None,
+        description="Commercial reference (project/site) frozen on the order",
+    )
     progress: CuttingProgress
     boards: List[OrderBoardResponse] = Field(default_factory=list)
+    print_labels_enabled: bool = Field(
+        ...,
+        description="Whether the order's branch prints labels: gates the "
+        "label dispatch that follows marking a piece cut",
+    )
 
 
 class PieceCutUpdate(CamelModel):
@@ -409,6 +418,11 @@ class WorkshopQueueItem(CamelModel):
     banding_status: BandingStatus = Field(
         ..., description="Parallel banding-track status (drives the banding actions)"
     )
+    notes: Optional[str] = Field(
+        default=None,
+        description="Commercial reference (project/site): tells apart several "
+        "orders of the same client on the board",
+    )
     created_at: datetime
     client: ClientResponse = Field(..., description="Client the order belongs to")
     board_usage: List[BoardUsage] = Field(
@@ -421,4 +435,10 @@ class WorkshopQueueItem(CamelModel):
     )
     progress: CuttingProgress = Field(
         ..., description="Cut pieces out of the total (0/0 if not yet materialized)"
+    )
+    print_consolidated_enabled: bool = Field(
+        ...,
+        description="Whether the order's branch prints the consolidated packet: "
+        "gates the dispatch that follows completing the order. Per item because "
+        "the admin's board spans every branch",
     )

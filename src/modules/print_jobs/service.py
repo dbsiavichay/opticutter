@@ -48,6 +48,18 @@ log = logging.getLogger(__name__)
 # because ``spool.sweep_stale`` is idempotent.
 _last_disk_sweep = 0.0
 
+# Which branch switch gates each job type (see ``BranchModel``). A branch with no
+# thermal printer (or no sheet printer) shouldn't even render the payload.
+_BRANCH_FLAG_BY_TYPE = {
+    PrintJobType.label: "print_labels_enabled",
+    PrintJobType.sheet: "print_consolidated_enabled",
+}
+
+
+def _printing_enabled(branch: BranchModel, job_type: PrintJobType) -> bool:
+    """True if the branch's shop is configured to print this job type."""
+    return getattr(branch, _BRANCH_FLAG_BY_TYPE[job_type])
+
 
 class PrintJobService:
     """Renders payloads, spools them to disk and manages the delivery queue."""
@@ -72,12 +84,19 @@ class PrintJobService:
         piece_id: int,
         created_by: Optional[int],
         branch_scope: Optional[int],
-    ) -> PrintJobModel:
-        """Renders a piece's label to TSPL and queues it for the branch's agent."""
+    ) -> Optional[PrintJobModel]:
+        """Renders a piece's label to TSPL and queues it for the branch's agent.
+
+        ``None`` when the order's branch has label printing disabled: the caller
+        turns that into a ``skipped`` 202. The piece is still validated first, so
+        a bad id is a 404 regardless of the branch's switch.
+        """
         order = self._order_scoped(order_id, branch_scope)
         piece = self.db.get(OrderPlacedPieceModel, piece_id)
         if piece is None or piece.order_id != order.id:
             raise EntityNotFoundError("OrderPlacedPiece", piece_id)
+        if not _printing_enabled(order.branch, PrintJobType.label):
+            return None
         payload = label_renderer.render_label(
             label_renderer.build_label_data(order, piece)
         )
@@ -92,9 +111,16 @@ class PrintJobService:
 
     def enqueue_consolidated(
         self, order_id: int, created_by: Optional[int], branch_scope: Optional[int]
-    ) -> PrintJobModel:
-        """Renders the consolidated PDF packet and queues it for the branch's agent."""
+    ) -> Optional[PrintJobModel]:
+        """Renders the consolidated PDF packet and queues it for the branch's agent.
+
+        ``None`` when the order's branch has consolidated printing disabled. The
+        check comes before the render on purpose: the packet is a PDF merge of the
+        order document, the diagram, the dispatch sheet and every attachment.
+        """
         order = self._order_scoped(order_id, branch_scope)
+        if not _printing_enabled(order.branch, PrintJobType.sheet):
+            return None
         payload = self._render_consolidated(order, branch_scope)
         return self._spool_and_create(
             order=order,
@@ -106,11 +132,14 @@ class PrintJobService:
 
     def retry_job(
         self, job_id: int, created_by: Optional[int], branch_scope: Optional[int]
-    ) -> PrintJobModel:
+    ) -> Optional[PrintJobModel]:
         """Re-dispatches a job: renders a fresh payload and enqueues a brand-new
         job of the same type. Safe regardless of the original's status (the failed
         job's spool is already gone, so a retry always re-renders), which also
         covers a job the agent acked ``done`` but that printed badly.
+
+        Delegates to the enqueue methods, so it inherits their branch switch: a
+        retry of a job whose branch has since been disabled returns ``None``.
         """
         job = self.get_job_scoped(job_id, branch_scope)
         if job.job_type == PrintJobType.sheet.value:

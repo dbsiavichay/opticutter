@@ -144,6 +144,10 @@ class PreOrderSummaryResponse(CamelModel):
     client: ClientResponse
     branch: BranchRefResponse = Field(..., description="Owning branch")
     status: PreOrderStatus
+    notes: Optional[str] = Field(
+        default=None,
+        description="Commercial reference (project/site), shown as the listing subtitle",
+    )
     source: Optional[str] = None
     order_id: Optional[int] = None
     created_at: datetime
@@ -189,7 +193,6 @@ class ReviewLineResponse(CamelModel):
     quantity: float
     unit_price: float
     line_total: float
-    linear_m: Optional[float] = None
 
 
 class ReviewServiceResponse(CamelModel):
@@ -230,6 +233,11 @@ class ReviewPreOrderResponse(CamelModel):
     )
     client_note: Optional[str] = Field(
         default=None, description="The client's own change request, echoed back"
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        description="Commercial reference (project/site); the client also sees it "
+        "on the proforma PDF",
     )
     client_name: Optional[str] = None
     currency: str
