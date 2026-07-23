@@ -251,6 +251,7 @@ class PreOrderService(BranchScopedMixin):
             validity_days=self.settings_service.get_preorder_config()[
                 "preorder_validity_days"
             ],
+            notes=preorder.notes,
         )
 
     def _record_transition(

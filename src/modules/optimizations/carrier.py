@@ -19,6 +19,10 @@ class ProformaCarrier:
     # Validity (days) shown on the proforma; ``None`` omits it (e.g. an already
     # confirmed order isn't a current quote). Set by the quoting carriers.
     validity_days: Optional[int] = None
+    # Free-form commercial reference (project/site name) typed by the seller: the
+    # differentiator when the same client has several jobs running. ``None``/empty
+    # omits the line from every document.
+    notes: Optional[str] = None
     requirements: List[dict] = field(default_factory=list)
     materials_summary: List[dict] = field(default_factory=list)
     edge_bandings_summary: List[dict] = field(default_factory=list)
@@ -74,13 +78,16 @@ class ProformaCarrier:
         reference: str,
         company: dict | None = None,
         validity_days: Optional[int] = None,
+        notes: Optional[str] = None,
     ) -> "ProformaCarrier":
         """Builds the carrier from an optimization payload + the client.
 
         ``company`` is the current letterhead (company data) rendered live,
         including the full configured branch list; it's not part of the priced
         snapshot. ``validity_days`` is the quote's validity period shown on the
-        proforma (``None`` omits it).
+        proforma (``None`` omits it). ``notes`` is the commercial reference: it
+        lives on the pre-order/order row, not in the optimization payload, so the
+        caller passes it in.
         """
         company = company or {}
         # Discount block (attached by build_pricing before assembling the carrier;
@@ -91,6 +98,7 @@ class ProformaCarrier:
             client=client,
             company=company,
             validity_days=validity_days,
+            notes=notes,
             requirements=payload.get("requirements") or [],
             materials_summary=payload.get("materials_summary") or [],
             edge_bandings_summary=payload.get("edge_bandings_summary") or [],
@@ -120,7 +128,11 @@ class ProformaCarrier:
         snapshot = order.optimization_snapshot or {}
         reference = order.code or f"ORD-{order.id:06d}"
         carrier = cls.from_payload(
-            snapshot, order.client, reference=reference, company=company
+            snapshot,
+            order.client,
+            reference=reference,
+            company=company,
+            notes=order.notes,
         )
         # The order freezes the board count when confirmed.
         carrier.total_boards_used = order.total_boards_used

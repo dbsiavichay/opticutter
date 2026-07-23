@@ -112,6 +112,18 @@ def test_list_filter_and_summary_omits_optimization(client):
     assert "optimization" not in listed["data"][0]
 
 
+def test_list_exposes_notes_as_the_listing_reference(client):
+    """The listing carries ``notes`` so the dashboard can show it as a subtitle
+    under the code (the differentiator between quotes of the same client)."""
+    c, b = _setup(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Proyecto Casa Pérez — cocina"
+    client.post("/api/v1/preorders/", json=payload)
+
+    item = client.get("/api/v1/preorders/?status=draft").json()["data"][0]
+    assert item["notes"] == "Proyecto Casa Pérez — cocina"
+
+
 def test_delete_preorder(client):
     c, b = _setup(client)
     pre = _create_preorder(client, c, b).json()["data"]
@@ -132,6 +144,25 @@ def test_preorder_proforma_pdf(client):
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert len(pdf.content) > 1000
+
+
+def test_preorder_proforma_prints_the_reference(client):
+    """``notes`` reaches the proforma as the "Ref:" line next to the N°/date."""
+    import io
+
+    from pypdf import PdfReader
+
+    c, b = _setup(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Proyecto Alfa"
+    pre = client.post("/api/v1/preorders/", json=payload).json()["data"]
+
+    pdf = client.get(f"/api/v1/preorders/{pre['id']}/proforma")
+    assert pdf.status_code == 200
+    text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf.content)).pages
+    )
+    assert "Ref: Proyecto Alfa" in text
 
 
 def test_preorder_proforma_pdf_inline_material_without_label(client):

@@ -129,6 +129,19 @@ def test_public_review_detail_is_sanitized(client):
         assert leaked not in data
 
 
+def test_public_review_shows_the_commercial_reference(client):
+    """The client sees the same reference that's printed on the proforma PDF."""
+    c = _create_client(client)
+    b = _create_board(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Proyecto Casa Pérez — cocina"
+    pre = client.post("/api/v1/preorders/", json=payload).json()["data"]
+    link = _generate_link(client, pre["id"])
+
+    data = client.get(f"/api/v1/public/review/{link['token']}").json()["data"]
+    assert data["notes"] == "Proyecto Casa Pérez — cocina"
+
+
 def test_public_review_unknown_token_404(client):
     resp = client.get("/api/v1/public/review/un-token-que-no-existe")
     assert resp.status_code == 404

@@ -81,6 +81,26 @@ def test_branch_duplicate_code_returns_409(client):
     assert dup.status_code == 409
 
 
+def test_printing_switches_default_on_and_are_editable(client):
+    """A new branch prints both types until the admin says its shop has no printer."""
+    created = _make_branch(client, code="IMPR", name="Sucursal Impresión")
+    assert created["printLabelsEnabled"] is True
+    assert created["printConsolidatedEnabled"] is True
+
+    updated = client.put(
+        f"/api/v1/branches/{created['id']}",
+        json={
+            "code": "IMPR",
+            "name": "Sucursal Impresión",
+            "printLabelsEnabled": False,
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()["data"]
+    assert body["printLabelsEnabled"] is False
+    assert body["printConsolidatedEnabled"] is True  # independent switches
+
+
 # ----------------------------------------------- global seller (read + create)
 def test_seller_reads_all_branches_and_create_defaults_to_base(client, db_session):
     """The seller is global: sees all branches and creates in their own by default."""

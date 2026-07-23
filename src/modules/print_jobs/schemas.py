@@ -3,6 +3,11 @@ from typing import Optional
 
 from src.shared.schemas import CamelModel
 
+# Enqueue outcome when the order's branch has that print type disabled: no job row
+# and no rendered payload. Deliberately NOT a ``PrintJobStatus`` value -- there is
+# no row to carry it; it only ever travels in the 202 body.
+PRINT_STATUS_SKIPPED = "skipped"
+
 
 class PrintLabelRequest(CamelModel):
     """Enqueue a label for a cut piece. ``piece_id`` is the placed-piece id (the
@@ -19,9 +24,14 @@ class PrintConsolidatedRequest(CamelModel):
 
 
 class PrintJobCreated(CamelModel):
-    """202 payload: the id the frontend can poll for status feedback."""
+    """202 payload: the id the frontend can poll for status feedback.
 
-    job_id: int
+    ``jobId`` is ``null`` with ``status = "skipped"`` when the branch has that
+    print type disabled -- a benign no-op, not an error, because the triggers are
+    automatic side-effects (one per cut piece) and a 4xx would toast on each one.
+    """
+
+    job_id: Optional[int] = None
     status: str
 
 

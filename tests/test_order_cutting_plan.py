@@ -1,5 +1,6 @@
 """Tests for the per-order cutting plan: materialization, touch marking, and the gate."""
 
+from src.modules.branches.model import BranchModel
 from src.modules.orders.model import OrderBoardModel, OrderPlacedPieceModel
 from src.modules.orders.schemas import OrderCreate
 from src.modules.orders.service import OrderService
@@ -122,6 +123,31 @@ def test_create_order_materializes_cutting_plan(client, db_session):
     assert board["cuts"], "colocar piezas genera recorridos de sierra"
     for cut in board["cuts"]:
         assert set(cut) == {"x", "y", "length", "isHorizontal"}
+
+
+def test_cutting_plan_carries_the_commercial_reference(client, db_session):
+    """The touch view shows the reference alongside the code, so the operator
+    knows which job of the client is on the saw."""
+    c = _create_client(client)
+    b = _create_board(client)
+    payload = _order_payload(c["id"], b["id"])
+    payload["notes"] = "Obra Los Álamos — closets"
+    order = _mint(client, db_session, payload)
+
+    assert _get_plan(client, order["id"])["notes"] == "Obra Los Álamos — closets"
+
+
+def test_cutting_plan_carries_the_branch_printing_switch(client, db_session):
+    """The touch view gates its own label dispatch, so marking a piece cut in a shop
+    with no thermal printer never fires the print request."""
+    order = _create_order(client, db_session)
+    assert _get_plan(client, order["id"])["printLabelsEnabled"] is True
+
+    branch = db_session.get(BranchModel, 1)
+    branch.print_labels_enabled = False
+    db_session.commit()
+
+    assert _get_plan(client, order["id"])["printLabelsEnabled"] is False
 
 
 def test_cutting_plan_unknown_order_returns_404(client):

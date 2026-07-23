@@ -72,6 +72,42 @@ def test_workshop_queue_lists_queued_through_cut(client, db_session):
     assert by_id[queued["id"]]["progress"]["cutPieces"] == 0
 
 
+def test_workshop_queue_carries_the_commercial_reference(client, db_session):
+    """The card shows the order's ``notes`` (project/site): it's what tells apart
+    several orders of the same client on the board."""
+    order = _order_without_banding(client, db_session)
+    db_session.get(OrderModel, order["id"]).notes = "Proyecto Casa Pérez — cocina"
+    db_session.commit()
+    assert _patch_status(client, order["id"], "queued").status_code == 200
+
+    board = client.get(_URL).json()["data"]
+    item = next(i for i in board if i["orderId"] == order["id"])
+    assert item["notes"] == "Proyecto Casa Pérez — cocina"
+
+
+def test_workshop_queue_carries_the_branch_printing_switch(client, db_session):
+    """The card gates its own consolidated dispatch: the admin's board spans every
+    branch, so the switch travels per item rather than once per response."""
+    order = _order_without_banding(client, db_session)
+    assert _patch_status(client, order["id"], "queued").status_code == 200
+
+    item = next(
+        i for i in client.get(_URL).json()["data"] if i["orderId"] == order["id"]
+    )
+    assert item["printConsolidatedEnabled"] is True  # default: the shop prints
+
+    branch = db_session.get(
+        BranchModel, db_session.get(OrderModel, order["id"]).branch_id
+    )
+    branch.print_consolidated_enabled = False
+    db_session.commit()
+
+    item = next(
+        i for i in client.get(_URL).json()["data"] if i["orderId"] == order["id"]
+    )
+    assert item["printConsolidatedEnabled"] is False
+
+
 def test_workshop_queue_excludes_confirmed_and_completed(client, db_session):
     """The board only spans the active shop-floor window (queued..cut)."""
     confirmed = _order_with_banding(client, db_session, identifier="0990000024")

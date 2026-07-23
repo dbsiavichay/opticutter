@@ -1,6 +1,6 @@
 from typing import Optional
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.shared.database import Base
@@ -15,6 +15,12 @@ class BranchModel(TimestampMixin, AuditMixin, Base):
     (``branch_id``). Staff (seller/operator) is bound to a branch; the admin
     isn't (sees and operates all of them). Deactivation is logical
     (``is_active``) to avoid breaking historical FKs.
+
+    It also carries the branch's **printing capability**: whether its shop has a
+    thermal label printer and/or a sheet printer. The print job resolves its
+    branch from ``order.branch_id``, so these flags gate the enqueue for every
+    role -- including the global ones (admin/seller), whose own branch scope is
+    ``None``.
     """
 
     __tablename__ = "branches"
@@ -25,3 +31,13 @@ class BranchModel(TimestampMixin, AuditMixin, Base):
     address: Mapped[Optional[str]] = mapped_column(String(256))
     phone: Mapped[Optional[str]] = mapped_column(String(32))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Printing switches (see ``print_jobs.service``). Default ON so the existing
+    # branches keep printing after the deploy; the admin unticks the ones with no
+    # hardware, which stops the payload from ever being rendered or spooled.
+    print_labels_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    print_consolidated_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
